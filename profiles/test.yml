@@ -1,0 +1,18 @@
+global_filter: "tcp.SrcPort == 55000 or tcp.DstPort == 55000"
+
+profiles:
+  - name: "RPM"
+    key: space
+    mode: toggle
+    delay_mode: send_all_after_delay
+    delay_ms: 1000
+    windivert_options:
+      forward: false
+
+  - name: "Long"
+    key: alt
+    mode: toggle
+    delay_mode: send_all_after_delay
+    delay_ms: 9000
+    windivert_options:
+      forward: false

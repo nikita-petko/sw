@@ -1,0 +1,43 @@
+global_filter: "tcp.DstPort == 55000 or tcp.SrcPort == 55000"
+
+profiles:
+  - name: "RPM"
+    key: space
+    mode: toggle
+    delay_mode: from_timestamp
+    delay_ms: 500
+    windivert_options:
+      forward: true
+
+  - name: "Long"
+    key: alt
+    mode: toggle
+    delay_mode: send_all_after_delay
+    delay_ms: 9000
+    windivert_options:
+      forward: true
+
+  - name: "Long - Ratio"
+    key: z
+    mode: toggle
+    delay_mode: ratio
+    ratio: "50%"
+    delay_ms: 9000
+    windivert_options:
+      forward: true
+
+  - name: "Long - Step"
+    keys:
+      - ctrl
+    mode: toggle
+    delay_ms: 9000
+    windivert_options:
+      forward: true
+
+  - name: "Long - Inf"
+    keys:
+      - shift 
+    mode: toggle
+    delay_ms: 0
+    windivert_options:
+      forward: true

@@ -1,0 +1,83 @@
+#ifndef PACKET_ENGINE_H_
+#define PACKET_ENGINE_H_
+
+#include <atomic>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <thread>
+#include <string>
+#include <vector>
+
+
+
+struct WinDivertOptions
+{
+	std::optional<bool> sniff;
+	std::optional<bool> forward;
+	std::optional<bool> outbound;
+};
+
+enum class ProfileActivationMode
+{
+	toggle,
+	hold,
+};
+enum class PacketDelayMode
+{
+	from_timestamp,
+	send_all_after_delay,
+	ratio,
+};
+
+struct ProfileOptions
+{
+	std::string name;
+	std::vector<int> keys;
+	ProfileActivationMode mode = ProfileActivationMode::toggle;
+	PacketDelayMode delay_mode = PacketDelayMode::from_timestamp;
+	int32_t delay_ms = 0;
+	int32_t ratio = 1;
+	bool ratio_percent = false;
+	std::optional<std::string> filter;
+	WinDivertOptions windivert_options;
+};
+
+struct PacketEngineOptions
+{
+	std::string global_filter;
+	std::vector<ProfileOptions> profiles;
+};
+
+class PacketEngine
+{
+public:
+	explicit PacketEngine(PacketEngineOptions options);
+	~PacketEngine();
+
+	PacketEngine(const PacketEngine&) = delete;
+	PacketEngine& operator=(const PacketEngine&) = delete;
+
+	void start_workers();
+	void stop_workers();
+	void setup(int profile);
+	void teardown();
+	bool is_running() const;
+	size_t pending_packets() const;
+	uint64_t next_batch_in_ms() const;
+	void print_state() const;
+
+private:
+	struct Session;
+	void read_packets(const std::shared_ptr<Session>& session);
+	void write_packets(const std::shared_ptr<Session>& session);
+
+	PacketEngineOptions options_;
+	std::atomic<bool> running_ = false;
+	std::atomic<bool> shutdown_ = false;
+
+	struct State;
+	std::unique_ptr<State> state_;
+};
+
+#endif
