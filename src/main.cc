@@ -132,7 +132,7 @@ int main(int argc, char* argv[])
 				: profile.delay_mode == PacketDelayMode::drop_and_send ? "Drop, then send in"
 				: profile.delay_mode == PacketDelayMode::drop ? "Drop packets"
 				: "Delay each by";
-		const std::string delay_value = indefinite_delay ? "profile  "
+		const std::string delay_value = indefinite_delay ? "profile is deactivated"
 			: profile.delay_mode == PacketDelayMode::drop ? "immediately" : logging::format_duration(static_cast<uint64_t>(profile.delay_ms));
 		LOG_INFO("\"%s\" -> %s %s (press: %s, key_mode: %s, mode: %s) @ \"%s\"",
 				 profile.name.c_str(),
