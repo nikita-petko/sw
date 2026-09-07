@@ -8,13 +8,13 @@ class FromTimestampMode final : public PacketMode
 public:
 	explicit FromTimestampMode(ProfileOptions options) : PacketMode(std::move(options), "from_timestamp") {}
 
-	void capture_packet(const BYTE*			  packet,
-				 UINT					  length,
-				 const WINDIVERT_ADDRESS& address,
-				 int					  profile,
-				 uint64_t				  now,
-				 uint64_t				  receive_order,
-				 PacketQueue&			  packets) override
+	void capture_packet(const BYTE*				 packet,
+						UINT					 length,
+						const WINDIVERT_ADDRESS& address,
+						int						 profile,
+						uint64_t				 now,
+						uint64_t				 receive_order,
+						PacketQueue&			 packets) override
 	{
 		const uint64_t release_at =
 			options_.delay_ms <= 0 ? (std::numeric_limits<uint64_t>::max)() : now + static_cast<uint64_t>(options_.delay_ms);

@@ -129,16 +129,16 @@ void log_state_line(size_t width, const std::string& text)
 
 std::string format_ipv4_address(UINT32 address)
 {
-	const auto* bytes = reinterpret_cast<const unsigned char*>(&address);
-	char buffer[16] = {};
+	const auto* bytes	   = reinterpret_cast<const unsigned char*>(&address);
+	char		buffer[16] = {};
 	std::snprintf(buffer, sizeof(buffer), "%u.%u.%u.%u", bytes[0], bytes[1], bytes[2], bytes[3]);
 	return buffer;
 }
 
 std::string format_ipv6_address(const UINT32* address)
 {
-	const auto* bytes = reinterpret_cast<const unsigned char*>(address);
-	char buffer[64] = {};
+	const auto* bytes	   = reinterpret_cast<const unsigned char*>(address);
+	char		buffer[64] = {};
 	std::snprintf(buffer,
 				  sizeof(buffer),
 				  "%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x",
@@ -200,19 +200,19 @@ struct PacketEngine::State
 
 	explicit State(size_t profile_count) : profile_stats(profile_count) {}
 
-	std::mutex							  lifecycle_mutex;
-	std::condition_variable				  lifecycle_changed;
-	std::vector<bool>					  active_profiles;
-	std::vector<ProfileStats>			  profile_stats;
-	std::vector<std::shared_ptr<Session>> active_sessions;
-	std::vector<std::thread>			  cleanup_threads;
-	HANDLE 								 discovery_handle = INVALID_HANDLE_VALUE;
-	std::thread 							 discovery_thread;
-	std::mutex 							 discovery_mutex;
-	std::string 							 discovered_server;
+	std::mutex								  lifecycle_mutex;
+	std::condition_variable					  lifecycle_changed;
+	std::vector<bool>						  active_profiles;
+	std::vector<ProfileStats>				  profile_stats;
+	std::vector<std::shared_ptr<Session>>	  active_sessions;
+	std::vector<std::thread>				  cleanup_threads;
+	HANDLE									  discovery_handle = INVALID_HANDLE_VALUE;
+	std::thread								  discovery_thread;
+	std::mutex								  discovery_mutex;
+	std::string								  discovered_server;
 	std::unordered_map<std::string, uint64_t> discovery_counts;
-	bool 								 authoritative_server = false;
-	bool 								 select_authoritative_server = false;
+	bool									  authoritative_server		  = false;
+	bool									  select_authoritative_server = false;
 };
 
 PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(options)), state_(new State(options_.profiles.size()))
@@ -344,7 +344,7 @@ std::string PacketEngine::server_filter(const ProfileOptions& profile) const
 std::string PacketEngine::current_server() const
 {
 	std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
-	const size_t server_index = server_index_.load();
+	const size_t				server_index = server_index_.load();
 	if (server_index != 0)
 	{
 		const ServerOptions& server = options_.servers[server_index - 1];
@@ -363,8 +363,8 @@ void PacketEngine::cycle_server(int direction)
 		current = (current + 1) % option_count;
 	else
 		current = current == 0 ? option_count - 1 : current - 1;
-	server_index_ = current;
-	state_->authoritative_server = false;
+	server_index_						= current;
+	state_->authoritative_server		= false;
 	state_->select_authoritative_server = false;
 	LOG_INFO("Server changed to: %s", current_server().c_str());
 
@@ -389,16 +389,16 @@ void PacketEngine::print_state() const
 		active_profiles = state_->active_profiles;
 	}
 
-	const size_t   queued_packets  = pending_packets();
-	const uint64_t next_release_in = next_batch_in_ms();
+	const size_t								  queued_packets  = pending_packets();
+	const uint64_t								  next_release_in = next_batch_in_ms();
 	std::vector<std::pair<std::string, uint64_t>> discovery_counts;
-	std::string discovered_server;
-	bool authoritative_server = false;
+	std::string									  discovered_server;
+	bool										  authoritative_server = false;
 	{
 		std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
 		std::lock_guard<std::mutex> lock(state_->discovery_mutex);
 		discovery_counts.assign(state_->discovery_counts.begin(), state_->discovery_counts.end());
-		discovered_server = state_->discovered_server;
+		discovered_server	 = state_->discovered_server;
 		authoritative_server = state_->authoritative_server;
 	}
 	std::sort(discovery_counts.begin(), discovery_counts.end(), [](const auto& left, const auto& right) {
@@ -453,8 +453,9 @@ void PacketEngine::print_state() const
 		log_state_line(state_width, "profile:         " + highlight("#" + std::to_string(profile_number) + " - " + profile_options.name));
 		log_state_line(state_width,
 					   "enabled time:    " + highlight(logging::format_duration(enabled_time_current)) + " current, " +
-						   highlight(logging::format_duration(enabled_time_min)) + " min, " + highlight(logging::format_duration(enabled_time_max)) +
-						   " max, " + highlight(logging::format_duration(enabled_time_average)) + " avg");
+						   highlight(logging::format_duration(enabled_time_min)) + " min, " +
+						   highlight(logging::format_duration(enabled_time_max)) + " max, " +
+						   highlight(logging::format_duration(enabled_time_average)) + " avg");
 		log_state_line(state_width,
 					   "enabled total:   " + highlight(logging::format_duration(enabled_time_total)) + " across " +
 						   highlight(std::to_string(enabled_count)) + " activations");
@@ -474,21 +475,19 @@ void PacketEngine::print_state() const
 	if (options_.discovery_port)
 	{
 		LOG_INFO("%s", format_state_divider(state_width, "server discovery").c_str());
-		log_state_line(state_width, "authoritative:   " +
-							highlight(discovered_server.empty() ? "none" : discovered_server) +
-							(authoritative_server ? " (selected)" : " (observed)"));
+		log_state_line(state_width,
+					   "authoritative:   " + highlight(discovered_server.empty() ? "none" : discovered_server) +
+						   (authoritative_server ? " (selected)" : " (observed)"));
 		log_state_line(state_width, "ranked servers:  " + highlight(std::to_string(discovery_counts.size())));
 		for (size_t index = 0; index < discovery_counts.size(); ++index)
 		{
 			const auto& [address, count] = discovery_counts[index];
-			const auto server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](const ServerOptions& item) {
+			const auto		  server	 = std::find_if(options_.servers.begin(), options_.servers.end(), [&](const ServerOptions& item) {
 				return item.address == address;
 			});
-			const std::string label = server == options_.servers.end() || server->name == server->address
-									? address
-									: server->name + " [" + address + "]";
-			log_state_line(state_width,
-						   std::to_string(index + 1) + ". " + label + " - " + highlight(std::to_string(count)) + " packets");
+			const std::string label =
+				server == options_.servers.end() || server->name == server->address ? address : server->name + " [" + address + "]";
+			log_state_line(state_width, std::to_string(index + 1) + ". " + label + " - " + highlight(std::to_string(count)) + " packets");
 		}
 		LOG_INFO("%s", format_state_divider(state_width).c_str());
 	}
@@ -553,10 +552,7 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 		}
 		else
 		{
-			LOG_DEBUG("%s recv: packet: Length = %u, Timestamp = %lld",
-					  profile_label.c_str(),
-					  received_length,
-					  address.Timestamp);
+			LOG_DEBUG("%s recv: packet: Length = %u, Timestamp = %lld", profile_label.c_str(), received_length, address.Timestamp);
 		}
 	}
 }
@@ -682,9 +678,9 @@ void PacketEngine::setup(int profile)
 	state_->active_sessions[profile - 1] = session;
 	state_->active_profiles[profile - 1] = true;
 	packet_modes_[profile - 1]->reset();
-	running_							 = true;
-	session->receive_thread				 = std::thread(&PacketEngine::read_packets, this, session);
-	session->send_thread				 = std::thread(&PacketEngine::write_packets, this, session);
+	running_				= true;
+	session->receive_thread = std::thread(&PacketEngine::read_packets, this, session);
+	session->send_thread	= std::thread(&PacketEngine::write_packets, this, session);
 	LOG_DEBUG("profile #%d - %s setup: opening handle", profile, profile_options.name.c_str());
 	LOG_DEBUG("profile #%d - %s setup: WinDivert layer = %s, filter = %s",
 			  profile,
@@ -707,7 +703,7 @@ bool PacketEngine::toggle(int profile)
 	if (!session)
 		return false;
 	std::lock_guard<std::mutex> packet_lock(session->packet_mutex);
-	const bool release = session->mode->toggle(session->delayed_packets);
+	const bool					release = session->mode->toggle(session->delayed_packets);
 	session->packet_changed.notify_all();
 	return release;
 }
@@ -763,9 +759,9 @@ void PacketEngine::start_workers()
 {
 	if (!options_.discovery_port)
 		return;
-	const uint16_t port = *options_.discovery_port;
+	const uint16_t	  port	 = *options_.discovery_port;
 	const std::string filter = "tcp.DstPort == " + std::to_string(port) + " or tcp.SrcPort == " + std::to_string(port) +
-							  " or udp.DstPort == " + std::to_string(port) + " or udp.SrcPort == " + std::to_string(port);
+							   " or udp.DstPort == " + std::to_string(port) + " or udp.SrcPort == " + std::to_string(port);
 	state_->discovery_handle = WinDivertOpen(filter.c_str(), WINDIVERT_LAYER_NETWORK, 0, WINDIVERT_FLAG_SNIFF);
 	if (state_->discovery_handle == INVALID_HANDLE_VALUE)
 	{
@@ -800,36 +796,36 @@ void PacketEngine::stop_workers()
 void PacketEngine::discover_packets()
 {
 	std::unordered_map<std::string, uint64_t> packet_counts;
-	std::unordered_set<std::string> seen_servers;
-	auto format_server_label = [&](const std::string& address) {
+	std::unordered_set<std::string>			  seen_servers;
+	auto									  format_server_label = [&](const std::string& address) {
 		const auto server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](const ServerOptions& item) {
 			return item.address == address;
 		});
 		return server == options_.servers.end() ? address : server->name + " [" + address + "]";
 	};
 	uint64_t window_started = GetTickCount64();
-	BYTE packet_data[0xFFFF];
+	BYTE	 packet_data[0xFFFF];
 	while (!shutdown_)
 	{
 		WINDIVERT_ADDRESS address;
-		UINT received_length = 0;
+		UINT			  received_length = 0;
 		if (WinDivertRecv(state_->discovery_handle, packet_data, sizeof(packet_data), &received_length, &address))
 		{
-			PWINDIVERT_IPHDR ip_header = nullptr;
+			PWINDIVERT_IPHDR   ip_header   = nullptr;
 			PWINDIVERT_IPV6HDR ipv6_header = nullptr;
 			if (WinDivertHelperParsePacket(packet_data,
-										  received_length,
-										  &ip_header,
-										  &ipv6_header,
-										  nullptr,
-										  nullptr,
-										  nullptr,
-										  nullptr,
-										  nullptr,
-										  nullptr,
-										  nullptr,
-										  nullptr,
-										  nullptr))
+										   received_length,
+										   &ip_header,
+										   &ipv6_header,
+										   nullptr,
+										   nullptr,
+										   nullptr,
+										   nullptr,
+										   nullptr,
+										   nullptr,
+										   nullptr,
+										   nullptr,
+										   nullptr))
 			{
 				std::string address_text;
 				if (ip_header)
@@ -839,7 +835,7 @@ void PacketEngine::discover_packets()
 				if (!address_text.empty())
 				{
 					std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
-					const bool first_seen = seen_servers.insert(address_text).second;
+					const bool					first_seen = seen_servers.insert(address_text).second;
 					auto existing_server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](const ServerOptions& server) {
 						return server.address == address_text;
 					});
@@ -889,7 +885,7 @@ void PacketEngine::discover_packets()
 					LOG_WARN("Discovered server '%s' already exists in the server list; switching to '%s'",
 							 winner->first.c_str(),
 							 existing_server->name.c_str());
-				state_->discovered_server = winner->first;
+				state_->discovered_server	   = winner->first;
 				const std::string server_label = format_server_label(winner->first);
 				LOG_INFO("Server '%s' is the authoritative server (%llu packets in %s)",
 						 server_label.c_str(),
@@ -897,9 +893,9 @@ void PacketEngine::discover_packets()
 						 logging::format_duration(options_.discovery_window_ms).c_str());
 				if (state_->select_authoritative_server || state_->authoritative_server)
 				{
-					state_->authoritative_server = true;
+					state_->authoritative_server		= true;
 					state_->select_authoritative_server = false;
-					server_index_ = static_cast<size_t>(std::distance(options_.servers.begin(), existing_server)) + 1;
+					server_index_						= static_cast<size_t>(std::distance(options_.servers.begin(), existing_server)) + 1;
 				}
 			}
 		}

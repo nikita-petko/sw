@@ -10,13 +10,13 @@ class DropAndSendMode final : public PacketMode
 public:
 	explicit DropAndSendMode(ProfileOptions options) : PacketMode(std::move(options), "drop_and_send") {}
 
-	void capture_packet(const BYTE*			  packet,
-				 UINT					  length,
-				 const WINDIVERT_ADDRESS& address,
-				 int					  profile,
-				 uint64_t				  now,
-				 uint64_t				  receive_order,
-				 PacketQueue&			  packets) override
+	void capture_packet(const BYTE*				 packet,
+						UINT					 length,
+						const WINDIVERT_ADDRESS& address,
+						int						 profile,
+						uint64_t				 now,
+						uint64_t				 receive_order,
+						PacketQueue&			 packets) override
 	{
 		profile_			= profile;
 		uint64_t release_at = now + static_cast<uint64_t>(options_.delay_ms);

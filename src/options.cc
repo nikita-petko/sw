@@ -383,7 +383,8 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			if (!mode)
 			{
 				LOG_ERROR(
-					"Invalid delay_mode in %s at line %d: expected from_timestamp, send_all_after_delay, ratio, drop, drop_and_send, or drop_until_toggle",
+					"Invalid delay_mode in %s at line %d: expected from_timestamp, send_all_after_delay, ratio, drop, drop_and_send, or "
+					"drop_until_toggle",
 					path,
 					line_number);
 				return false;
@@ -537,7 +538,7 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 	options.initial_server.reset();
 	options.discovery_port.reset();
 	options.discovery_window_ms = 5000;
-	bool config_loaded = false;
+	bool config_loaded			= false;
 	for (int index = 1; index < argc; ++index)
 	{
 		if (std::strcmp(argv[index], "--config") == 0)
@@ -588,8 +589,8 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 			}
 			try
 			{
-				size_t consumed = 0;
-				const unsigned long port = std::stoul(argv[++index], &consumed);
+				size_t				consumed = 0;
+				const unsigned long port	 = std::stoul(argv[++index], &consumed);
 				if (consumed != std::strlen(argv[index]) || port == 0 || port > (std::numeric_limits<uint16_t>::max)())
 					throw std::invalid_argument("invalid port");
 				options.discovery_port = static_cast<uint16_t>(port);
@@ -609,8 +610,8 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 			}
 			try
 			{
-				size_t consumed = 0;
-				const unsigned long long window = std::stoull(argv[++index], &consumed);
+				size_t					 consumed = 0;
+				const unsigned long long window	  = std::stoull(argv[++index], &consumed);
 				if (consumed != std::strlen(argv[index]) || window == 0)
 					throw std::invalid_argument("invalid window");
 				options.discovery_window_ms = window;

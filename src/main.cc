@@ -129,10 +129,10 @@ int main(int argc, char* argv[])
 			: profile.delay_mode == PacketDelayMode::send_all_after_delay					? "Send all in"
 			: profile.delay_mode == PacketDelayMode::ratio
 				? "Send " + std::to_string(profile.ratio) + (profile.ratio_percent ? "% per" : " packets per")
-			: profile.delay_mode == PacketDelayMode::drop_and_send ? "Drop, then send in"
+			: profile.delay_mode == PacketDelayMode::drop_and_send	   ? "Drop, then send in"
 			: profile.delay_mode == PacketDelayMode::drop_until_toggle ? "Drop, hold, then send"
-			: profile.delay_mode == PacketDelayMode::drop		   ? "Drop packets"
-																   : "Delay each by";
+			: profile.delay_mode == PacketDelayMode::drop			   ? "Drop packets"
+																	   : "Delay each by";
 		const std::string delay_value = indefinite_delay ? "profile is deactivated"
 										: profile.delay_mode == PacketDelayMode::drop
 											? "immediately"
@@ -159,9 +159,9 @@ int main(int argc, char* argv[])
 			std::string status = "(STOPPED)";
 			if (engine.is_running())
 			{
-				const size_t   pending_packets = engine.pending_packets();
-				const uint64_t next_batch	   = engine.next_batch_in_ms();
-				const std::string held_for	   = "; held for " + logging::format_duration(engine.running_time_ms());
+				const size_t	  pending_packets = engine.pending_packets();
+				const uint64_t	  next_batch	  = engine.next_batch_in_ms();
+				const std::string held_for		  = "; held for " + logging::format_duration(engine.running_time_ms());
 				status = pending_packets == 0 ? "(RUNNING: 0 packets waiting; waiting for first packet...)"
 						 : next_batch == (std::numeric_limits<uint64_t>::max)()
 							 ? "(RUNNING: " + std::to_string(pending_packets) + " packets waiting; waiting for profile deactivation...)"
@@ -178,8 +178,8 @@ int main(int argc, char* argv[])
 					active_profiles += ", ";
 				active_profiles += options.profiles[index].name;
 			}
-			const std::string server_status = "server: " + engine.current_server() +
-										 (engine.is_authoritative_server() ? " (authoritative)" : "");
+			const std::string server_status =
+				"server: " + engine.current_server() + (engine.is_authoritative_server() ? " (authoritative)" : "");
 			logging::set_status(status, server_status + (active_profiles.empty() ? "" : " | " + active_profiles));
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		}

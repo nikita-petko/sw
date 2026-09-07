@@ -10,22 +10,17 @@ public:
 
 	void reset() override { phase_ = Phase::dropping; }
 
-	void capture_packet(const BYTE* packet,
-				 UINT length,
-				 const WINDIVERT_ADDRESS& address,
-				 int profile,
-				 uint64_t,
-				 uint64_t receive_order,
-				 PacketQueue& packets) override
+	void capture_packet(const BYTE*				 packet,
+						UINT					 length,
+						const WINDIVERT_ADDRESS& address,
+						int						 profile,
+						uint64_t,
+						uint64_t	 receive_order,
+						PacketQueue& packets) override
 	{
 		if (phase_ != Phase::holding)
 			return;
-		packets.push(make_packet_node(packet,
-									  length,
-									  address,
-									  profile,
-									  (std::numeric_limits<uint64_t>::max)(),
-									  receive_order));
+		packets.push(make_packet_node(packet, length, address, profile, (std::numeric_limits<uint64_t>::max)(), receive_order));
 	}
 
 	void release(PacketQueue&, uint64_t, std::vector<PacketNode*>&) override {}
