@@ -8,7 +8,7 @@ class SendAllAfterDelayMode final : public PacketMode
 public:
 	explicit SendAllAfterDelayMode(ProfileOptions options) : PacketMode(std::move(options), "send_all_after_delay") {}
 
-	void capture(const BYTE*			  packet,
+	void capture_packet(const BYTE*			  packet,
 				 UINT					  length,
 				 const WINDIVERT_ADDRESS& address,
 				 int					  profile,

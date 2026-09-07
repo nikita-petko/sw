@@ -8,7 +8,7 @@ class FromTimestampMode final : public PacketMode
 public:
 	explicit FromTimestampMode(ProfileOptions options) : PacketMode(std::move(options), "from_timestamp") {}
 
-	void capture(const BYTE*			  packet,
+	void capture_packet(const BYTE*			  packet,
 				 UINT					  length,
 				 const WINDIVERT_ADDRESS& address,
 				 int					  profile,

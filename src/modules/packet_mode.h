@@ -55,9 +55,19 @@ public:
 						 int					  profile,
 						 uint64_t				  now,
 						 uint64_t				  receive_order,
-						 PacketQueue&			  packets)											  = 0;
+						 PacketQueue&			  packets);
 	virtual void release(PacketQueue& packets, uint64_t now, std::vector<PacketNode*>& ready_packets) = 0;
+	virtual void reset() {}
+	virtual bool toggle(PacketQueue&) { return false; }
 	virtual void flush(PacketQueue& packets, std::vector<PacketNode*>& pending_packets)				  = 0;
+
+	virtual void capture_packet(const BYTE* packet,
+								UINT length,
+								const WINDIVERT_ADDRESS& address,
+								int profile,
+								uint64_t now,
+								uint64_t receive_order,
+								PacketQueue& packets) = 0;
 
 protected:
 	ProfileOptions options_;

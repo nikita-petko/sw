@@ -130,6 +130,7 @@ int main(int argc, char* argv[])
 			: profile.delay_mode == PacketDelayMode::ratio
 				? "Send " + std::to_string(profile.ratio) + (profile.ratio_percent ? "% per" : " packets per")
 			: profile.delay_mode == PacketDelayMode::drop_and_send ? "Drop, then send in"
+			: profile.delay_mode == PacketDelayMode::drop_until_toggle ? "Drop, hold, then send"
 			: profile.delay_mode == PacketDelayMode::drop		   ? "Drop packets"
 																   : "Delay each by";
 		const std::string delay_value = indefinite_delay ? "profile is deactivated"
@@ -160,14 +161,13 @@ int main(int argc, char* argv[])
 			{
 				const size_t   pending_packets = engine.pending_packets();
 				const uint64_t next_batch	   = engine.next_batch_in_ms();
+				const std::string held_for	   = "; held for " + logging::format_duration(engine.running_time_ms());
 				status = pending_packets == 0 ? "(RUNNING: 0 packets waiting; waiting for first packet...)"
 						 : next_batch == (std::numeric_limits<uint64_t>::max)()
 							 ? "(RUNNING: " + std::to_string(pending_packets) + " packets waiting; waiting for profile deactivation...)"
 							 : "(RUNNING: " + std::to_string(pending_packets) + " packets waiting; " +
 								   logging::format_duration(next_batch) + " left until next batch...)";
-				if (next_batch == (std::numeric_limits<uint64_t>::max)())
-					status = "(RUNNING: " + std::to_string(pending_packets) + " packets waiting; held for " +
-							 logging::format_duration(engine.running_time_ms()) + ")";
+				status.insert(status.size() - 1, held_for);
 			}
 			std::string active_profiles;
 			for (size_t index = 0; index < options.profiles.size(); ++index)
@@ -230,7 +230,16 @@ int main(int argc, char* argv[])
 			}
 			else if (active_profiles[index] && !activation_key_held[index])
 			{
-				if (engine.is_running(profile))
+				if (engine.is_running(profile) && options.profiles[index].delay_mode == PacketDelayMode::drop_until_toggle)
+				{
+					LOG_DEBUG("Toggling profile %d", profile);
+					if (engine.toggle(profile))
+					{
+						engine.teardown(profile);
+						LOG_DEBUG("Profile %d released and deactivated (drop_until_toggle mode)", profile);
+					}
+				}
+				else if (engine.is_running(profile))
 				{
 					LOG_DEBUG("Disabling profile %d", profile);
 					engine.teardown(profile);

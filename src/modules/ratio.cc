@@ -9,7 +9,7 @@ class RatioMode final : public PacketMode
 public:
 	explicit RatioMode(ProfileOptions options) : PacketMode(std::move(options), "ratio") {}
 
-	void capture(const BYTE*			  packet,
+	void capture_packet(const BYTE*			  packet,
 				 UINT					  length,
 				 const WINDIVERT_ADDRESS& address,
 				 int					  profile,

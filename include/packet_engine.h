@@ -48,6 +48,15 @@ enum class PacketDelayMode
 	ratio,
 	drop,
 	drop_and_send,
+	drop_until_toggle,
+};
+
+enum class RetransmissionMode
+{
+	none,
+	only_seq,
+	only_ack,
+	both,
 };
 
 struct ProfileOptions
@@ -57,6 +66,7 @@ struct ProfileOptions
 	ProfileKeyMode key_mode = ProfileKeyMode::combination;
 	ProfileActivationMode mode = ProfileActivationMode::toggle;
 	PacketDelayMode delay_mode = PacketDelayMode::from_timestamp;
+	RetransmissionMode retransmission_mode = RetransmissionMode::none;
 	int32_t delay_ms = 0;
 	int32_t ratio = 1;
 	bool ratio_percent = false;
@@ -90,6 +100,7 @@ public:
 	void stop_workers();
 	void setup(int profile);
 	void teardown(int profile);
+	bool toggle(int profile);
 	void teardown();
 	bool is_running() const;
 	bool is_running(int profile) const;

@@ -119,6 +119,7 @@ profiles:
     key: space
     mode: toggle
     delay_mode: from_timestamp
+    retransmission_mode: both
     delay_ms: 500
     windivert_options:
       forward: false
@@ -142,7 +143,8 @@ profiles:
 | `keys` | One of `key` or `keys` | A list of keys that must all be held, for example `keys: [ctrl, shift]`. A block list is also supported. |
 | `key_mode` | No | `oneof` activates when any configured key is held; `combination` activates when all configured keys are held. Defaults to `combination`. |
 | `mode` | No | `toggle` or `hold`; defaults to `toggle`. |
-| `delay_mode` | No | `from_timestamp`, `send_all_after_delay`, `ratio`, `drop`, or `drop_and_send`; defaults to `from_timestamp`. |
+| `delay_mode` | No | `from_timestamp`, `send_all_after_delay`, `ratio`, `drop`, `drop_and_send`, or `drop_until_toggle`; defaults to `from_timestamp`. |
+| `retransmission_mode` | No | `none` allows retransmissions; `only_seq` drops duplicate sequence numbers; `only_ack` drops duplicate acknowledgment numbers; `both` requires a unique `(SeqNum, AckNum)` pair. Defaults to `none`. |
 | `delay_ms` | No | Delay in milliseconds. Defaults to `0`. |
 | `ratio` | For `ratio` mode | Positive packet count, or a positive percentage such as `50%`. Percentage ratios also require `delay_ms > 0` and may not exceed `100%`. |
 | `filter` | No | Profile-specific WinDivert filter. Overrides `global_filter`. |
@@ -166,6 +168,9 @@ accepted, including hexadecimal values such as `0x41`.
 - `drop_and_send`: Drops the configured `ratio` of each batch, then sends the
   remaining packets after `delay_ms`. Both `ratio` and a positive `delay_ms` are
   required.
+- `drop_until_toggle`: Drops packets after activation. The next toggle starts
+  holding packets, and the following toggle sends the held packets and
+  deactivates the profile. This mode requires `mode: toggle`.
 
 When `delay_ms` is zero, queued packets wait until the profile is deactivated.
 Deactivation flushes all remaining packets immediately, so this is a packet

@@ -1,5 +1,6 @@
 #include "options.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -125,6 +126,21 @@ std::optional<PacketDelayMode> parse_delay_mode(const std::string& value)
 		return PacketDelayMode::drop;
 	if (value == "drop_and_send")
 		return PacketDelayMode::drop_and_send;
+	if (value == "drop_until_toggle")
+		return PacketDelayMode::drop_until_toggle;
+	return std::nullopt;
+}
+
+std::optional<RetransmissionMode> parse_retransmission_mode(const std::string& value)
+{
+	if (value == "none")
+		return RetransmissionMode::none;
+	if (value == "only_seq")
+		return RetransmissionMode::only_seq;
+	if (value == "only_ack")
+		return RetransmissionMode::only_ack;
+	if (value == "both")
+		return RetransmissionMode::both;
 	return std::nullopt;
 }
 
@@ -177,6 +193,10 @@ bool add_server(const std::string& value, PacketEngineOptions& options, const ch
 		LOG_ERROR("Invalid server '%s' in %s at line %d; expected address or address:name", item.c_str(), path, line_number);
 		return false;
 	}
+	if (std::find_if(options.servers.begin(), options.servers.end(), [&](const ServerOptions& existing) {
+			return existing.address == server.address;
+		}) != options.servers.end())
+		return true;
 	options.servers.push_back(server);
 	return true;
 }
@@ -363,12 +383,22 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			if (!mode)
 			{
 				LOG_ERROR(
-					"Invalid delay_mode in %s at line %d: expected from_timestamp, send_all_after_delay, ratio, drop, or drop_and_send",
+					"Invalid delay_mode in %s at line %d: expected from_timestamp, send_all_after_delay, ratio, drop, drop_and_send, or drop_until_toggle",
 					path,
 					line_number);
 				return false;
 			}
 			profile->delay_mode = *mode;
+		}
+		else if (key == "retransmission_mode")
+		{
+			const auto mode = parse_retransmission_mode(unquote(value));
+			if (!mode)
+			{
+				LOG_ERROR("Invalid retransmission_mode in %s at line %d: expected none, only_seq, only_ack, or both", path, line_number);
+				return false;
+			}
+			profile->retransmission_mode = *mode;
 		}
 		else if (key == "delay_ms")
 		{
@@ -422,6 +452,11 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		if (item.delay_mode == PacketDelayMode::drop_and_send && !item.ratio_configured)
 		{
 			LOG_ERROR("Profile '%s' requires ratio to be configured", item.name.c_str());
+			return false;
+		}
+		if (item.delay_mode == PacketDelayMode::drop_until_toggle && item.mode != ProfileActivationMode::toggle)
+		{
+			LOG_ERROR("Profile '%s' requires toggle mode for drop_until_toggle", item.name.c_str());
 			return false;
 		}
 	}

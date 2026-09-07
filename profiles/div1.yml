@@ -1,8 +1,11 @@
 global_filter: "tcp.PayloadLength > 0 and tcp.DstPort == 55000 and ip.DstAddr == 34.90.202.108"
 
 servers:
-  - "34.90.202.108:EU"
-  - "136.112.189.19:US"
+  - "34.13.202.203:AMS-EUC-203"
+  - "34.90.202.108:AMS-EUC-108"
+  - "104.155.45.25:BRU-EUW-25"
+  - "34.76.248.132:BRU-EUW-132"
+  - "136.112.189.19:MCI-USC-19"
 
 profiles:
   - name: "RPM"
@@ -14,13 +17,28 @@ profiles:
     windivert_options:
       forward: true
 
+  - name: "Long (Running Ratio)"
+    keys:
+      - z
+    key_mode: oneof
+    mode: toggle
+    filter: "tcp.Psh and tcp.PayloadLength > 0 and tcp.DstPort == 55000"
+    retransmission_mode: none
+    delay_mode: ratio
+    ratio: 10%
+    delay_ms: 18000
+    windivert_options:
+      forward: true
+      server_direction: destination
+
   - name: "Long (Recv)"
     keys:
       - ctrl
       - space
     key_mode: oneof
     mode: toggle
-    filter: "tcp.PayloadLength > 0 and tcp.SrcPort == 55000"
+    filter: "tcp.Psh and tcp.PayloadLength > 0 and tcp.SrcPort == 55000"
+    retransmission_mode: none
     delay_mode: send_all_after_delay
     delay_ms: 0
     windivert_options:
@@ -33,7 +51,8 @@ profiles:
       - space
     key_mode: oneof
     mode: toggle
-    filter: "tcp.PayloadLength > 0 and tcp.DstPort == 55000"
+    retransmission_mode: none
+    filter: "tcp.Psh and tcp.PayloadLength > 0 and tcp.DstPort == 55000"
     delay_mode: send_all_after_delay
     delay_ms: 0
     windivert_options:
