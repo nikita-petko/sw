@@ -50,6 +50,22 @@ const char* level_name(logging::level message_level)
 	}
 	return "UNKNOWN";
 }
+
+const char* level_color(logging::level message_level)
+{
+	switch (message_level)
+	{
+		case logging::level::error:
+			return "\033[31m";
+		case logging::level::warn:
+			return "\033[33m";
+		case logging::level::info:
+			return "\033[32m";
+		case logging::level::debug:
+			return "\033[36m";
+	}
+	return "";
+}
 }  // namespace
 
 namespace logging {
@@ -99,7 +115,7 @@ void write(level message_level, const char* format, ...)
 	va_end(arguments);
 
 	clear_status_line();
-	std::printf("[%s] %s\n", level_name(message_level), message);
+	std::printf("%s[%s] %s\033[0m\n", level_color(message_level), level_name(message_level), message);
 	if (!status_line.empty())
 		print_status_line(status_line);
 	std::fflush(stdout);

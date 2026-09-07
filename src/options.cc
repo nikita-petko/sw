@@ -7,7 +7,6 @@
 #include <fstream>
 #include <optional>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 #include "log.h"
@@ -41,6 +40,15 @@ std::optional<ProfileActivationMode> parse_activation_mode(const std::string& va
 		return ProfileActivationMode::toggle;
 	if (value == "hold")
 		return ProfileActivationMode::hold;
+	return std::nullopt;
+}
+
+std::optional<ProfileKeyMode> parse_key_mode(const std::string& value)
+{
+	if (value == "oneof")
+		return ProfileKeyMode::oneof;
+	if (value == "combination")
+		return ProfileKeyMode::combination;
 	return std::nullopt;
 }
 
@@ -100,6 +108,10 @@ std::optional<PacketDelayMode> parse_delay_mode(const std::string& value)
 		return PacketDelayMode::send_all_after_delay;
 	if (value == "ratio")
 		return PacketDelayMode::ratio;
+	if (value == "drop")
+		return PacketDelayMode::drop;
+	if (value == "drop_and_send")
+		return PacketDelayMode::drop_and_send;
 	return std::nullopt;
 }
 
@@ -243,6 +255,16 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		subsection_indent = -1;
 		if (key == "name")
 			profile->name = unquote(value);
+		else if (key == "key_mode")
+		{
+			const auto mode = parse_key_mode(unquote(value));
+			if (!mode)
+			{
+				LOG_ERROR("Invalid profile key_mode in %s at line %d: expected oneof or combination", path, line_number);
+				return false;
+			}
+			profile->key_mode = *mode;
+		}
 		else if (key == "mode")
 		{
 			const auto mode = parse_activation_mode(unquote(value));
@@ -258,7 +280,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			const auto mode = parse_delay_mode(unquote(value));
 			if (!mode)
 			{
-				LOG_ERROR("Invalid delay_mode in %s at line %d: expected from_timestamp, send_all_after_delay, or ratio",
+				LOG_ERROR("Invalid delay_mode in %s at line %d: expected from_timestamp, send_all_after_delay, ratio, drop, or drop_and_send",
 						  path,
 						  line_number);
 				return false;
@@ -290,6 +312,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				if (consumed != ratio_value.size())
 					throw std::invalid_argument("trailing characters");
 				profile->ratio_percent = percent;
+				profile->ratio_configured = true;
 			}
 			catch (...)
 			{
@@ -307,22 +330,18 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			LOG_ERROR("Each profile in %s requires a name and key(s)", path);
 			return false;
 		}
-		if (item.delay_mode == PacketDelayMode::ratio &&
+		if ((item.delay_mode == PacketDelayMode::ratio || item.delay_mode == PacketDelayMode::drop_and_send) &&
 			(item.ratio <= 0 || (item.ratio_percent && item.ratio > 100) || item.delay_ms <= 0))
 		{
 			LOG_ERROR("Profile '%s' requires a positive ratio and delay_ms", item.name.c_str());
 			return false;
 		}
+		if (item.delay_mode == PacketDelayMode::drop_and_send && !item.ratio_configured)
+		{
+			LOG_ERROR("Profile '%s' requires ratio to be configured", item.name.c_str());
+			return false;
+		}
 	}
-	std::unordered_set<int> configured_keys;
-	for (const ProfileOptions& item : options.profiles)
-		for (const int key : item.keys)
-			if (!configured_keys.insert(key).second)
-			{
-				LOG_ERROR("A profile key is assigned more than once in %s", path);
-				return false;
-			}
-
 	if (options.profiles.empty())
 	{
 		LOG_ERROR("No profiles found in %s", path);
@@ -346,6 +365,12 @@ bool validate_filters(const char* path, const PacketEngineOptions& options)
 		const bool		   outbound		  = profile.windivert_options.outbound.value_or(false);
 		const bool		   forward		  = profile.windivert_options.forward.value_or(false);
 		const std::string& filter		  = profile.filter.value_or(options.global_filter);
+		if (outbound && forward)
+		{
+			LOG_ERROR("Invalid options for profile '%s': outbound requires forward to be false",
+					  profile.name.c_str());
+			return false;
+		}
 		const std::string  capture_filter = outbound ? "outbound and (" + filter + ")" : filter;
 		const char*		   error		  = nullptr;
 		UINT			   error_position = 0;
@@ -394,7 +419,16 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 				return false;
 			}
 
-			logging::set_level(parse_log_level(argv[++index]));
+			const logging::level requested_level = parse_log_level(argv[++index]);
+#ifdef NDEBUG
+			if (requested_level == logging::level::debug)
+			{
+				logging::set_level(logging::level::info);
+				LOG_WARN("Debug logging is not supported on release builds; clamping log level to info");
+			}
+			else
+#endif
+				logging::set_level(requested_level);
 		}
 		else if (std::strcmp(argv[index], "--help") == 0 || std::strcmp(argv[index], "-h") == 0 || argc == 1)
 		{

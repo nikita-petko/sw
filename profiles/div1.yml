@@ -1,43 +1,35 @@
-global_filter: "tcp.DstPort == 55000 or tcp.SrcPort == 55000"
+global_filter: "tcp.PayloadLength > 0 and tcp.DstPort == 55000 and ip.DstAddr == 34.90.202.108"
 
 profiles:
   - name: "RPM"
-    key: space
+    key: x
     mode: toggle
     delay_mode: from_timestamp
+    filter: "(tcp.SrcPort == 55000 or tcp.DstPort == 55000)"
     delay_ms: 500
     windivert_options:
       forward: true
 
-  - name: "Long"
-    key: alt
-    mode: toggle
-    delay_mode: send_all_after_delay
-    delay_ms: 9000
-    windivert_options:
-      forward: true
-
-  - name: "Long - Ratio"
-    key: z
-    mode: toggle
-    delay_mode: ratio
-    ratio: "50%"
-    delay_ms: 9000
-    windivert_options:
-      forward: true
-
-  - name: "Long - Step"
+  - name: "Long (Recv)"
     keys:
       - ctrl
+      - space
+    key_mode: oneof
     mode: toggle
-    delay_ms: 9000
+    filter: "tcp.PayloadLength > 0 and tcp.SrcPort == 55000 and ip.SrcAddr == 34.90.202.108"
+    delay_mode: send_all_after_delay
+    delay_ms: 0
     windivert_options:
       forward: true
-
-  - name: "Long - Inf"
+      
+  - name: "Long (Send)"
     keys:
-      - shift 
+      - alt
+      - space
+    key_mode: oneof
     mode: toggle
+    filter: "tcp.PayloadLength > 0 and tcp.DstPort == 55000 and ip.DstAddr == 34.90.202.108"
+    delay_mode: send_all_after_delay
     delay_ms: 0
     windivert_options:
       forward: true

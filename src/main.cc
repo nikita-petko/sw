@@ -7,6 +7,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "log.h"
 #include "options.h"
@@ -24,22 +25,35 @@ bool is_key_held(int key)
 	return (::GetAsyncKeyState(key) & 0x8000) != 0;
 }
 
-int find_active_profile(const PacketEngineOptions& options)
+std::vector<bool> find_active_profiles(const PacketEngineOptions& options)
 {
+	std::vector<bool> active(options.profiles.size(), false);
 	for (size_t index = 0; index < options.profiles.size(); ++index)
 	{
-		bool active = true;
-		for (const int key : options.profiles[index].keys)
-			active = active && is_key_held(key);
-		if (active)
-			return static_cast<int>(index);
+		const ProfileOptions& profile = options.profiles[index];
+		if (profile.key_mode == ProfileKeyMode::oneof)
+		{
+			for (const int key : profile.keys)
+				active[index] = active[index] || is_key_held(key);
+		}
+		else
+		{
+			active[index] = true;
+			for (const int key : profile.keys)
+				active[index] = active[index] && is_key_held(key);
+		}
 	}
-	return -1;
+	return active;
 }
 
 const char* format_mode(ProfileActivationMode mode)
 {
 	return mode == ProfileActivationMode::hold ? "hold" : "toggle";
+}
+
+const char* format_key_mode(ProfileKeyMode mode)
+{
+	return mode == ProfileKeyMode::oneof ? "oneof" : "combination";
 }
 
 std::string format_key(int key)
@@ -60,10 +74,11 @@ std::string format_key(int key)
 std::string format_keys(const ProfileOptions& profile)
 {
 	std::string result;
+	const char* separator = profile.key_mode == ProfileKeyMode::oneof ? " or " : "+";
 	for (const int key : profile.keys)
 	{
 		if (!result.empty())
-			result += "+";
+			result += separator;
 		result += format_key(key);
 	}
 	return result;
@@ -94,16 +109,27 @@ int main(int argc, char* argv[])
 	LOG_INFO("Loaded profiles (%zu):", options.profiles.size());
 	for (const ProfileOptions& profile : options.profiles)
 	{
+		const bool indefinite_delay = profile.delay_ms <= 0 &&
+			(profile.delay_mode == PacketDelayMode::from_timestamp || profile.delay_mode == PacketDelayMode::send_all_after_delay ||
+			 profile.delay_mode == PacketDelayMode::drop_and_send);
 		const std::string delay_description =
-			profile.delay_mode == PacketDelayMode::send_all_after_delay ? "Send all in"
+			indefinite_delay && profile.delay_mode == PacketDelayMode::send_all_after_delay ? "Send all until"
+			: indefinite_delay && profile.delay_mode == PacketDelayMode::drop_and_send ? "Drop, then send until"
+			: indefinite_delay ? "Delay each until"
+			: profile.delay_mode == PacketDelayMode::send_all_after_delay ? "Send all in"
 			: profile.delay_mode == PacketDelayMode::ratio
 				? "Send " + std::to_string(profile.ratio) + (profile.ratio_percent ? "% per" : " packets per")
+				: profile.delay_mode == PacketDelayMode::drop_and_send ? "Drop, then send in"
+				: profile.delay_mode == PacketDelayMode::drop ? "Drop packets"
 				: "Delay each by";
-		LOG_INFO("\"%s\" -> %s %s (press: %s, mode: %s) @ \"%s\"",
+		const std::string delay_value = indefinite_delay ? "profile deactivation"
+			: profile.delay_mode == PacketDelayMode::drop ? "immediately" : logging::format_duration(static_cast<uint64_t>(profile.delay_ms));
+		LOG_INFO("\"%s\" -> %s %s (press: %s, key_mode: %s, mode: %s) @ \"%s\"",
 				 profile.name.c_str(),
 				 delay_description.c_str(),
-				 logging::format_duration(static_cast<uint64_t>(profile.delay_ms)).c_str(),
+				 delay_value.c_str(),
 				 format_keys(profile).c_str(),
+				 format_key_mode(profile.key_mode),
 				 format_mode(profile.mode),
 				 profile.filter.value_or(options.global_filter).c_str());
 	}
@@ -113,7 +139,6 @@ int main(int argc, char* argv[])
 	PacketEngine engine(options);
 	LOG_INFO("Hold a configured profile key to start/stop packet capture, 'q' or backspace to quit.");
 	engine.start_workers();
-	std::atomic<bool> activation_key_held = false;
 	std::atomic<bool> status_shutdown	  = false;
 	std::thread		  status_thread([&] {
 		while (!status_shutdown.load())
@@ -128,12 +153,15 @@ int main(int argc, char* argv[])
 							 ? "(RUNNING: " + std::to_string(pending_packets) + " packets waiting; waiting for profile deactivation...)"
 							 : "(RUNNING: " + std::to_string(pending_packets) + " packets waiting; " +
 								   logging::format_duration(next_batch) + " left until next batch...)";
+			if (next_batch == (std::numeric_limits<uint64_t>::max)())
+				status = "(RUNNING: " + std::to_string(pending_packets) + " packets waiting; held for " +
+						logging::format_duration(engine.running_time_ms()) + ")";
 			}
 			logging::set_status(status);
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		}
 	});
-	int				  hold_profile = -1;
+	std::vector<bool> activation_key_held(options.profiles.size(), false);
 
 	while (true)
 	{
@@ -149,46 +177,42 @@ int main(int argc, char* argv[])
 			continue;
 		}
 
-		const int profile = find_active_profile(options);
-		if (profile != -1)
+		const std::vector<bool> active_profiles = find_active_profiles(options);
+		for (size_t index = 0; index < options.profiles.size(); ++index)
 		{
-			if (options.profiles[profile].mode == ProfileActivationMode::hold)
+			const int profile = static_cast<int>(index + 1);
+			if (options.profiles[index].mode == ProfileActivationMode::hold)
 			{
-				hold_profile = profile;
-				if (!engine.is_running())
+				if (active_profiles[index] && !engine.is_running(profile))
 				{
-					LOG_DEBUG("Setting up profile %d", profile + 1);
-					engine.setup(profile + 1);
-					LOG_DEBUG("Profile %d activated (hold mode)", profile + 1);
+					LOG_DEBUG("Setting up profile %d", profile);
+					engine.setup(profile);
+					LOG_DEBUG("Profile %d activated (hold mode)", profile);
+				}
+				if (!active_profiles[index] && engine.is_running(profile))
+				{
+					LOG_DEBUG("Disabling profile %d", profile);
+					engine.teardown(profile);
+					LOG_DEBUG("Profile %d deactivated (hold mode)", profile);
 				}
 			}
-			else if (!activation_key_held)
+			else if (active_profiles[index] && !activation_key_held[index])
 			{
-				if (engine.is_running())
+				if (engine.is_running(profile))
 				{
-					LOG_DEBUG("Disabling profile %d", profile + 1);
-					engine.teardown();
-					LOG_DEBUG("Profile %d deactivated (toggle mode)", profile + 1);
+					LOG_DEBUG("Disabling profile %d", profile);
+					engine.teardown(profile);
+					LOG_DEBUG("Profile %d deactivated (toggle mode)", profile);
 				}
 				else
 				{
-					LOG_DEBUG("Setting up profile %d", profile + 1);
-					engine.setup(profile + 1);
-					LOG_DEBUG("Profile %d activated (toggle mode)", profile + 1);
+					LOG_DEBUG("Setting up profile %d", profile);
+					engine.setup(profile);
+					LOG_DEBUG("Profile %d activated (toggle mode)", profile);
 				}
 			}
-			activation_key_held = true;
+			activation_key_held[index] = active_profiles[index];
 		}
-
-		if (hold_profile != -1 && profile != hold_profile)
-		{
-			LOG_DEBUG("Disabling profile %d", hold_profile + 1);
-			engine.teardown();
-			LOG_DEBUG("Profile %d deactivated (hold mode)", hold_profile + 1);
-			hold_profile = -1;
-		}
-		if (profile == -1)
-			activation_key_held = false;
 	}
 
 	engine.teardown();

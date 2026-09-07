@@ -23,22 +23,31 @@ enum class ProfileActivationMode
 	toggle,
 	hold,
 };
+enum class ProfileKeyMode
+{
+	combination,
+	oneof,
+};
 enum class PacketDelayMode
 {
 	from_timestamp,
 	send_all_after_delay,
 	ratio,
+	drop,
+	drop_and_send,
 };
 
 struct ProfileOptions
 {
 	std::string name;
 	std::vector<int> keys;
+	ProfileKeyMode key_mode = ProfileKeyMode::combination;
 	ProfileActivationMode mode = ProfileActivationMode::toggle;
 	PacketDelayMode delay_mode = PacketDelayMode::from_timestamp;
 	int32_t delay_ms = 0;
 	int32_t ratio = 1;
 	bool ratio_percent = false;
+	bool ratio_configured = false;
 	std::optional<std::string> filter;
 	WinDivertOptions windivert_options;
 };
@@ -61,8 +70,11 @@ public:
 	void start_workers();
 	void stop_workers();
 	void setup(int profile);
+	void teardown(int profile);
 	void teardown();
 	bool is_running() const;
+	bool is_running(int profile) const;
+	uint64_t running_time_ms() const;
 	size_t pending_packets() const;
 	uint64_t next_batch_in_ms() const;
 	void print_state() const;

@@ -24,6 +24,10 @@ void clear_status();
 #define LOG_ERROR(message, ...) logging::write(logging::level::error, message, ##__VA_ARGS__)
 #define LOG_WARN(message, ...) logging::write(logging::level::warn, message, ##__VA_ARGS__)
 #define LOG_INFO(message, ...) logging::write(logging::level::info, message, ##__VA_ARGS__)
+#ifdef NDEBUG
+#define LOG_DEBUG(...) ((void)0)
+#else
 #define LOG_DEBUG(message, ...) logging::write(logging::level::debug, message, ##__VA_ARGS__)
+#endif
 
 #endif // LOG_H_

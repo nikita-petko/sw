@@ -151,15 +151,16 @@ struct PacketEngine::State
 
 	std::mutex				  lifecycle_mutex;
 	std::condition_variable	  lifecycle_changed;
-	int						  current_profile = 1;
-	int						  last_profile	  = 0;
+	std::vector<bool> active_profiles;
 	std::vector<ProfileStats> profile_stats;
-	std::shared_ptr<Session>  active_session;
+	std::vector<std::shared_ptr<Session>> active_sessions;
 	std::vector<std::thread>  cleanup_threads;
 };
 
 PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(options)), state_(new State(options_.profiles.size()))
 {
+	state_->active_profiles.resize(options_.profiles.size());
+	state_->active_sessions.resize(options_.profiles.size());
 }
 
 PacketEngine::~PacketEngine()
@@ -173,71 +174,77 @@ bool PacketEngine::is_running() const
 	return running_.load();
 }
 
+bool PacketEngine::is_running(int profile) const
+{
+	if (profile < 1 || static_cast<size_t>(profile) > options_.profiles.size())
+		return false;
+	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
+	return state_->active_profiles[profile - 1];
+}
+
+uint64_t PacketEngine::running_time_ms() const
+{
+	const uint64_t now = GetTickCount64();
+	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
+	uint64_t earliest_enabled = now;
+	bool has_active_profile = false;
+	for (size_t index = 0; index < options_.profiles.size(); ++index)
+	{
+		if (state_->active_profiles[index])
+		{
+			has_active_profile = true;
+			earliest_enabled = (std::min)(earliest_enabled, state_->profile_stats[index].enabled_since);
+		}
+	}
+	return has_active_profile ? now - earliest_enabled : 0;
+}
+
 size_t PacketEngine::pending_packets() const
 {
-	std::shared_ptr<Session> session;
-	{
-		std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
-		session = state_->active_session;
-	}
-	if (!session)
-		return 0;
-	std::lock_guard<std::mutex> lock(session->packet_mutex);
-	return session->delayed_packets.size();
+	size_t pending = 0;
+	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
+	for (const auto& session : state_->active_sessions)
+		if (session)
+		{
+			std::lock_guard<std::mutex> session_lock(session->packet_mutex);
+			pending += session->delayed_packets.size();
+		}
+	return pending;
 }
 
 uint64_t PacketEngine::next_batch_in_ms() const
 {
-	std::shared_ptr<Session> session;
-	{
-		std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
-		session = state_->active_session;
-	}
-	if (!session)
+	uint64_t next_release = (std::numeric_limits<uint64_t>::max)();
+	bool has_queued_packets = false;
+	const uint64_t now = GetTickCount64();
+	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
+	for (const auto& session : state_->active_sessions)
+		if (session)
+		{
+			std::lock_guard<std::mutex> session_lock(session->packet_mutex);
+			if (!session->delayed_packets.empty())
+			{
+				has_queued_packets = true;
+				next_release = (std::min)(next_release, session->delayed_packets.top()->release_at);
+			}
+		}
+	if (!has_queued_packets)
 		return 0;
-	std::lock_guard<std::mutex> lock(session->packet_mutex);
-	if (session->delayed_packets.empty())
-		return 0;
-
-	const uint64_t now		  = GetTickCount64();
-	const uint64_t release_at = session->delayed_packets.top()->release_at;
-	if (release_at == (std::numeric_limits<uint64_t>::max)())
+	if (next_release == (std::numeric_limits<uint64_t>::max)())
 		return (std::numeric_limits<uint64_t>::max)();
-	return release_at > now ? release_at - now : 0;
+	return next_release > now ? next_release - now : 0;
 }
 
 void PacketEngine::print_state() const
 {
-	int profile		 = 0;
-	int last_profile = 0;
+	std::vector<bool> active_profiles;
 	{
 		std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
-		profile		 = running_ ? state_->current_profile : 0;
-		last_profile = state_->last_profile;
+		active_profiles = state_->active_profiles;
 	}
 
-	size_t	 queued_packets	 = 0;
-	uint64_t next_release_in = 0;
-	{
-		std::shared_ptr<Session> session;
-		{
-			std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
-			session = state_->active_session;
-		}
-		if (session)
-		{
-			std::lock_guard<std::mutex> lock(session->packet_mutex);
-			queued_packets = session->delayed_packets.size();
-			if (!session->delayed_packets.empty())
-			{
-				const uint64_t now		  = GetTickCount64();
-				const uint64_t release_at = session->delayed_packets.top()->release_at;
-				next_release_in			  = release_at == (std::numeric_limits<uint64_t>::max)() ? (std::numeric_limits<uint64_t>::max)()
-											: release_at > now									 ? release_at - now
-																								 : 0;
-			}
-		}
-	}
+	const size_t queued_packets = pending_packets();
+	const uint64_t next_release_in = next_batch_in_ms();
 
 	size_t state_width = 53;
 	for (size_t index = 0; index < options_.profiles.size(); ++index)
@@ -267,7 +274,7 @@ void PacketEngine::print_state() const
 		uint64_t				   enabled_count		= 0;
 		{
 			std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
-			if (profile == static_cast<int>(profile_number))
+			if (active_profiles[index])
 				enabled_time_current = GetTickCount64() - stats.enabled_since;
 			enabled_time_total = stats.enabled_time_total;
 			enabled_time_min   = stats.enabled_count == 0 ? 0 : stats.enabled_time_min;
@@ -277,14 +284,12 @@ void PacketEngine::print_state() const
 		}
 		const uint64_t enabled_time_average = enabled_count == 0 ? 0 : enabled_time_total / enabled_count;
 		std::string	   profile_label		= profile_options.name;
-		if (profile == static_cast<int>(profile_number))
+		if (active_profiles[index])
 			profile_label += " (ACTIVE)";
 		else if (enabled_count != 0)
 			profile_label += " (held " + logging::format_duration(last_enabled_time) + ")";
 		LOG_INFO("%s", format_state_divider(state_width, profile_label).c_str());
-		log_state_line(state_width,
-					   "profile:         #" + std::to_string(profile_number) + " - " + profile_options.name +
-						   (last_profile == static_cast<int>(profile_number) && profile == 0 ? " (last)" : ""));
+		log_state_line(state_width, "profile:         #" + std::to_string(profile_number) + " - " + profile_options.name);
 		log_state_line(state_width,
 					   "enabled time:    " + logging::format_duration(enabled_time_current) + " current, " +
 						   logging::format_duration(enabled_time_min) + " min, " + logging::format_duration(enabled_time_max) + " max, " +
@@ -312,6 +317,7 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 {
 	const int			  profile		  = session->profile;
 	const ProfileOptions& profile_options = options_.profiles[profile - 1];
+	const std::string	  profile_label	  = "profile #" + std::to_string(profile) + " - " + profile_options.name;
 	while (!session->stopping)
 	{
 		BYTE			  packet_data[0xFFFF];
@@ -321,12 +327,12 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 		{
 			const DWORD error = GetLastError();
 			if (!session->stopping && error != ERROR_INVALID_HANDLE && error != ERROR_OPERATION_ABORTED)
-				LOG_ERROR("WinDivertRecv error %lu: %s", error, format_win32_error(error).c_str());
+				LOG_ERROR("%s recv: WinDivertRecv error %lu: %s", profile_label.c_str(), error, format_win32_error(error).c_str());
 			continue;
 		}
 		state_->profile_stats[profile - 1].packets_caught.fetch_add(1);
 		const bool sniff = profile_options.windivert_options.sniff.value_or(false);
-		if (!sniff)
+		if (!sniff && profile_options.delay_mode != PacketDelayMode::drop)
 		{
 			std::lock_guard<std::mutex> lock(session->packet_mutex);
 			if (session->stopping)
@@ -337,11 +343,13 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 			node->packet					= new BYTE[received_length];
 			node->length					= received_length;
 			node->address					= new WINDIVERT_ADDRESS(address);
-			node->profile					= state_->current_profile;	// Record the active profile
+			node->profile					= session->profile;
 			node->release_at =
 				configured_delay <= 0 ? (std::numeric_limits<uint64_t>::max)() : now + static_cast<uint64_t>(configured_delay);
 			node->receive_order = session->next_receive_order++;
-			if (profile_options.delay_mode == PacketDelayMode::send_all_after_delay && !session->delayed_packets.empty())
+			if ((profile_options.delay_mode == PacketDelayMode::send_all_after_delay ||
+				 profile_options.delay_mode == PacketDelayMode::drop_and_send) &&
+				!session->delayed_packets.empty())
 				node->release_at = session->delayed_packets.top()->release_at;
 			else if (profile_options.delay_mode == PacketDelayMode::ratio)
 			{
@@ -363,17 +371,36 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 			session->delayed_packets.push(node);
 			session->packet_changed.notify_one();
 		}
-		LOG_DEBUG("Received packet: Length = %u, Timestamp = %lld, IsOutbound = %d, IsLoopback = %d",
-				  received_length,
-				  address.Timestamp,
-				  address.Outbound,
-				  address.Loopback);
+		PWINDIVERT_TCPHDR tcp_header = nullptr;
+		if (WinDivertHelperParsePacket(packet_data, received_length, nullptr, nullptr, nullptr, nullptr, nullptr, &tcp_header, nullptr,
+										 nullptr, nullptr, nullptr, nullptr) &&
+			 tcp_header != nullptr)
+		{
+			LOG_DEBUG("%s recv: TCP packet: Length = %u, Sequence = %u, Ack = %u, Timestamp = %lld, IsOutbound = %d, IsLoopback = %d",
+					  profile_label.c_str(),
+					  received_length,
+					  WinDivertHelperNtohl(tcp_header->SeqNum),
+					  WinDivertHelperNtohl(tcp_header->AckNum),
+					  address.Timestamp,
+					  address.Outbound,
+					  address.Loopback);
+		}
+		else
+		{
+			LOG_DEBUG("%s recv: packet: Length = %u, Timestamp = %lld, IsOutbound = %d, IsLoopback = %d",
+					  profile_label.c_str(),
+					  received_length,
+					  address.Timestamp,
+					  address.Outbound,
+					  address.Loopback);
+		}
 	}
 }
 
 void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 {
 	const ProfileOptions& profile_options = options_.profiles[session->profile - 1];
+	const std::string	   profile_label	 = "profile #" + std::to_string(session->profile) + " - " + profile_options.name;
 	while (!session->stopping)
 	{
 		while (!session->stopping)
@@ -444,18 +471,37 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 						ready_packets.push_back(node);
 					}
 			}
+			if (profile_options.delay_mode == PacketDelayMode::drop_and_send)
+			{
+				const size_t drop_count = profile_options.ratio_percent
+												  ? (ready_packets.size() * static_cast<size_t>(profile_options.ratio) + 99) / 100
+												  : (std::min)(ready_packets.size(), static_cast<size_t>(profile_options.ratio));
+				for (size_t index = 0; index < drop_count; ++index)
+				{
+					PacketNode* node = ready_packets[index];
+					LOG_DEBUG("%s drop: delayed packet: Length = %u, Timestamp = %llu",
+							  profile_label.c_str(),
+							  node->length,
+							  static_cast<unsigned long long>(node->address->Timestamp));
+					delete[] node->packet;
+					delete node->address;
+					delete node;
+				}
+				ready_packets.erase(ready_packets.begin(), ready_packets.begin() + drop_count);
+			}
 			for (PacketNode* node : ready_packets)
 			{
 				UINT sent = 0;
 				if (!WinDivertSend(session->handle, node->packet, node->length, &sent, node->address))
 				{
 					const DWORD error = GetLastError();
-					LOG_ERROR("WinDivertSend failed %lu: %s", error, format_win32_error(error).c_str());
+					LOG_ERROR("%s send: WinDivertSend failed %lu: %s", profile_label.c_str(), error, format_win32_error(error).c_str());
 				}
 				else if (sent != 0)
 				{
 					state_->profile_stats[session->profile - 1].delayed_packets_sent.fetch_add(1);
-					LOG_DEBUG("Sent delayed packet: Length = %u, Timestamp = %llu, SendLen = %u",
+					LOG_DEBUG("%s send: delayed packet: Length = %u, Timestamp = %llu, SendLen = %u",
+							  profile_label.c_str(),
 							  node->length,
 							  static_cast<unsigned long long>(node->address->Timestamp),
 							  sent);
@@ -479,18 +525,37 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 				session->delayed_packets.pop();
 			}
 		}
+		if (profile_options.delay_mode == PacketDelayMode::drop_and_send)
+		{
+			const size_t drop_count = profile_options.ratio_percent
+										  ? (pending_packets.size() * static_cast<size_t>(profile_options.ratio) + 99) / 100
+										  : (std::min)(pending_packets.size(), static_cast<size_t>(profile_options.ratio));
+			for (size_t index = 0; index < drop_count; ++index)
+			{
+				PacketNode* node = pending_packets[index];
+				LOG_DEBUG("%s drop: flushed packet: Length = %u, Timestamp = %llu",
+						  profile_label.c_str(),
+						  node->length,
+						  static_cast<unsigned long long>(node->address->Timestamp));
+				delete[] node->packet;
+				delete node->address;
+				delete node;
+			}
+			pending_packets.erase(pending_packets.begin(), pending_packets.begin() + drop_count);
+		}
 		for (PacketNode* node : pending_packets)
 		{
 			UINT sent = 0;
 			if (!WinDivertSend(session->handle, node->packet, node->length, &sent, node->address))
 			{
 				const DWORD error = GetLastError();
-				LOG_ERROR("WinDivertSend failed %lu: %s", error, format_win32_error(error).c_str());
+				LOG_ERROR("%s flush: WinDivertSend failed %lu: %s", profile_label.c_str(), error, format_win32_error(error).c_str());
 			}
 			else if (sent != 0)
 			{
 				state_->profile_stats[session->profile - 1].teardown_packets_sent.fetch_add(1);
-				LOG_DEBUG("Sent flushed packet: Length = %u, Timestamp = %llu, SendLen = %u",
+				LOG_DEBUG("%s flush: sent packet: Length = %u, Timestamp = %llu, SendLen = %u",
+						  profile_label.c_str(),
 						  node->length,
 						  static_cast<unsigned long long>(node->address->Timestamp),
 						  sent);
@@ -500,20 +565,19 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 			delete node;
 		}
 	}
-	LOG_DEBUG("Packet flush stopped");
+	LOG_DEBUG("%s flush: stopped", profile_label.c_str());
 }
 
 void PacketEngine::setup(int profile)
 {
 	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
-	if (running_)
-		return;
 	if (profile < 1 || static_cast<size_t>(profile) > options_.profiles.size())
 	{
 		LOG_ERROR("Profile %d is not configured", profile);
 		return;
 	}
-	state_->current_profile = profile;
+	if (state_->active_sessions[profile - 1])
+		return;
 	timeBeginPeriod(1);
 	const ProfileOptions& profile_options = options_.profiles[profile - 1];
 	const bool			  sniff			  = profile_options.windivert_options.sniff.value_or(false);
@@ -527,21 +591,29 @@ void PacketEngine::setup(int profile)
 	if (handle == INVALID_HANDLE_VALUE)
 	{
 		const DWORD error = GetLastError();
-		LOG_ERROR("Failed to open WinDivert handle %lu: %s", error, format_win32_error(error).c_str());
+		LOG_ERROR("profile #%d - %s setup: failed to open WinDivert handle %lu: %s",
+				  profile,
+				  profile_options.name.c_str(),
+				  error,
+				  format_win32_error(error).c_str());
 		timeEndPeriod(1);
 		return;
 	}
 	std::shared_ptr<Session> session(new Session(profile, handle));
-	state_->last_profile							 = profile;
 	state_->profile_stats[profile - 1].enabled_since = GetTickCount64();
 	WinDivertSetParam(handle, WINDIVERT_PARAM_QUEUE_LENGTH, 4096);
 	WinDivertSetParam(handle, WINDIVERT_PARAM_QUEUE_TIME, 1024);
-	state_->active_session	= session;
-	running_				= true;
+	state_->active_sessions[profile - 1] = session;
+	state_->active_profiles[profile - 1] = true;
+	running_ = true;
 	session->receive_thread = std::thread(&PacketEngine::read_packets, this, session);
 	session->send_thread	= std::thread(&PacketEngine::write_packets, this, session);
-	LOG_DEBUG("Setting up...");
-	LOG_DEBUG("WinDivert layer = %s, filter = %s", forward ? "NETWORK_FORWARD" : "NETWORK", capture_filter.c_str());
+	LOG_DEBUG("profile #%d - %s setup: opening handle", profile, profile_options.name.c_str());
+	LOG_DEBUG("profile #%d - %s setup: WinDivert layer = %s, filter = %s",
+			  profile,
+			  profile_options.name.c_str(),
+			  forward ? "NETWORK_FORWARD" : "NETWORK",
+			  capture_filter.c_str());
 	LOG_INFO("Lag switch enabled, profile = %s (%s, mode = %s). %s",
 			 profile_options.name.c_str(),
 			 format_keys(profile_options).c_str(),
@@ -549,18 +621,20 @@ void PacketEngine::setup(int profile)
 			 profile_options.mode == ProfileActivationMode::hold ? "Release key(s) to turn off" : "Press key(s) again to turn off");
 }
 
-void PacketEngine::teardown()
+void PacketEngine::teardown(int profile)
 {
-	LOG_DEBUG("Teardown requested");
+	LOG_DEBUG("profile #%d teardown: requested", profile);
 	uint64_t				 enabled_time = 0;
 	std::shared_ptr<Session> session;
 	{
 		std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
-		session = state_->active_session;
+		if (profile < 1 || static_cast<size_t>(profile) > options_.profiles.size())
+			return;
+		session = state_->active_sessions[profile - 1];
 		if (!session)
 			return;
-		LOG_DEBUG("Tearing down...");
-		State::ProfileStats& stats = state_->profile_stats[state_->current_profile - 1];
+		LOG_DEBUG("profile #%d - %s teardown: stopping workers", profile, options_.profiles[profile - 1].name.c_str());
+		State::ProfileStats& stats = state_->profile_stats[profile - 1];
 		enabled_time			   = GetTickCount64() - stats.enabled_since;
 		stats.last_enabled_time	   = enabled_time;
 		stats.enabled_time_total += enabled_time;
@@ -569,19 +643,29 @@ void PacketEngine::teardown()
 		if (enabled_time > stats.enabled_time_max)
 			stats.enabled_time_max = enabled_time;
 		++stats.enabled_count;
-		running_ = false;
-		state_->active_session.reset();
+		state_->active_sessions[profile - 1].reset();
+		state_->active_profiles[profile - 1] = false;
+		running_ = std::any_of(state_->active_profiles.begin(), state_->active_profiles.end(), [](bool active) { return active; });
 		session->stopping = true;
 		WinDivertShutdown(session->handle, WINDIVERT_SHUTDOWN_RECV);
 		session->packet_changed.notify_all();
-		state_->cleanup_threads.emplace_back([this, session, enabled_time] {
+		state_->cleanup_threads.emplace_back([this, session, enabled_time, profile] {
 			session->receive_thread.join();
 			session->send_thread.join();
 			WinDivertClose(session->handle);
 			timeEndPeriod(1);
-			LOG_INFO("Lag switch disabled after %s", logging::format_duration(enabled_time).c_str());
+			LOG_INFO("profile #%d - %s teardown: disabled after %s",
+					 profile,
+					 options_.profiles[profile - 1].name.c_str(),
+					 logging::format_duration(enabled_time).c_str());
 		});
 	}
+}
+
+void PacketEngine::teardown()
+{
+	for (size_t index = 0; index < options_.profiles.size(); ++index)
+		teardown(static_cast<int>(index + 1));
 }
 
 void PacketEngine::start_workers()

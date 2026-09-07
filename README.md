@@ -75,9 +75,11 @@ While the program is running:
 - Press `Tab` to print packet and activation statistics.
 - Press `q`, `Q`, or Backspace to quit.
 
-Only one profile can be active at a time. Profile keys must be unique across
-the configuration. `Tab` is reserved for displaying state and cannot be used
-as a profile key.
+Multiple profiles can be active at the same time. Profiles may share keys; a
+key press activates or deactivates every matching toggle profile, while hold
+profiles follow the key state independently. Each active profile has its own
+capture handle and packet queue. `Tab` is reserved for displaying state and
+cannot be used as a profile key.
 
 ## Configuration
 
@@ -112,8 +114,9 @@ profiles:
 | `name` | Yes | Display name shown in logs and state output. |
 | `key` | One of `key` or `keys` | One activation key. |
 | `keys` | One of `key` or `keys` | A list of keys that must all be held, for example `keys: [ctrl, shift]`. A block list is also supported. |
+| `key_mode` | No | `oneof` activates when any configured key is held; `combination` activates when all configured keys are held. Defaults to `combination`. |
 | `mode` | No | `toggle` or `hold`; defaults to `toggle`. |
-| `delay_mode` | No | `from_timestamp`, `send_all_after_delay`, or `ratio`; defaults to `from_timestamp`. |
+| `delay_mode` | No | `from_timestamp`, `send_all_after_delay`, `ratio`, `drop`, or `drop_and_send`; defaults to `from_timestamp`. |
 | `delay_ms` | No | Delay in milliseconds. Defaults to `0`. |
 | `ratio` | For `ratio` mode | Positive packet count, or a positive percentage such as `50%`. Percentage ratios also require `delay_ms > 0` and may not exceed `100%`. |
 | `filter` | No | Profile-specific WinDivert filter. Overrides `global_filter`. |
@@ -133,6 +136,10 @@ accepted, including hexadecimal values such as `0x41`.
 - `ratio`: Releases packets in groups. With `ratio: 3`, three packets are sent
   per delay interval. With `ratio: 50%`, half of the queued packets are sent at
   each interval, with at least one packet sent when packets are available.
+- `drop`: Drops every filtered packet while the profile is active.
+- `drop_and_send`: Drops the configured `ratio` of each batch, then sends the
+  remaining packets after `delay_ms`. Both `ratio` and a positive `delay_ms` are
+  required.
 
 When `delay_ms` is zero, queued packets wait until the profile is deactivated.
 Deactivation flushes all remaining packets immediately, so this is a packet
@@ -154,11 +161,12 @@ Each option is a boolean:
 - `forward`: Open the WinDivert `NETWORK_FORWARD` layer instead of the normal
   `NETWORK` layer.
 - `outbound`: Restrict the filter to outbound packets. Internally, the capture
-  filter becomes `outbound and (<filter>)`.
+  filter becomes `outbound and (<filter>)`. This applies only to the normal
+  `NETWORK` layer; do not combine it with `forward: true`.
 
 Filters are compiled with WinDivert before the program starts. Invalid filters,
-missing profile names or keys, duplicate keys, invalid booleans, and invalid
-delay modes cause startup to fail with an error.
+missing profile names or keys, invalid booleans, and invalid delay modes cause
+startup to fail with an error.
 
 ## Included profiles
 
