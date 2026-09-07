@@ -137,7 +137,7 @@ void set_status(const std::string& status, const std::string& right_status)
 {
 	std::lock_guard lock(log_mutex);
 	print_status_line(status, right_status);
-	status_line		= status;
+	status_line		  = status;
 	status_right_line = right_status;
 	std::fflush(stdout);
 }

@@ -14,7 +14,6 @@
 
 #include <mmsystem.h>
 #include <algorithm>
-#include "modules/packet_mode.h"
 #include <chrono>
 #include <condition_variable>
 #include <limits>
@@ -22,6 +21,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "modules/packet_mode.h"
 #include "windivert_runtime.h"
 
 #include "log.h"
@@ -98,18 +98,22 @@ void log_state_line(size_t width, const std::string& text)
 struct PacketEngine::Session
 {
 	explicit Session(int profile_number, HANDLE divert_handle, PacketMode* packet_mode)
-		: profile(profile_number), handle(divert_handle), mode(packet_mode) {}
+	: profile(profile_number)
+	, handle(divert_handle)
+	, mode(packet_mode)
+	{
+	}
 
-	int																				 profile;
-	HANDLE																			 handle;
-	std::atomic<bool>																 stopping = false;
-	std::mutex																		 packet_mutex;
-	std::condition_variable															 packet_changed;
-	uint64_t																		 next_receive_order = 0;
-	PacketQueue																	 delayed_packets;
-	PacketMode*												 mode;
-	std::thread																		 receive_thread;
-	std::thread																		 send_thread;
+	int						profile;
+	HANDLE					handle;
+	std::atomic<bool>		stopping = false;
+	std::mutex				packet_mutex;
+	std::condition_variable packet_changed;
+	uint64_t				next_receive_order = 0;
+	PacketQueue				delayed_packets;
+	PacketMode*				mode;
+	std::thread				receive_thread;
+	std::thread				send_thread;
 };
 
 struct PacketEngine::State
@@ -129,12 +133,12 @@ struct PacketEngine::State
 
 	explicit State(size_t profile_count) : profile_stats(profile_count) {}
 
-	std::mutex				  lifecycle_mutex;
-	std::condition_variable	  lifecycle_changed;
-	std::vector<bool> active_profiles;
-	std::vector<ProfileStats> profile_stats;
+	std::mutex							  lifecycle_mutex;
+	std::condition_variable				  lifecycle_changed;
+	std::vector<bool>					  active_profiles;
+	std::vector<ProfileStats>			  profile_stats;
 	std::vector<std::shared_ptr<Session>> active_sessions;
-	std::vector<std::thread>  cleanup_threads;
+	std::vector<std::thread>			  cleanup_threads;
 };
 
 PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(options)), state_(new State(options_.profiles.size()))
@@ -182,16 +186,16 @@ bool PacketEngine::is_running(int profile) const
 
 uint64_t PacketEngine::running_time_ms() const
 {
-	const uint64_t now = GetTickCount64();
+	const uint64_t				now = GetTickCount64();
 	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
-	uint64_t earliest_enabled = now;
-	bool has_active_profile = false;
+	uint64_t					earliest_enabled   = now;
+	bool						has_active_profile = false;
 	for (size_t index = 0; index < options_.profiles.size(); ++index)
 	{
 		if (state_->active_profiles[index])
 		{
 			has_active_profile = true;
-			earliest_enabled = (std::min)(earliest_enabled, state_->profile_stats[index].enabled_since);
+			earliest_enabled   = (std::min)(earliest_enabled, state_->profile_stats[index].enabled_since);
 		}
 	}
 	return has_active_profile ? now - earliest_enabled : 0;
@@ -199,7 +203,7 @@ uint64_t PacketEngine::running_time_ms() const
 
 size_t PacketEngine::pending_packets() const
 {
-	size_t pending = 0;
+	size_t						pending = 0;
 	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
 	for (const auto& session : state_->active_sessions)
 		if (session)
@@ -212,9 +216,9 @@ size_t PacketEngine::pending_packets() const
 
 uint64_t PacketEngine::next_batch_in_ms() const
 {
-	uint64_t next_release = (std::numeric_limits<uint64_t>::max)();
-	bool has_queued_packets = false;
-	const uint64_t now = GetTickCount64();
+	uint64_t					next_release	   = (std::numeric_limits<uint64_t>::max)();
+	bool						has_queued_packets = false;
+	const uint64_t				now				   = GetTickCount64();
 	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
 	for (const auto& session : state_->active_sessions)
 		if (session)
@@ -223,7 +227,7 @@ uint64_t PacketEngine::next_batch_in_ms() const
 			if (!session->delayed_packets.empty())
 			{
 				has_queued_packets = true;
-				next_release = (std::min)(next_release, session->delayed_packets.top()->release_at);
+				next_release	   = (std::min)(next_release, session->delayed_packets.top()->release_at);
 			}
 		}
 	if (!has_queued_packets)
@@ -235,8 +239,8 @@ uint64_t PacketEngine::next_batch_in_ms() const
 
 std::string PacketEngine::server_filter(const ProfileOptions& profile) const
 {
-	const std::string& filter = profile.filter.value_or(options_.global_filter);
-	const size_t server_index = server_index_.load();
+	const std::string& filter		= profile.filter.value_or(options_.global_filter);
+	const size_t	   server_index = server_index_.load();
 	if (server_index == 0 || !profile.windivert_options.server_direction)
 		return filter;
 
@@ -266,7 +270,7 @@ void PacketEngine::cycle_server(int direction)
 	if (options_.servers.empty() || direction == 0)
 		return;
 	const size_t option_count = options_.servers.size() + 1;
-	size_t current = server_index_.load();
+	size_t		 current	  = server_index_.load();
 	if (direction > 0)
 		current = (current + 1) % option_count;
 	else
@@ -295,7 +299,7 @@ void PacketEngine::print_state() const
 		active_profiles = state_->active_profiles;
 	}
 
-	const size_t queued_packets = pending_packets();
+	const size_t   queued_packets  = pending_packets();
 	const uint64_t next_release_in = next_batch_in_ms();
 
 	size_t state_width = 53;
@@ -390,18 +394,29 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 			if (session->stopping)
 				break;
 			session->mode->capture(packet_data,
-				received_length,
-				address,
-				session->profile,
-				GetTickCount64(),
-				session->next_receive_order++,
-				session->delayed_packets);
+								   received_length,
+								   address,
+								   session->profile,
+								   GetTickCount64(),
+								   session->next_receive_order++,
+								   session->delayed_packets);
 			session->packet_changed.notify_one();
 		}
 		PWINDIVERT_TCPHDR tcp_header = nullptr;
-		if (WinDivertHelperParsePacket(packet_data, received_length, nullptr, nullptr, nullptr, nullptr, nullptr, &tcp_header, nullptr,
-										 nullptr, nullptr, nullptr, nullptr) &&
-			 tcp_header != nullptr)
+		if (WinDivertHelperParsePacket(packet_data,
+									   received_length,
+									   nullptr,
+									   nullptr,
+									   nullptr,
+									   nullptr,
+									   nullptr,
+									   &tcp_header,
+									   nullptr,
+									   nullptr,
+									   nullptr,
+									   nullptr,
+									   nullptr) &&
+			tcp_header != nullptr)
 		{
 			LOG_DEBUG("%s recv: TCP packet: Length = %u, Sequence = %u, Ack = %u, Timestamp = %lld, IsOutbound = %d, IsLoopback = %d",
 					  profile_label.c_str(),
@@ -427,7 +442,7 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 {
 	const ProfileOptions& profile_options = options_.profiles[session->profile - 1];
-	const std::string	   profile_label	 = "profile #" + std::to_string(session->profile) + " - " + profile_options.name;
+	const std::string	  profile_label	  = "profile #" + std::to_string(session->profile) + " - " + profile_options.name;
 	while (!session->stopping)
 	{
 		while (!session->stopping)
@@ -522,7 +537,7 @@ void PacketEngine::setup(int profile)
 	const bool			  sniff			  = profile_options.windivert_options.sniff.value_or(false);
 	const bool			  outbound		  = profile_options.windivert_options.outbound.value_or(false);
 	const bool			  forward		  = profile_options.windivert_options.forward.value_or(false);
-	const std::string		  filter		  = server_filter(profile_options);
+	const std::string	  filter		  = server_filter(profile_options);
 	UINT				  flags			  = sniff ? WINDIVERT_FLAG_SNIFF : 0;
 	const std::string	  capture_filter  = outbound ? "outbound and (" + filter + ")" : filter;
 	const WINDIVERT_LAYER layer			  = forward ? WINDIVERT_LAYER_NETWORK_FORWARD : WINDIVERT_LAYER_NETWORK;
@@ -544,9 +559,9 @@ void PacketEngine::setup(int profile)
 	WinDivertSetParam(handle, WINDIVERT_PARAM_QUEUE_TIME, 1024);
 	state_->active_sessions[profile - 1] = session;
 	state_->active_profiles[profile - 1] = true;
-	running_ = true;
-	session->receive_thread = std::thread(&PacketEngine::read_packets, this, session);
-	session->send_thread	= std::thread(&PacketEngine::write_packets, this, session);
+	running_							 = true;
+	session->receive_thread				 = std::thread(&PacketEngine::read_packets, this, session);
+	session->send_thread				 = std::thread(&PacketEngine::write_packets, this, session);
 	LOG_DEBUG("profile #%d - %s setup: opening handle", profile, profile_options.name.c_str());
 	LOG_DEBUG("profile #%d - %s setup: WinDivert layer = %s, filter = %s",
 			  profile,
@@ -584,7 +599,7 @@ void PacketEngine::teardown(int profile)
 		++stats.enabled_count;
 		state_->active_sessions[profile - 1].reset();
 		state_->active_profiles[profile - 1] = false;
-		running_ = std::any_of(state_->active_profiles.begin(), state_->active_profiles.end(), [](bool active) { return active; });
+		running_		  = std::any_of(state_->active_profiles.begin(), state_->active_profiles.end(), [](bool active) { return active; });
 		session->stopping = true;
 		WinDivertShutdown(session->handle, WINDIVERT_SHUTDOWN_RECV);
 		session->packet_changed.notify_all();

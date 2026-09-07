@@ -166,10 +166,10 @@ bool add_server(const std::string& value, PacketEngineOptions& options, const ch
 		LOG_ERROR("Invalid empty server in %s at line %d", path, line_number);
 		return false;
 	}
-	const size_t separator = item.find(':');
+	const size_t  separator = item.find(':');
 	ServerOptions server;
 	server.address = trim(item.substr(0, separator));
-	server.name = separator == std::string::npos ? server.address : trim(item.substr(separator + 1));
+	server.name	   = separator == std::string::npos ? server.address : trim(item.substr(separator + 1));
 	if (server.address.empty() || server.name.empty())
 	{
 		LOG_ERROR("Invalid server '%s' in %s at line %d; expected address or address:name", item.c_str(), path, line_number);
@@ -244,7 +244,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		}
 		if (key == "servers" && value.empty())
 		{
-			subsection = "servers";
+			subsection		  = "servers";
 			subsection_indent = indent;
 			continue;
 		}
@@ -360,9 +360,10 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			const auto mode = parse_delay_mode(unquote(value));
 			if (!mode)
 			{
-				LOG_ERROR("Invalid delay_mode in %s at line %d: expected from_timestamp, send_all_after_delay, ratio, drop, or drop_and_send",
-						  path,
-						  line_number);
+				LOG_ERROR(
+					"Invalid delay_mode in %s at line %d: expected from_timestamp, send_all_after_delay, ratio, drop, or drop_and_send",
+					path,
+					line_number);
 				return false;
 			}
 			profile->delay_mode = *mode;
@@ -391,7 +392,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				profile->ratio	= static_cast<int32_t>(std::stol(ratio_value, &consumed));
 				if (consumed != ratio_value.size())
 					throw std::invalid_argument("trailing characters");
-				profile->ratio_percent = percent;
+				profile->ratio_percent	  = percent;
 				profile->ratio_configured = true;
 			}
 			catch (...)
@@ -442,13 +443,12 @@ bool validate_filters(const char* path, const PacketEngineOptions& options)
 	{
 		LOG_DEBUG("Validating filter '%s' for profile '%s'", profile.filter.value_or(options.global_filter).c_str(), profile.name.c_str());
 
-		const bool		   outbound		  = profile.windivert_options.outbound.value_or(false);
-		const bool		   forward		  = profile.windivert_options.forward.value_or(false);
-		const std::string& filter		  = profile.filter.value_or(options.global_filter);
+		const bool		   outbound = profile.windivert_options.outbound.value_or(false);
+		const bool		   forward	= profile.windivert_options.forward.value_or(false);
+		const std::string& filter	= profile.filter.value_or(options.global_filter);
 		if (outbound && forward)
 		{
-			LOG_ERROR("Invalid options for profile '%s': outbound requires forward to be false",
-					  profile.name.c_str());
+			LOG_ERROR("Invalid options for profile '%s': outbound requires forward to be false", profile.name.c_str());
 			return false;
 		}
 		for (size_t server_index = 0; server_index <= options.servers.size(); ++server_index)
@@ -471,8 +471,8 @@ bool validate_filters(const char* path, const PacketEngineOptions& options)
 				server_filter = "(" + server_filter + ") and " + address_field + " == " + options.servers[server_index - 1].address;
 			}
 			const std::string capture_filter = outbound ? "outbound and (" + server_filter + ")" : server_filter;
-			const char* error = nullptr;
-			UINT error_position = 0;
+			const char*		  error			 = nullptr;
+			UINT			  error_position = 0;
 			if (!WinDivertHelperCompileFilter(capture_filter.c_str(),
 											  forward ? WINDIVERT_LAYER_NETWORK_FORWARD : WINDIVERT_LAYER_NETWORK,
 											  nullptr,

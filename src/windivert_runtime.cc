@@ -188,19 +188,19 @@ extern "C" BOOL WinDivertHelperCompileFilter(const char*	 filter,
 	return WinDivertHelperCompileFilter_fn(filter, layer, object, object_len, error, error_position);
 }
 
-extern "C" BOOL WinDivertHelperParsePacket(const VOID* packet,
-																 UINT packet_len,
-																 PWINDIVERT_IPHDR* pp_ip_hdr,
-																 PWINDIVERT_IPV6HDR* pp_ipv6_hdr,
-																 UINT8* p_protocol,
-																 PWINDIVERT_ICMPHDR* pp_icmp_hdr,
-																 PWINDIVERT_ICMPV6HDR* pp_icmpv6_hdr,
-																 PWINDIVERT_TCPHDR* pp_tcp_hdr,
-																 PWINDIVERT_UDPHDR* pp_udp_hdr,
-																 PVOID* pp_data,
-																 UINT* p_data_len,
-																 PVOID* pp_next,
-																 UINT* p_next_len)
+extern "C" BOOL WinDivertHelperParsePacket(const VOID*			 packet,
+										   UINT					 packet_len,
+										   PWINDIVERT_IPHDR*	 pp_ip_hdr,
+										   PWINDIVERT_IPV6HDR*	 pp_ipv6_hdr,
+										   UINT8*				 p_protocol,
+										   PWINDIVERT_ICMPHDR*	 pp_icmp_hdr,
+										   PWINDIVERT_ICMPV6HDR* pp_icmpv6_hdr,
+										   PWINDIVERT_TCPHDR*	 pp_tcp_hdr,
+										   PWINDIVERT_UDPHDR*	 pp_udp_hdr,
+										   PVOID*				 pp_data,
+										   UINT*				 p_data_len,
+										   PVOID*				 pp_next,
+										   UINT*				 p_next_len)
 {
 	return WinDivertHelperParsePacket_fn(packet,
 										 packet_len,

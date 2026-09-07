@@ -119,21 +119,23 @@ int main(int argc, char* argv[])
 	LOG_INFO("Loaded profiles (%zu):", options.profiles.size());
 	for (const ProfileOptions& profile : options.profiles)
 	{
-		const bool indefinite_delay = profile.delay_ms <= 0 &&
-			(profile.delay_mode == PacketDelayMode::from_timestamp || profile.delay_mode == PacketDelayMode::send_all_after_delay ||
-			 profile.delay_mode == PacketDelayMode::drop_and_send);
+		const bool		  indefinite_delay = profile.delay_ms <= 0 && (profile.delay_mode == PacketDelayMode::from_timestamp ||
+																	   profile.delay_mode == PacketDelayMode::send_all_after_delay ||
+																	   profile.delay_mode == PacketDelayMode::drop_and_send);
 		const std::string delay_description =
 			indefinite_delay && profile.delay_mode == PacketDelayMode::send_all_after_delay ? "Send all until"
-			: indefinite_delay && profile.delay_mode == PacketDelayMode::drop_and_send ? "Drop, then send until"
-			: indefinite_delay ? "Delay each until"
-			: profile.delay_mode == PacketDelayMode::send_all_after_delay ? "Send all in"
+			: indefinite_delay && profile.delay_mode == PacketDelayMode::drop_and_send		? "Drop, then send until"
+			: indefinite_delay																? "Delay each until"
+			: profile.delay_mode == PacketDelayMode::send_all_after_delay					? "Send all in"
 			: profile.delay_mode == PacketDelayMode::ratio
 				? "Send " + std::to_string(profile.ratio) + (profile.ratio_percent ? "% per" : " packets per")
-				: profile.delay_mode == PacketDelayMode::drop_and_send ? "Drop, then send in"
-				: profile.delay_mode == PacketDelayMode::drop ? "Drop packets"
-				: "Delay each by";
+			: profile.delay_mode == PacketDelayMode::drop_and_send ? "Drop, then send in"
+			: profile.delay_mode == PacketDelayMode::drop		   ? "Drop packets"
+																   : "Delay each by";
 		const std::string delay_value = indefinite_delay ? "profile is deactivated"
-			: profile.delay_mode == PacketDelayMode::drop ? "immediately" : logging::format_duration(static_cast<uint64_t>(profile.delay_ms));
+										: profile.delay_mode == PacketDelayMode::drop
+											? "immediately"
+											: logging::format_duration(static_cast<uint64_t>(profile.delay_ms));
 		LOG_INFO("\"%s\" -> %s %s (press: %s, key_mode: %s, mode: %s) @ \"%s\"",
 				 profile.name.c_str(),
 				 delay_description.c_str(),
@@ -149,7 +151,7 @@ int main(int argc, char* argv[])
 	PacketEngine engine(options);
 	LOG_INFO("Hold a configured profile key to start/stop packet capture, 'q' or backspace to quit.");
 	engine.start_workers();
-	std::atomic<bool> status_shutdown	  = false;
+	std::atomic<bool> status_shutdown = false;
 	std::thread		  status_thread([&] {
 		while (!status_shutdown.load())
 		{
@@ -163,9 +165,9 @@ int main(int argc, char* argv[])
 							 ? "(RUNNING: " + std::to_string(pending_packets) + " packets waiting; waiting for profile deactivation...)"
 							 : "(RUNNING: " + std::to_string(pending_packets) + " packets waiting; " +
 								   logging::format_duration(next_batch) + " left until next batch...)";
-			if (next_batch == (std::numeric_limits<uint64_t>::max)())
-				status = "(RUNNING: " + std::to_string(pending_packets) + " packets waiting; held for " +
-						logging::format_duration(engine.running_time_ms()) + ")";
+				if (next_batch == (std::numeric_limits<uint64_t>::max)())
+					status = "(RUNNING: " + std::to_string(pending_packets) + " packets waiting; held for " +
+							 logging::format_duration(engine.running_time_ms()) + ")";
 			}
 			std::string active_profiles;
 			for (size_t index = 0; index < options.profiles.size(); ++index)

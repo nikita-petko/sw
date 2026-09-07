@@ -9,12 +9,17 @@ class RatioMode final : public PacketMode
 public:
 	explicit RatioMode(ProfileOptions options) : PacketMode(std::move(options), "ratio") {}
 
-	void capture(const BYTE* packet, UINT length, const WINDIVERT_ADDRESS& address, int profile, uint64_t now,
-		uint64_t receive_order, PacketQueue& packets) override
+	void capture(const BYTE*			  packet,
+				 UINT					  length,
+				 const WINDIVERT_ADDRESS& address,
+				 int					  profile,
+				 uint64_t				  now,
+				 uint64_t				  receive_order,
+				 PacketQueue&			  packets) override
 	{
 		if (packets.empty())
 		{
-			ratio_release_at_ = now + static_cast<uint64_t>(options_.delay_ms);
+			ratio_release_at_	 = now + static_cast<uint64_t>(options_.delay_ms);
 			ratio_batch_packets_ = 0;
 		}
 		else if (!options_.ratio_percent && ratio_batch_packets_ >= options_.ratio)
@@ -46,7 +51,7 @@ public:
 				queued_packets.push_back(node);
 		}
 		const size_t send_count = (std::max<size_t>)(1, (queued_packets.size() * static_cast<size_t>(options_.ratio) + 99) / 100);
-		ratio_release_at_ = now + static_cast<uint64_t>(options_.delay_ms);
+		ratio_release_at_		= now + static_cast<uint64_t>(options_.delay_ms);
 		for (size_t index = 0; index < queued_packets.size(); ++index)
 		{
 			PacketNode* node = queued_packets[index];
@@ -70,10 +75,10 @@ public:
 	}
 
 private:
-	uint64_t ratio_release_at_ = 0;
-	int32_t ratio_batch_packets_ = 0;
+	uint64_t ratio_release_at_	  = 0;
+	int32_t	 ratio_batch_packets_ = 0;
 };
-}
+}  // namespace
 
 std::unique_ptr<PacketMode> create_ratio_mode(const ProfileOptions& options)
 {

@@ -7,8 +7,7 @@
 
 #include "log.h"
 
-PacketMode::PacketMode(ProfileOptions options, const char* mode_name)
-	: options_(std::move(options)), mode_name_(mode_name)
+PacketMode::PacketMode(ProfileOptions options, const char* mode_name) : options_(std::move(options)), mode_name_(mode_name)
 {
 	LOG_DEBUG("packet mode init: %s (%s)", mode_name_, options_.name.c_str());
 }
@@ -18,19 +17,19 @@ PacketMode::~PacketMode()
 	LOG_DEBUG("packet mode deinit: %s (%s)", mode_name_, options_.name.c_str());
 }
 
-PacketNode* make_packet_node(const BYTE* packet,
-	UINT length,
-	const WINDIVERT_ADDRESS& address,
-	int profile,
-	uint64_t release_at,
-	uint64_t receive_order)
+PacketNode* make_packet_node(const BYTE*			  packet,
+							 UINT					  length,
+							 const WINDIVERT_ADDRESS& address,
+							 int					  profile,
+							 uint64_t				  release_at,
+							 uint64_t				  receive_order)
 {
-	PacketNode* node = new PacketNode;
-	node->packet = new BYTE[length];
-	node->length = length;
-	node->address = new WINDIVERT_ADDRESS(address);
-	node->profile = profile;
-	node->release_at = release_at;
+	PacketNode* node	= new PacketNode;
+	node->packet		= new BYTE[length];
+	node->length		= length;
+	node->address		= new WINDIVERT_ADDRESS(address);
+	node->profile		= profile;
+	node->release_at	= release_at;
 	node->receive_order = receive_order;
 	std::memcpy(node->packet, packet, length);
 	return node;

@@ -10,7 +10,7 @@ public:
 	void release(PacketQueue&, uint64_t, std::vector<PacketNode*>&) override {}
 	void flush(PacketQueue&, std::vector<PacketNode*>&) override {}
 };
-}
+}  // namespace
 
 std::unique_ptr<PacketMode> create_drop_mode(const ProfileOptions& options)
 {
