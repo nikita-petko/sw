@@ -17,7 +17,17 @@
 namespace {
 int get_key_without_waiting()
 {
-	return _kbhit() ? _getch() : -1;
+	if (!_kbhit())
+		return -1;
+	const int key = _getch();
+	if (key != 0 && key != 0xE0)
+		return key;
+	const int extended_key = _getch();
+	if (extended_key == 0x49)
+		return VK_PRIOR;
+	if (extended_key == 0x51)
+		return VK_NEXT;
+	return -1;
 }
 
 bool is_key_held(int key)
@@ -122,7 +132,7 @@ int main(int argc, char* argv[])
 				: profile.delay_mode == PacketDelayMode::drop_and_send ? "Drop, then send in"
 				: profile.delay_mode == PacketDelayMode::drop ? "Drop packets"
 				: "Delay each by";
-		const std::string delay_value = indefinite_delay ? "profile deactivation"
+		const std::string delay_value = indefinite_delay ? "profile  "
 			: profile.delay_mode == PacketDelayMode::drop ? "immediately" : logging::format_duration(static_cast<uint64_t>(profile.delay_ms));
 		LOG_INFO("\"%s\" -> %s %s (press: %s, key_mode: %s, mode: %s) @ \"%s\"",
 				 profile.name.c_str(),
@@ -166,7 +176,8 @@ int main(int argc, char* argv[])
 					active_profiles += ", ";
 				active_profiles += options.profiles[index].name;
 			}
-			logging::set_status(status, active_profiles);
+			const std::string server_status = "server: " + engine.current_server();
+			logging::set_status(status, server_status + (active_profiles.empty() ? "" : " | " + active_profiles));
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		}
 	});
@@ -180,6 +191,16 @@ int main(int argc, char* argv[])
 
 		if (key == 'q' || key == 'Q' || key == VK_BACK)
 			break;
+		if (key == VK_PRIOR)
+		{
+			engine.cycle_server(-1);
+			continue;
+		}
+		if (key == VK_NEXT)
+		{
+			engine.cycle_server(1);
+			continue;
+		}
 		if (key == VK_TAB)
 		{
 			engine.print_state();

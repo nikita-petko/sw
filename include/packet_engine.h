@@ -16,6 +16,19 @@ struct WinDivertOptions
 	std::optional<bool> sniff;
 	std::optional<bool> forward;
 	std::optional<bool> outbound;
+	enum class ServerDirection
+	{
+		source,
+		destination,
+		both,
+	};
+	std::optional<ServerDirection> server_direction;
+};
+
+struct ServerOptions
+{
+	std::string address;
+	std::string name;
 };
 
 enum class ProfileActivationMode
@@ -55,7 +68,9 @@ struct ProfileOptions
 struct PacketEngineOptions
 {
 	std::string global_filter;
+	std::vector<ServerOptions> servers;
 	std::vector<ProfileOptions> profiles;
+	std::optional<std::string> initial_server;
 };
 
 class PacketEngine
@@ -77,16 +92,20 @@ public:
 	uint64_t running_time_ms() const;
 	size_t pending_packets() const;
 	uint64_t next_batch_in_ms() const;
+	void cycle_server(int direction);
+	std::string current_server() const;
 	void print_state() const;
 
 private:
 	struct Session;
 	void read_packets(const std::shared_ptr<Session>& session);
 	void write_packets(const std::shared_ptr<Session>& session);
+	std::string server_filter(const ProfileOptions& profile) const;
 
 	PacketEngineOptions options_;
 	std::atomic<bool> running_ = false;
 	std::atomic<bool> shutdown_ = false;
+	std::atomic<size_t> server_index_ = 0;
 
 	struct State;
 	std::unique_ptr<State> state_;

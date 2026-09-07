@@ -1,5 +1,9 @@
 global_filter: "tcp.PayloadLength > 0 and tcp.DstPort == 55000 and ip.DstAddr == 34.90.202.108"
 
+servers:
+  - "34.90.202.108:EU"
+  - "136.112.189.19:US"
+
 profiles:
   - name: "RPM"
     key: x
@@ -16,11 +20,12 @@ profiles:
       - space
     key_mode: oneof
     mode: toggle
-    filter: "tcp.PayloadLength > 0 and tcp.SrcPort == 55000 and ip.SrcAddr == 34.90.202.108"
+    filter: "tcp.PayloadLength > 0 and tcp.SrcPort == 55000"
     delay_mode: send_all_after_delay
     delay_ms: 0
     windivert_options:
       forward: true
+      server_direction: source
       
   - name: "Long (Send)"
     keys:
@@ -28,8 +33,9 @@ profiles:
       - space
     key_mode: oneof
     mode: toggle
-    filter: "tcp.PayloadLength > 0 and tcp.DstPort == 55000 and ip.DstAddr == 34.90.202.108"
+    filter: "tcp.PayloadLength > 0 and tcp.DstPort == 55000"
     delay_mode: send_all_after_delay
     delay_ms: 0
     windivert_options:
       forward: true
+      server_direction: destination

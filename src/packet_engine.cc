@@ -84,10 +84,11 @@ const char* key_name(int key)
 std::string format_keys(const ProfileOptions& profile)
 {
 	std::string result;
+	const char* separator = profile.key_mode == ProfileKeyMode::oneof ? " or " : "+";
 	for (const int key : profile.keys)
 	{
 		if (!result.empty())
-			result += "+";
+			result += separator;
 		if (const char* name = key_name(key))
 			result += name;
 		else if (key >= 0x20 && key <= 0x7E)
@@ -161,6 +162,21 @@ PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(opt
 {
 	state_->active_profiles.resize(options_.profiles.size());
 	state_->active_sessions.resize(options_.profiles.size());
+	if (options_.initial_server)
+	{
+		for (size_t index = 0; index < options_.servers.size(); ++index)
+		{
+			const ServerOptions& server = options_.servers[index];
+			if (*options_.initial_server == server.address || *options_.initial_server == server.name)
+			{
+				server_index_ = index + 1;
+				break;
+			}
+		}
+		if (server_index_ == 0)
+			LOG_WARN("Server '%s' does not exist; using none", options_.initial_server->c_str());
+	}
+	LOG_INFO("Initial server: %s", current_server().c_str());
 }
 
 PacketEngine::~PacketEngine()
@@ -233,6 +249,60 @@ uint64_t PacketEngine::next_batch_in_ms() const
 	if (next_release == (std::numeric_limits<uint64_t>::max)())
 		return (std::numeric_limits<uint64_t>::max)();
 	return next_release > now ? next_release - now : 0;
+}
+
+std::string PacketEngine::server_filter(const ProfileOptions& profile) const
+{
+	const std::string& filter = profile.filter.value_or(options_.global_filter);
+	const size_t server_index = server_index_.load();
+	if (server_index == 0 || !profile.windivert_options.server_direction)
+		return filter;
+
+	const char* address_field = "ip.Addr";
+	switch (*profile.windivert_options.server_direction)
+	{
+		case WinDivertOptions::ServerDirection::source:
+			address_field = "ip.SrcAddr";
+			break;
+		case WinDivertOptions::ServerDirection::destination:
+			address_field = "ip.DstAddr";
+			break;
+		case WinDivertOptions::ServerDirection::both:
+			break;
+	}
+	return "(" + filter + ") and " + address_field + " == " + options_.servers[server_index - 1].address;
+}
+
+std::string PacketEngine::current_server() const
+{
+	const size_t server_index = server_index_.load();
+	return server_index == 0 ? "none" : options_.servers[server_index - 1].name;
+}
+
+void PacketEngine::cycle_server(int direction)
+{
+	if (options_.servers.empty() || direction == 0)
+		return;
+	const size_t option_count = options_.servers.size() + 1;
+	size_t current = server_index_.load();
+	if (direction > 0)
+		current = (current + 1) % option_count;
+	else
+		current = current == 0 ? option_count - 1 : current - 1;
+	server_index_ = current;
+	LOG_INFO("Server changed to: %s", current_server().c_str());
+
+	std::vector<int> active_profiles;
+	{
+		std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
+		for (size_t index = 0; index < state_->active_profiles.size(); ++index)
+			if (state_->active_profiles[index])
+				active_profiles.push_back(static_cast<int>(index + 1));
+	}
+	for (const int profile : active_profiles)
+		teardown(profile);
+	for (const int profile : active_profiles)
+		setup(profile);
 }
 
 void PacketEngine::print_state() const
@@ -583,7 +653,7 @@ void PacketEngine::setup(int profile)
 	const bool			  sniff			  = profile_options.windivert_options.sniff.value_or(false);
 	const bool			  outbound		  = profile_options.windivert_options.outbound.value_or(false);
 	const bool			  forward		  = profile_options.windivert_options.forward.value_or(false);
-	const std::string&	  filter		  = profile_options.filter.value_or(options_.global_filter);
+	const std::string		  filter		  = server_filter(profile_options);
 	UINT				  flags			  = sniff ? WINDIVERT_FLAG_SNIFF : 0;
 	const std::string	  capture_filter  = outbound ? "outbound and (" + filter + ")" : filter;
 	const WINDIVERT_LAYER layer			  = forward ? WINDIVERT_LAYER_NETWORK_FORWARD : WINDIVERT_LAYER_NETWORK;

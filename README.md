@@ -64,6 +64,7 @@ Options:
 | --- | --- |
 | `--config <file>` | Load profiles from a YAML file. Required. |
 | `--log-level <level>`, `-l <level>` | Set the minimum log level: `error`, `warn`, `info`, or `debug`. |
+| `--server <server>`, `-s <server>` | Select the initial configured server by name or address. Unknown values warn and use `none`. |
 | `--help`, `-h` | Print command help and exit. |
 
 While the program is running:
@@ -73,6 +74,8 @@ While the program is running:
 - Activate a `hold` profile by holding its configured key or combination.
   Releasing the key deactivates it.
 - Press `Tab` to print packet and activation statistics.
+- Press Page Up or Page Down to cycle the configured server filter, including
+  `none` (which applies no server filter).
 - Press `q`, `Q`, or Backspace to quit.
 
 Multiple profiles can be active at the same time. Profiles may share keys; a
@@ -90,6 +93,10 @@ more profiles:
 ```yaml
 global_filter: "tcp.DstPort == 55000 or tcp.SrcPort == 55000"
 
+servers:
+  - "34.90.202.108:game server"
+  - "203.0.113.10:backup server"
+
 profiles:
   - name: "Example"
     key: space
@@ -98,6 +105,7 @@ profiles:
     delay_ms: 500
     windivert_options:
       forward: false
+      server_direction: destination
 ```
 
 ### Top-level fields
@@ -105,6 +113,7 @@ profiles:
 | Field | Required | Description |
 | --- | --- | --- |
 | `global_filter` | No | WinDivert filter used by profiles that do not define `filter`. Defaults to `tcp.DstPort == 55000 or tcp.SrcPort == 55000`. |
+| `servers` | No | String array of server addresses. An entry may use `address:name` to provide the status-bar name. |
 | `profiles` | Yes | A non-empty list of profile definitions. |
 
 ### Profile fields
@@ -152,6 +161,7 @@ windivert_options:
   sniff: false
   forward: false
   outbound: false
+  server_direction: destination
 ```
 
 Each option is a boolean:
@@ -163,6 +173,9 @@ Each option is a boolean:
 - `outbound`: Restrict the filter to outbound packets. Internally, the capture
   filter becomes `outbound and (<filter>)`. This applies only to the normal
   `NETWORK` layer; do not combine it with `forward: true`.
+- `server_direction`: When a server is selected, add an `ip.SrcAddr`,
+  `ip.DstAddr`, or `ip.Addr` filter for `source`, `destination`, or `both`.
+  If no server is selected, no IP server filter is added.
 
 Filters are compiled with WinDivert before the program starts. Invalid filters,
 missing profile names or keys, invalid booleans, and invalid delay modes cause

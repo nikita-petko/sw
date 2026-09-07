@@ -52,6 +52,17 @@ std::optional<ProfileKeyMode> parse_key_mode(const std::string& value)
 	return std::nullopt;
 }
 
+std::optional<WinDivertOptions::ServerDirection> parse_server_direction(const std::string& value)
+{
+	if (value == "source")
+		return WinDivertOptions::ServerDirection::source;
+	if (value == "destination")
+		return WinDivertOptions::ServerDirection::destination;
+	if (value == "both")
+		return WinDivertOptions::ServerDirection::both;
+	return std::nullopt;
+}
+
 logging::level parse_log_level(const std::string& value)
 {
 	if (value == "error")
@@ -147,6 +158,27 @@ bool add_keys(const std::string& value, ProfileOptions& profile, const char* pat
 	return true;
 }
 
+bool add_server(const std::string& value, PacketEngineOptions& options, const char* path, int line_number)
+{
+	const std::string item = unquote(trim(value));
+	if (item.empty())
+	{
+		LOG_ERROR("Invalid empty server in %s at line %d", path, line_number);
+		return false;
+	}
+	const size_t separator = item.find(':');
+	ServerOptions server;
+	server.address = trim(item.substr(0, separator));
+	server.name = separator == std::string::npos ? server.address : trim(item.substr(separator + 1));
+	if (server.address.empty() || server.name.empty())
+	{
+		LOG_ERROR("Invalid server '%s' in %s at line %d; expected address or address:name", item.c_str(), path, line_number);
+		return false;
+	}
+	options.servers.push_back(server);
+	return true;
+}
+
 bool load_profiles(const char* path, PacketEngineOptions& options)
 {
 	std::ifstream file(path);
@@ -157,6 +189,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 	}
 
 	options.profiles.clear();
+	options.servers.clear();
 	std::string		line;
 	ProfileOptions* profile = nullptr;
 	std::string		section;
@@ -176,6 +209,12 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		if (subsection == "keys" && content.front() == '-' && content.find(':') == std::string::npos)
 		{
 			if (!profile || indent <= subsection_indent || !add_keys(content.substr(1), *profile, path, line_number))
+				return false;
+			continue;
+		}
+		if (subsection == "servers" && content.front() == '-')
+		{
+			if (indent <= subsection_indent || !add_server(content.substr(1), options, path, line_number))
 				return false;
 			continue;
 		}
@@ -199,6 +238,36 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		if (key == "profiles" && value.empty())
 		{
 			section = "profiles";
+			subsection.clear();
+			subsection_indent = -1;
+			continue;
+		}
+		if (key == "servers" && value.empty())
+		{
+			subsection = "servers";
+			subsection_indent = indent;
+			continue;
+		}
+		if (indent == 0 && key == "servers")
+		{
+			std::string list = trim(value);
+			if (list.size() < 2 || list.front() != '[' || list.back() != ']')
+			{
+				LOG_ERROR("Invalid servers list in %s at line %d", path, line_number);
+				return false;
+			}
+			list = list.substr(1, list.size() - 2);
+			for (size_t start = 0; start < list.size();)
+			{
+				const size_t end = list.find(',', start);
+				if (!add_server(list.substr(start, end == std::string::npos ? std::string::npos : end - start), options, path, line_number))
+					return false;
+				if (end == std::string::npos)
+					break;
+				start = end + 1;
+			}
+			subsection.clear();
+			subsection_indent = -1;
 			continue;
 		}
 		if (key == "windivert_options" && value.empty() && profile)
@@ -232,6 +301,17 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			continue;
 		if (subsection == "windivert_options" && indent > subsection_indent)
 		{
+			if (key == "server_direction")
+			{
+				const auto direction = parse_server_direction(unquote(value));
+				if (!direction)
+				{
+					LOG_ERROR("Invalid server_direction in %s at line %d: expected source, destination, or both", path, line_number);
+					return false;
+				}
+				profile->windivert_options.server_direction = *direction;
+				continue;
+			}
 			const auto parsed = parse_bool(value);
 			if (!parsed)
 			{
@@ -371,22 +451,42 @@ bool validate_filters(const char* path, const PacketEngineOptions& options)
 					  profile.name.c_str());
 			return false;
 		}
-		const std::string  capture_filter = outbound ? "outbound and (" + filter + ")" : filter;
-		const char*		   error		  = nullptr;
-		UINT			   error_position = 0;
-		if (!WinDivertHelperCompileFilter(capture_filter.c_str(),
-										  forward ? WINDIVERT_LAYER_NETWORK_FORWARD : WINDIVERT_LAYER_NETWORK,
-										  nullptr,
-										  0,
-										  &error,
-										  &error_position))
+		for (size_t server_index = 0; server_index <= options.servers.size(); ++server_index)
 		{
-			LOG_ERROR("Invalid filter for profile '%s' in %s at position %u: %s",
-					  profile.name.c_str(),
-					  path,
-					  error_position,
-					  error ? error : "unknown error");
-			return false;
+			std::string server_filter = filter;
+			if (server_index != 0 && profile.windivert_options.server_direction)
+			{
+				const char* address_field = "ip.Addr";
+				switch (*profile.windivert_options.server_direction)
+				{
+					case WinDivertOptions::ServerDirection::source:
+						address_field = "ip.SrcAddr";
+						break;
+					case WinDivertOptions::ServerDirection::destination:
+						address_field = "ip.DstAddr";
+						break;
+					case WinDivertOptions::ServerDirection::both:
+						break;
+				}
+				server_filter = "(" + server_filter + ") and " + address_field + " == " + options.servers[server_index - 1].address;
+			}
+			const std::string capture_filter = outbound ? "outbound and (" + server_filter + ")" : server_filter;
+			const char* error = nullptr;
+			UINT error_position = 0;
+			if (!WinDivertHelperCompileFilter(capture_filter.c_str(),
+											  forward ? WINDIVERT_LAYER_NETWORK_FORWARD : WINDIVERT_LAYER_NETWORK,
+											  nullptr,
+											  0,
+											  &error,
+											  &error_position))
+			{
+				LOG_ERROR("Invalid filter for profile '%s' in %s at position %u: %s",
+						  profile.name.c_str(),
+						  path,
+						  error_position,
+						  error ? error : "unknown error");
+				return false;
+			}
 		}
 	}
 	return true;
@@ -397,6 +497,7 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 {
 	options.global_filter = kDefaultFilter;
 	options.profiles.clear();
+	options.initial_server.reset();
 	bool config_loaded = false;
 	for (int index = 1; index < argc; ++index)
 	{
@@ -430,11 +531,21 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 #endif
 				logging::set_level(requested_level);
 		}
+		else if (std::strcmp(argv[index], "--server") == 0 || std::strcmp(argv[index], "-s") == 0)
+		{
+			if (index + 1 >= argc)
+			{
+				LOG_ERROR("--server requires a configured server name or address");
+				return false;
+			}
+			options.initial_server = argv[++index];
+		}
 		else if (std::strcmp(argv[index], "--help") == 0 || std::strcmp(argv[index], "-h") == 0 || argc == 1)
 		{
 			std::printf("Usage: %s [options]\nOptions:\n", argv[0]);
 			std::printf("  --config <file> Load profiles from YAML\n");
 			std::printf("  --log-level, -l <level> Set log level: error, warn, info, or debug\n");
+			std::printf("  --server, -s <server> Select the initial configured server\n");
 			std::printf("  --help, -h              Show this help message\n");
 			return false;
 		}
