@@ -12,6 +12,7 @@ constexpr size_t max_log_message = 1024;
 logging::level	 minimum_level	 = logging::level::info;
 std::mutex		 log_mutex;
 std::string		 status_line;
+std::string		 status_right_line;
 
 void clear_status_line()
 {
@@ -28,9 +29,15 @@ int console_width()
 	return console_info.srWindow.Right - console_info.srWindow.Left + 1;
 }
 
-void print_status_line(const std::string& status)
+void print_status_line(const std::string& status, const std::string& right_status = {})
 {
-	const int	 width	 = console_width();
+	const int width = console_width();
+	if (width > 0 && !right_status.empty() && status.size() + right_status.size() <= static_cast<size_t>(width))
+	{
+		const size_t padding = static_cast<size_t>(width) - status.size() - right_status.size();
+		std::printf("\r\033[30;47m%s%*s%s\033[0m", status.c_str(), static_cast<int>(padding), "", right_status.c_str());
+		return;
+	}
 	const size_t padding = width > 0 && status.size() < static_cast<size_t>(width) ? static_cast<size_t>(width) - status.size() : 0;
 	std::printf("\r\033[30;47m%s%*s\033[0m", status.c_str(), static_cast<int>(padding), "");
 }
@@ -117,15 +124,21 @@ void write(level message_level, const char* format, ...)
 	clear_status_line();
 	std::printf("%s[%s] %s\033[0m\n", level_color(message_level), level_name(message_level), message);
 	if (!status_line.empty())
-		print_status_line(status_line);
+		print_status_line(status_line, status_right_line);
 	std::fflush(stdout);
 }
 
 void set_status(const std::string& status)
 {
+	set_status(status, {});
+}
+
+void set_status(const std::string& status, const std::string& right_status)
+{
 	std::lock_guard lock(log_mutex);
-	print_status_line(status);
-	status_line = status;
+	print_status_line(status, right_status);
+	status_line		= status;
+	status_right_line = right_status;
 	std::fflush(stdout);
 }
 
@@ -134,6 +147,7 @@ void clear_status()
 	std::lock_guard lock(log_mutex);
 	clear_status_line();
 	status_line.clear();
+	status_right_line.clear();
 	std::printf("\r\033[2K");
 	std::fflush(stdout);
 }

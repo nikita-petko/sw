@@ -157,7 +157,16 @@ int main(int argc, char* argv[])
 				status = "(RUNNING: " + std::to_string(pending_packets) + " packets waiting; held for " +
 						logging::format_duration(engine.running_time_ms()) + ")";
 			}
-			logging::set_status(status);
+			std::string active_profiles;
+			for (size_t index = 0; index < options.profiles.size(); ++index)
+			{
+				if (!engine.is_running(static_cast<int>(index + 1)))
+					continue;
+				if (!active_profiles.empty())
+					active_profiles += ", ";
+				active_profiles += options.profiles[index].name;
+			}
+			logging::set_status(status, active_profiles);
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		}
 	});

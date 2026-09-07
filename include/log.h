@@ -17,6 +17,7 @@ std::string format_duration(uint64_t duration_ms);
 void set_level(level minimum_level);
 void write(level message_level, const char* format, ...);
 void set_status(const std::string& status);
+void set_status(const std::string& status, const std::string& right_status);
 void clear_status();
 
 } // namespace logging
