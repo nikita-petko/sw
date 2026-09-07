@@ -73,6 +73,8 @@ struct PacketEngineOptions
 	std::optional<std::string> initial_server;
 };
 
+class PacketMode;
+
 class PacketEngine
 {
 public:
@@ -106,6 +108,7 @@ private:
 	std::atomic<bool> running_ = false;
 	std::atomic<bool> shutdown_ = false;
 	std::atomic<size_t> server_index_ = 0;
+	std::vector<std::unique_ptr<PacketMode>> packet_modes_;
 
 	struct State;
 	std::unique_ptr<State> state_;

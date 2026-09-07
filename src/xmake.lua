@@ -1,6 +1,6 @@
 target("lagsw")
     set_kind("binary")
-    add_files("*.cc", "*.rc")
+    add_files("*.cc", "modules/*.cc", "*.rc")
 
     add_includedirs("../include", "../win_divert/include")
 

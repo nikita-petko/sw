@@ -14,12 +14,11 @@
 
 #include <mmsystem.h>
 #include <algorithm>
+#include "modules/packet_mode.h"
 #include <chrono>
 #include <condition_variable>
-#include <cstring>
 #include <limits>
 #include <mutex>
-#include <queue>
 #include <string>
 #include <utility>
 #include <vector>
@@ -47,26 +46,6 @@ std::string format_win32_error(DWORD error)
 		result.pop_back();
 	return result;
 }
-
-struct PacketNode
-{
-	BYTE*			   packet;
-	UINT			   length;
-	WINDIVERT_ADDRESS* address;
-	int				   profile;
-	uint64_t		   release_at;
-	uint64_t		   receive_order;
-};
-
-struct PacketReleaseEarlier
-{
-	bool operator()(const PacketNode* left, const PacketNode* right) const
-	{
-		if (left->release_at != right->release_at)
-			return left->release_at > right->release_at;
-		return left->receive_order > right->receive_order;
-	}
-};
 
 const char* key_name(int key)
 {
@@ -118,17 +97,17 @@ void log_state_line(size_t width, const std::string& text)
 
 struct PacketEngine::Session
 {
-	explicit Session(int profile_number, HANDLE divert_handle) : profile(profile_number), handle(divert_handle) {}
+	explicit Session(int profile_number, HANDLE divert_handle, PacketMode* packet_mode)
+		: profile(profile_number), handle(divert_handle), mode(packet_mode) {}
 
 	int																				 profile;
 	HANDLE																			 handle;
 	std::atomic<bool>																 stopping = false;
 	std::mutex																		 packet_mutex;
 	std::condition_variable															 packet_changed;
-	uint64_t																		 next_receive_order	 = 0;
-	uint64_t																		 ratio_release_at	 = 0;
-	int32_t																			 ratio_batch_packets = 0;
-	std::priority_queue<PacketNode*, std::vector<PacketNode*>, PacketReleaseEarlier> delayed_packets;
+	uint64_t																		 next_receive_order = 0;
+	PacketQueue																	 delayed_packets;
+	PacketMode*												 mode;
 	std::thread																		 receive_thread;
 	std::thread																		 send_thread;
 };
@@ -160,6 +139,9 @@ struct PacketEngine::State
 
 PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(options)), state_(new State(options_.profiles.size()))
 {
+	packet_modes_.reserve(options_.profiles.size());
+	for (const ProfileOptions& profile : options_.profiles)
+		packet_modes_.push_back(create_packet_mode(profile));
 	state_->active_profiles.resize(options_.profiles.size());
 	state_->active_sessions.resize(options_.profiles.size());
 	if (options_.initial_server)
@@ -402,43 +384,18 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 		}
 		state_->profile_stats[profile - 1].packets_caught.fetch_add(1);
 		const bool sniff = profile_options.windivert_options.sniff.value_or(false);
-		if (!sniff && profile_options.delay_mode != PacketDelayMode::drop)
+		if (!sniff)
 		{
 			std::lock_guard<std::mutex> lock(session->packet_mutex);
 			if (session->stopping)
 				break;
-			const int32_t  configured_delay = profile_options.delay_ms;
-			const uint64_t now				= GetTickCount64();
-			PacketNode*	   node				= new PacketNode;
-			node->packet					= new BYTE[received_length];
-			node->length					= received_length;
-			node->address					= new WINDIVERT_ADDRESS(address);
-			node->profile					= session->profile;
-			node->release_at =
-				configured_delay <= 0 ? (std::numeric_limits<uint64_t>::max)() : now + static_cast<uint64_t>(configured_delay);
-			node->receive_order = session->next_receive_order++;
-			if ((profile_options.delay_mode == PacketDelayMode::send_all_after_delay ||
-				 profile_options.delay_mode == PacketDelayMode::drop_and_send) &&
-				!session->delayed_packets.empty())
-				node->release_at = session->delayed_packets.top()->release_at;
-			else if (profile_options.delay_mode == PacketDelayMode::ratio)
-			{
-				if (session->delayed_packets.empty())
-				{
-					session->ratio_release_at	 = now + static_cast<uint64_t>(configured_delay);
-					session->ratio_batch_packets = 0;
-				}
-				else if (!profile_options.ratio_percent && session->ratio_batch_packets >= profile_options.ratio)
-				{
-					session->ratio_release_at += static_cast<uint64_t>(configured_delay);
-					session->ratio_batch_packets = 0;
-				}
-				node->release_at = session->ratio_release_at;
-				if (!profile_options.ratio_percent)
-					++session->ratio_batch_packets;
-			}
-			std::memcpy(node->packet, packet_data, received_length);
-			session->delayed_packets.push(node);
+			session->mode->capture(packet_data,
+				received_length,
+				address,
+				session->profile,
+				GetTickCount64(),
+				session->next_receive_order++,
+				session->delayed_packets);
 			session->packet_changed.notify_one();
 		}
 		PWINDIVERT_TCPHDR tcp_header = nullptr;
@@ -495,69 +452,7 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 					}
 					continue;
 				}
-				const ProfileOptions& profile = profile_options;
-				if (profile.delay_mode == PacketDelayMode::ratio && profile.ratio_percent)
-				{
-					std::vector<PacketNode*> queued_packets;
-					while (!session->delayed_packets.empty())
-					{
-						PacketNode* node = session->delayed_packets.top();
-						session->delayed_packets.pop();
-						if (node == nullptr || node->address == nullptr)
-						{
-							delete node;
-							continue;
-						}
-						queued_packets.push_back(node);
-					}
-					const size_t send_count =
-						(std::max<size_t>)(1, (queued_packets.size() * static_cast<size_t>(profile.ratio) + 99) / 100);
-					session->ratio_release_at = now + static_cast<uint64_t>(profile.delay_ms);
-					for (size_t index = 0; index < queued_packets.size(); ++index)
-					{
-						PacketNode* node = queued_packets[index];
-						if (index < send_count)
-							ready_packets.push_back(node);
-						else
-						{
-							node->release_at = session->ratio_release_at;
-							session->delayed_packets.push(node);
-						}
-					}
-				}
-				else
-					while (!session->delayed_packets.empty())
-					{
-						PacketNode* node = session->delayed_packets.top();
-						if (node == nullptr || node->address == nullptr)
-						{
-							session->delayed_packets.pop();
-							delete node;
-							continue;
-						}
-						if (node->release_at > now)
-							break;
-						session->delayed_packets.pop();
-						ready_packets.push_back(node);
-					}
-			}
-			if (profile_options.delay_mode == PacketDelayMode::drop_and_send)
-			{
-				const size_t drop_count = profile_options.ratio_percent
-												  ? (ready_packets.size() * static_cast<size_t>(profile_options.ratio) + 99) / 100
-												  : (std::min)(ready_packets.size(), static_cast<size_t>(profile_options.ratio));
-				for (size_t index = 0; index < drop_count; ++index)
-				{
-					PacketNode* node = ready_packets[index];
-					LOG_DEBUG("%s drop: delayed packet: Length = %u, Timestamp = %llu",
-							  profile_label.c_str(),
-							  node->length,
-							  static_cast<unsigned long long>(node->address->Timestamp));
-					delete[] node->packet;
-					delete node->address;
-					delete node;
-				}
-				ready_packets.erase(ready_packets.begin(), ready_packets.begin() + drop_count);
+				session->mode->release(session->delayed_packets, now, ready_packets);
 			}
 			for (PacketNode* node : ready_packets)
 			{
@@ -580,38 +475,14 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 			for (size_t index = 0; index < ready_packets.size(); ++index)
 			{
 				PacketNode* node = ready_packets[index];
-				delete[] node->packet;
-				delete node->address;
-				delete node;
+				destroy_packet_node(node);
 			}
 		}
 
 		std::vector<PacketNode*> pending_packets;
 		{
 			std::lock_guard<std::mutex> lock(session->packet_mutex);
-			while (!session->delayed_packets.empty())
-			{
-				pending_packets.push_back(session->delayed_packets.top());
-				session->delayed_packets.pop();
-			}
-		}
-		if (profile_options.delay_mode == PacketDelayMode::drop_and_send)
-		{
-			const size_t drop_count = profile_options.ratio_percent
-										  ? (pending_packets.size() * static_cast<size_t>(profile_options.ratio) + 99) / 100
-										  : (std::min)(pending_packets.size(), static_cast<size_t>(profile_options.ratio));
-			for (size_t index = 0; index < drop_count; ++index)
-			{
-				PacketNode* node = pending_packets[index];
-				LOG_DEBUG("%s drop: flushed packet: Length = %u, Timestamp = %llu",
-						  profile_label.c_str(),
-						  node->length,
-						  static_cast<unsigned long long>(node->address->Timestamp));
-				delete[] node->packet;
-				delete node->address;
-				delete node;
-			}
-			pending_packets.erase(pending_packets.begin(), pending_packets.begin() + drop_count);
+			session->mode->flush(session->delayed_packets, pending_packets);
 		}
 		for (PacketNode* node : pending_packets)
 		{
@@ -630,9 +501,7 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 						  static_cast<unsigned long long>(node->address->Timestamp),
 						  sent);
 			}
-			delete[] node->packet;
-			delete node->address;
-			delete node;
+			destroy_packet_node(node);
 		}
 	}
 	LOG_DEBUG("%s flush: stopped", profile_label.c_str());
@@ -669,7 +538,7 @@ void PacketEngine::setup(int profile)
 		timeEndPeriod(1);
 		return;
 	}
-	std::shared_ptr<Session> session(new Session(profile, handle));
+	std::shared_ptr<Session> session(new Session(profile, handle, packet_modes_[profile - 1].get()));
 	state_->profile_stats[profile - 1].enabled_since = GetTickCount64();
 	WinDivertSetParam(handle, WINDIVERT_PARAM_QUEUE_LENGTH, 4096);
 	WinDivertSetParam(handle, WINDIVERT_PARAM_QUEUE_TIME, 1024);
