@@ -63,6 +63,7 @@ struct ProfileOptions
 {
 	std::string name;
 	std::vector<int> keys;
+	std::vector<std::string> disables;
 	ProfileKeyMode key_mode = ProfileKeyMode::combination;
 	ProfileActivationMode mode = ProfileActivationMode::toggle;
 	PacketDelayMode delay_mode = PacketDelayMode::from_timestamp;

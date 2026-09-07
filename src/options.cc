@@ -176,6 +176,32 @@ bool add_keys(const std::string& value, ProfileOptions& profile, const char* pat
 	return true;
 }
 
+bool add_disabled_profiles(const std::string& value, ProfileOptions& profile, const char* path, int line_number)
+{
+	std::string list = trim(value);
+	if (list.size() >= 2 && list.front() == '[' && list.back() == ']')
+		list = list.substr(1, list.size() - 2);
+	else if (list.empty())
+		return true;
+	else
+		list += ',';
+	for (size_t start = 0; start < list.size();)
+	{
+		const size_t	  end  = list.find(',', start);
+		const std::string item = unquote(trim(list.substr(start, end == std::string::npos ? std::string::npos : end - start)));
+		if (item.empty())
+		{
+			LOG_ERROR("Invalid disabled profile in %s at line %d", path, line_number);
+			return false;
+		}
+		profile.disables.push_back(item);
+		if (end == std::string::npos)
+			break;
+		start = end + 1;
+	}
+	return true;
+}
+
 bool add_server(const std::string& value, PacketEngineOptions& options, const char* path, int line_number)
 {
 	const std::string item = unquote(trim(value));
@@ -231,6 +257,12 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		if (subsection == "keys" && content.front() == '-' && content.find(':') == std::string::npos)
 		{
 			if (!profile || indent <= subsection_indent || !add_keys(content.substr(1), *profile, path, line_number))
+				return false;
+			continue;
+		}
+		if (subsection == "disables" && content.front() == '-' && content.find(':') == std::string::npos)
+		{
+			if (!profile || indent <= subsection_indent || !add_disabled_profiles(content.substr(1), *profile, path, line_number))
 				return false;
 			continue;
 		}
@@ -303,6 +335,14 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			subsection		  = "keys";
 			subsection_indent = indent;
 			if (!add_keys(value, *profile, path, line_number))
+				return false;
+			continue;
+		}
+		if (key == "disables" && profile)
+		{
+			subsection		  = "disables";
+			subsection_indent = indent;
+			if (!add_disabled_profiles(value, *profile, path, line_number))
 				return false;
 			continue;
 		}
@@ -459,6 +499,24 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		{
 			LOG_ERROR("Profile '%s' requires toggle mode for drop_until_toggle", item.name.c_str());
 			return false;
+		}
+		for (const std::string& disabled_name : item.disables)
+		{
+			if (disabled_name == "*")
+				continue;
+			if (disabled_name == item.name)
+			{
+				LOG_ERROR("Profile '%s' cannot disable itself", item.name.c_str());
+				return false;
+			}
+			const auto target = std::find_if(options.profiles.begin(), options.profiles.end(), [&](const ProfileOptions& candidate) {
+				return candidate.name == disabled_name;
+			});
+			if (target == options.profiles.end())
+			{
+				LOG_ERROR("Profile '%s' disables unknown profile '%s'", item.name.c_str(), disabled_name.c_str());
+				return false;
+			}
 		}
 	}
 	if (options.profiles.empty())

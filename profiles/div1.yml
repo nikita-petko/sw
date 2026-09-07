@@ -10,6 +10,7 @@ profiles:
   - name: "RPM"
     key: x
     mode: toggle
+    disables: "*"
     delay_mode: from_timestamp
     filter: "(tcp.SrcPort == 55000 or tcp.DstPort == 55000)"
     delay_ms: 500
@@ -21,6 +22,7 @@ profiles:
       - z
     key_mode: oneof
     mode: toggle
+    disables: "*"
     filter: "tcp.Psh and tcp.PayloadLength > 0 and tcp.DstPort == 55000"
     retransmission_mode: none
     delay_mode: ratio
@@ -36,6 +38,9 @@ profiles:
       - space
     key_mode: oneof
     mode: toggle
+    disables: 
+      - "RPM"
+      - "Long (Running Ratio)"
     filter: "tcp.Psh and tcp.PayloadLength > 0 and tcp.SrcPort == 55000"
     retransmission_mode: none
     delay_mode: send_all_after_delay
@@ -51,6 +56,9 @@ profiles:
     key_mode: oneof
     mode: toggle
     retransmission_mode: none
+    disables: 
+      - "RPM"
+      - "Long (Running Ratio)"
     filter: "tcp.Psh and tcp.PayloadLength > 0 and tcp.DstPort == 55000"
     delay_mode: send_all_after_delay
     delay_ms: 0

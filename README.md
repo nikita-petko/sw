@@ -121,6 +121,7 @@ profiles:
   - name: "Example"
     key: space
     mode: toggle
+    disables: "Other profile"
     delay_mode: from_timestamp
     retransmission_mode: both
     delay_ms: 500
@@ -146,6 +147,7 @@ profiles:
 | `keys` | One of `key` or `keys` | A list of keys that must all be held, for example `keys: [ctrl, shift]`. A block list is also supported. |
 | `key_mode` | No | `oneof` activates when any configured key is held; `combination` activates when all configured keys are held. Defaults to `combination`. |
 | `mode` | No | `toggle` or `hold`; defaults to `toggle`. |
+| `disables` | No | A profile name, `*`, or a list of either, to keep disabled while this profile is active. `*` disables every other profile. Named targets must be configured profiles and cannot include this profile. |
 | `delay_mode` | No | `from_timestamp`, `send_all_after_delay`, `ratio`, `drop`, `drop_and_send`, or `drop_until_toggle`; defaults to `from_timestamp`. |
 | `retransmission_mode` | No | `none` allows retransmissions; `only_seq` drops duplicate sequence numbers; `only_ack` drops duplicate acknowledgment numbers; `both` requires a unique `(SeqNum, AckNum)` pair. Defaults to `none`. |
 | `delay_ms` | No | Delay in milliseconds. Defaults to `0`. |
@@ -157,6 +159,9 @@ Keys may be a single printable character or one of `tab`, `space`, `alt`,
 `ctrl`, and `shift`. Printable characters are case-insensitive and are stored
 as their uppercase virtual-key value. Numeric virtual-key codes are also
 accepted, including hexadecimal values such as `0x41`.
+
+When two profiles list each other in `disables`, pressing either profile's key
+while the other is active switches directly to the requested profile.
 
 ### Delay modes
 

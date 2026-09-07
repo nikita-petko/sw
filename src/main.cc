@@ -211,9 +211,79 @@ int main(int argc, char* argv[])
 		}
 
 		const std::vector<bool> active_profiles = find_active_profiles(options);
+		std::vector<bool> disabled_profiles(options.profiles.size(), false);
+		auto profile_disables = [&](size_t source, size_t target) {
+			return std::find(options.profiles[source].disables.begin(), options.profiles[source].disables.end(), "*") !=
+					   options.profiles[source].disables.end() ||
+				   std::find(options.profiles[source].disables.begin(),
+							 options.profiles[source].disables.end(),
+							 options.profiles[target].name) != options.profiles[source].disables.end();
+		};
+		auto disable_targets = [&](size_t source) {
+			for (const std::string& disabled_name : options.profiles[source].disables)
+			{
+				for (size_t target = 0; target < options.profiles.size(); ++target)
+				{
+					if (target == source || (disabled_name != "*" && options.profiles[target].name != disabled_name))
+						continue;
+					disabled_profiles[target] = true;
+					if (engine.is_running(static_cast<int>(target + 1)))
+						engine.teardown(static_cast<int>(target + 1));
+					if (disabled_name != "*")
+						break;
+				}
+			}
+		};
+		for (size_t index = 0; index < options.profiles.size(); ++index)
+			if (engine.is_running(static_cast<int>(index + 1)))
+				disable_targets(index);
+		std::vector<bool> switch_profiles(options.profiles.size(), false);
+		for (size_t index = 0; index < options.profiles.size(); ++index)
+		{
+			if (!disabled_profiles[index] || !active_profiles[index] || activation_key_held[index])
+				continue;
+			bool can_swap = true;
+			for (size_t source = 0; source < options.profiles.size(); ++source)
+			{
+				if (engine.is_running(static_cast<int>(source + 1)) && profile_disables(source, index) && !profile_disables(index, source))
+				{
+					can_swap = false;
+					break;
+				}
+			}
+			switch_profiles[index] = can_swap;
+		}
+		if (std::find(switch_profiles.begin(), switch_profiles.end(), true) != switch_profiles.end())
+		{
+			for (size_t source = 0; source < options.profiles.size(); ++source)
+			{
+				if (!engine.is_running(static_cast<int>(source + 1)))
+					continue;
+				for (size_t target = 0; target < options.profiles.size(); ++target)
+					if (switch_profiles[target] && profile_disables(source, target))
+					{
+						engine.teardown(static_cast<int>(source + 1));
+						break;
+					}
+			}
+			for (size_t index = 0; index < options.profiles.size(); ++index)
+			{
+				if (!switch_profiles[index])
+					continue;
+				LOG_DEBUG("Switching to profile %d", static_cast<int>(index + 1));
+				engine.setup(static_cast<int>(index + 1));
+				activation_key_held[index] = active_profiles[index];
+				LOG_DEBUG("Profile %d activated after disabling mutually exclusive profiles", static_cast<int>(index + 1));
+			}
+		}
 		for (size_t index = 0; index < options.profiles.size(); ++index)
 		{
 			const int profile = static_cast<int>(index + 1);
+			if (disabled_profiles[index])
+			{
+				activation_key_held[index] = active_profiles[index];
+				continue;
+			}
 			if (options.profiles[index].mode == ProfileActivationMode::hold)
 			{
 				if (active_profiles[index] && !engine.is_running(profile))
@@ -229,7 +299,7 @@ int main(int argc, char* argv[])
 					LOG_DEBUG("Profile %d deactivated (hold mode)", profile);
 				}
 			}
-			else if (active_profiles[index] && !activation_key_held[index])
+			else if (!switch_profiles[index] && active_profiles[index] && !activation_key_held[index])
 			{
 				if (engine.is_running(profile) && options.profiles[index].delay_mode == PacketDelayMode::drop_until_toggle)
 				{
@@ -253,6 +323,8 @@ int main(int argc, char* argv[])
 					LOG_DEBUG("Profile %d activated (toggle mode)", profile);
 				}
 			}
+			if (engine.is_running(profile))
+				disable_targets(index);
 			activation_key_held[index] = active_profiles[index];
 		}
 	}
