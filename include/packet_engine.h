@@ -104,6 +104,7 @@ public:
 	void teardown();
 	bool is_running() const;
 	bool is_running(int profile) const;
+	bool is_authoritative_server() const;
 	uint64_t running_time_ms() const;
 	size_t pending_packets() const;
 	uint64_t next_batch_in_ms() const;

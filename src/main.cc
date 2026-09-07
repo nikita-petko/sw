@@ -178,7 +178,8 @@ int main(int argc, char* argv[])
 					active_profiles += ", ";
 				active_profiles += options.profiles[index].name;
 			}
-			const std::string server_status = "server: " + engine.current_server();
+			const std::string server_status = "server: " + engine.current_server() +
+										 (engine.is_authoritative_server() ? " (authoritative)" : "");
 			logging::set_status(status, server_status + (active_profiles.empty() ? "" : " | " + active_profiles));
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		}

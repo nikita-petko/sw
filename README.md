@@ -82,6 +82,8 @@ While the program is running:
 - Activate a `hold` profile by holding its configured key or combination.
   Releasing the key deactivates it.
 - Press `Tab` to print packet and activation statistics.
+  When discovery is enabled, it also prints the current authoritative server
+  and a packet-ranked list for the active discovery window.
 - Press Page Up or Page Down to cycle the configured server filter, including
   `none` (which applies no server filter).
 - Press `q`, `Q`, or Backspace to quit.
@@ -94,12 +96,13 @@ cannot be used as a profile key.
 
 When discovery is enabled, lagsw opens a sniff-only handle and counts packets
 to and from the selected port without delaying them. At the end of each window,
-the remote address with the highest packet count becomes the current server,
-is added to the server list, and is logged. If that address is already in the
-list, lagsw warns and reuses the existing entry. Profiles with
-`server_direction` use the discovered address when they are next activated. A
-manually selected `--server` remains active until a discovery result replaces
-it.
+the remote address with the highest packet count is logged as authoritative and
+added to the server list. If that address is already in the list, lagsw warns
+and reuses the existing entry. Discovery switches to the authoritative server
+when no concrete server was selected. Both an omitted `--server` argument and
+explicit `--server none` request automatic selection. A concrete `--server`
+selection is never replaced by discovery. Profiles with `server_direction` use
+the selected server when they are next activated.
 
 ## Configuration
 

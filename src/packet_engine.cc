@@ -92,9 +92,39 @@ std::string format_state_divider(size_t width, const std::string& label = {})
 	return "|" + std::string(left_width, '-') + text + std::string(inner_width - left_width - text.size(), '-') + "|";
 }
 
+// bright white, contrasts with the green LOG_INFO text around it
+constexpr const char* kStatColor = "\033[97m";
+// switches back to the green LOG_INFO color after a highlighted stat
+constexpr const char* kStatReset = "\033[32m";
+
+std::string highlight(const std::string& value)
+{
+	return std::string(kStatColor) + value + kStatReset;
+}
+
+size_t visible_length(const std::string& text)
+{
+	size_t length = 0;
+	for (size_t index = 0; index < text.size(); ++index)
+	{
+		if (text[index] == '\033' && index + 1 < text.size() && text[index + 1] == '[')
+		{
+			index += 2;
+			while (index < text.size() && text[index] != 'm')
+				++index;
+			continue;
+		}
+		++length;
+	}
+	return length;
+}
+
 void log_state_line(size_t width, const std::string& text)
 {
-	LOG_INFO("| %-*s |", static_cast<int>(width - 4), text.c_str());
+	const size_t inner_width = width - 4;
+	const size_t visible	 = visible_length(text);
+	const size_t padding	 = visible < inner_width ? inner_width - visible : 0;
+	LOG_INFO("| %s%*s |", text.c_str(), static_cast<int>(padding), "");
 }
 
 std::string format_ipv4_address(UINT32 address)
@@ -180,6 +210,9 @@ struct PacketEngine::State
 	std::thread 							 discovery_thread;
 	std::mutex 							 discovery_mutex;
 	std::string 							 discovered_server;
+	std::unordered_map<std::string, uint64_t> discovery_counts;
+	bool 								 authoritative_server = false;
+	bool 								 select_authoritative_server = false;
 };
 
 PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(options)), state_(new State(options_.profiles.size()))
@@ -189,6 +222,7 @@ PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(opt
 		packet_modes_.push_back(create_packet_mode(profile));
 	state_->active_profiles.resize(options_.profiles.size());
 	state_->active_sessions.resize(options_.profiles.size());
+	state_->select_authoritative_server = !options_.initial_server || *options_.initial_server == "none";
 	if (options_.initial_server)
 	{
 		for (size_t index = 0; index < options_.servers.size(); ++index)
@@ -200,7 +234,7 @@ PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(opt
 				break;
 			}
 		}
-		if (server_index_ == 0)
+		if (server_index_ == 0 && !state_->select_authoritative_server)
 			LOG_WARN("Server '%s' does not exist; using none", options_.initial_server->c_str());
 	}
 	LOG_INFO("Initial server: %s", current_server().c_str());
@@ -223,6 +257,12 @@ bool PacketEngine::is_running(int profile) const
 		return false;
 	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
 	return state_->active_profiles[profile - 1];
+}
+
+bool PacketEngine::is_authoritative_server() const
+{
+	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
+	return state_->authoritative_server;
 }
 
 uint64_t PacketEngine::running_time_ms() const
@@ -282,18 +322,9 @@ std::string PacketEngine::server_filter(const ProfileOptions& profile) const
 {
 	const std::string& filter		= profile.filter.value_or(options_.global_filter);
 	const size_t	   server_index = server_index_.load();
-	if (!profile.windivert_options.server_direction)
+	if (server_index == 0 || !profile.windivert_options.server_direction)
 		return filter;
-	std::string server_address;
-	if (server_index == 0)
-	{
-		std::lock_guard<std::mutex> lock(state_->discovery_mutex);
-		server_address = state_->discovered_server;
-	}
-	else
-		server_address = options_.servers[server_index - 1].address;
-	if (server_address.empty())
-		return filter;
+	const std::string& server_address = options_.servers[server_index - 1].address;
 
 	const char* address_field = "ip.Addr";
 	switch (*profile.windivert_options.server_direction)
@@ -319,8 +350,7 @@ std::string PacketEngine::current_server() const
 		const ServerOptions& server = options_.servers[server_index - 1];
 		return server.name == server.address ? server.address : server.name + " [" + server.address + "]";
 	}
-	std::lock_guard<std::mutex> lock(state_->discovery_mutex);
-	return state_->discovered_server.empty() ? "none" : state_->discovered_server;
+	return "none";
 }
 
 void PacketEngine::cycle_server(int direction)
@@ -334,6 +364,8 @@ void PacketEngine::cycle_server(int direction)
 	else
 		current = current == 0 ? option_count - 1 : current - 1;
 	server_index_ = current;
+	state_->authoritative_server = false;
+	state_->select_authoritative_server = false;
 	LOG_INFO("Server changed to: %s", current_server().c_str());
 
 	std::vector<int> active_profiles;
@@ -359,6 +391,21 @@ void PacketEngine::print_state() const
 
 	const size_t   queued_packets  = pending_packets();
 	const uint64_t next_release_in = next_batch_in_ms();
+	std::vector<std::pair<std::string, uint64_t>> discovery_counts;
+	std::string discovered_server;
+	bool authoritative_server = false;
+	{
+		std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
+		std::lock_guard<std::mutex> lock(state_->discovery_mutex);
+		discovery_counts.assign(state_->discovery_counts.begin(), state_->discovery_counts.end());
+		discovered_server = state_->discovered_server;
+		authoritative_server = state_->authoritative_server;
+	}
+	std::sort(discovery_counts.begin(), discovery_counts.end(), [](const auto& left, const auto& right) {
+		if (left.second != right.second)
+			return left.second > right.second;
+		return left.first < right.first;
+	});
 
 	size_t state_width = 53;
 	for (size_t index = 0; index < options_.profiles.size(); ++index)
@@ -374,7 +421,7 @@ void PacketEngine::print_state() const
 	if (enabled_time_width + 4 > state_width)
 		state_width = enabled_time_width + 4;
 	LOG_INFO("+%s+", std::string(state_width - 2, '-').c_str());
-	log_state_line(state_width, std::string("status:          ") + (running_ ? "RUNNING" : "STOPPED"));
+	log_state_line(state_width, "status:          " + highlight(running_ ? "RUNNING" : "STOPPED"));
 	for (size_t index = 0; index < options_.profiles.size(); ++index)
 	{
 		const size_t			   profile_number		= index + 1;
@@ -403,26 +450,47 @@ void PacketEngine::print_state() const
 		else if (enabled_count != 0)
 			profile_label += " (held " + logging::format_duration(last_enabled_time) + ")";
 		LOG_INFO("%s", format_state_divider(state_width, profile_label).c_str());
-		log_state_line(state_width, "profile:         #" + std::to_string(profile_number) + " - " + profile_options.name);
+		log_state_line(state_width, "profile:         " + highlight("#" + std::to_string(profile_number) + " - " + profile_options.name));
 		log_state_line(state_width,
-					   "enabled time:    " + logging::format_duration(enabled_time_current) + " current, " +
-						   logging::format_duration(enabled_time_min) + " min, " + logging::format_duration(enabled_time_max) + " max, " +
-						   logging::format_duration(enabled_time_average) + " avg");
+					   "enabled time:    " + highlight(logging::format_duration(enabled_time_current)) + " current, " +
+						   highlight(logging::format_duration(enabled_time_min)) + " min, " + highlight(logging::format_duration(enabled_time_max)) +
+						   " max, " + highlight(logging::format_duration(enabled_time_average)) + " avg");
 		log_state_line(state_width,
-					   "enabled total:   " + logging::format_duration(enabled_time_total) + " across " + std::to_string(enabled_count) +
-						   " activations");
-		log_state_line(state_width, "packets caught:  " + std::to_string(stats.packets_caught.load()));
-		log_state_line(state_width, "sent after delay: " + std::to_string(stats.delayed_packets_sent.load()));
-		log_state_line(state_width, "sent at teardown: " + std::to_string(stats.teardown_packets_sent.load()));
+					   "enabled total:   " + highlight(logging::format_duration(enabled_time_total)) + " across " +
+						   highlight(std::to_string(enabled_count)) + " activations");
+		log_state_line(state_width, "packets caught:  " + highlight(std::to_string(stats.packets_caught.load())));
+		log_state_line(state_width, "sent after delay: " + highlight(std::to_string(stats.delayed_packets_sent.load())));
+		log_state_line(state_width, "sent at teardown: " + highlight(std::to_string(stats.teardown_packets_sent.load())));
 		LOG_INFO("%s", format_state_divider(state_width).c_str());
 	}
-	log_state_line(state_width, "queued packets:  " + std::to_string(queued_packets));
+	log_state_line(state_width, "queued packets:  " + highlight(std::to_string(queued_packets)));
 	if (queued_packets != 0)
 	{
 		if (next_release_in == (std::numeric_limits<uint64_t>::max)())
-			log_state_line(state_width, "next release:    on profile deactivation");
+			log_state_line(state_width, "next release:    " + highlight("on profile deactivation"));
 		else
-			log_state_line(state_width, "next release:    in " + logging::format_duration(next_release_in));
+			log_state_line(state_width, "next release:    in " + highlight(logging::format_duration(next_release_in)));
+	}
+	if (options_.discovery_port)
+	{
+		LOG_INFO("%s", format_state_divider(state_width, "server discovery").c_str());
+		log_state_line(state_width, "authoritative:   " +
+							highlight(discovered_server.empty() ? "none" : discovered_server) +
+							(authoritative_server ? " (selected)" : " (observed)"));
+		log_state_line(state_width, "ranked servers:  " + highlight(std::to_string(discovery_counts.size())));
+		for (size_t index = 0; index < discovery_counts.size(); ++index)
+		{
+			const auto& [address, count] = discovery_counts[index];
+			const auto server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](const ServerOptions& item) {
+				return item.address == address;
+			});
+			const std::string label = server == options_.servers.end() || server->name == server->address
+									? address
+									: server->name + " [" + address + "]";
+			log_state_line(state_width,
+						   std::to_string(index + 1) + ". " + label + " - " + highlight(std::to_string(count)) + " packets");
+		}
+		LOG_INFO("%s", format_state_divider(state_width).c_str());
 	}
 	LOG_INFO("+%s+", std::string(state_width - 2, '-').c_str());
 }
@@ -770,13 +838,23 @@ void PacketEngine::discover_packets()
 					address_text = format_ipv6_address(address.Outbound ? ipv6_header->DstAddr : ipv6_header->SrcAddr);
 				if (!address_text.empty())
 				{
-					if (seen_servers.insert(address_text).second)
+					std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
+					const bool first_seen = seen_servers.insert(address_text).second;
+					auto existing_server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](const ServerOptions& server) {
+						return server.address == address_text;
+					});
+					if (existing_server == options_.servers.end())
 					{
-						std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
+						options_.servers.push_back({address_text, address_text});
+						existing_server = options_.servers.end() - 1;
+					}
+					if (first_seen)
+					{
 						const std::string server_label = format_server_label(address_text);
 						LOG_INFO("Server '%s' is potentially the authoritative server (first packet received)", server_label.c_str());
 					}
 					++packet_counts[address_text];
+					state_->discovery_counts = packet_counts;
 				}
 			}
 		}
@@ -802,8 +880,7 @@ void PacketEngine::discover_packets()
 				auto existing_server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](const ServerOptions& server) {
 					return server.address == winner->first;
 				});
-				const bool server_was_existing = existing_server != options_.servers.end();
-				if (!server_was_existing)
+				if (existing_server == options_.servers.end())
 				{
 					options_.servers.push_back({winner->first, winner->first});
 					existing_server = options_.servers.end() - 1;
@@ -813,15 +890,24 @@ void PacketEngine::discover_packets()
 							 winner->first.c_str(),
 							 existing_server->name.c_str());
 				state_->discovered_server = winner->first;
-				server_index_ = static_cast<size_t>(std::distance(options_.servers.begin(), existing_server)) + 1;
-				const std::string server_label = server_was_existing ? format_server_label(winner->first) : winner->first;
+				const std::string server_label = format_server_label(winner->first);
 				LOG_INFO("Server '%s' is the authoritative server (%llu packets in %s)",
 						 server_label.c_str(),
 						 static_cast<unsigned long long>(winner->second),
 						 logging::format_duration(options_.discovery_window_ms).c_str());
+				if (state_->select_authoritative_server || state_->authoritative_server)
+				{
+					state_->authoritative_server = true;
+					state_->select_authoritative_server = false;
+					server_index_ = static_cast<size_t>(std::distance(options_.servers.begin(), existing_server)) + 1;
+				}
 			}
 		}
 		packet_counts.clear();
+		{
+			std::lock_guard<std::mutex> lock(state_->discovery_mutex);
+			state_->discovery_counts.clear();
+		}
 		window_started = now;
 	}
 }
