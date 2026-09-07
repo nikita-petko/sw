@@ -16,9 +16,11 @@
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <limits>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 #include "modules/packet_mode.h"
@@ -93,6 +95,40 @@ void log_state_line(size_t width, const std::string& text)
 {
 	LOG_INFO("| %-*s |", static_cast<int>(width - 4), text.c_str());
 }
+
+std::string format_ipv4_address(UINT32 address)
+{
+	const auto* bytes = reinterpret_cast<const unsigned char*>(&address);
+	char buffer[16] = {};
+	std::snprintf(buffer, sizeof(buffer), "%u.%u.%u.%u", bytes[0], bytes[1], bytes[2], bytes[3]);
+	return buffer;
+}
+
+std::string format_ipv6_address(const UINT32* address)
+{
+	const auto* bytes = reinterpret_cast<const unsigned char*>(address);
+	char buffer[64] = {};
+	std::snprintf(buffer,
+				  sizeof(buffer),
+				  "%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x",
+				  bytes[0],
+				  bytes[1],
+				  bytes[2],
+				  bytes[3],
+				  bytes[4],
+				  bytes[5],
+				  bytes[6],
+				  bytes[7],
+				  bytes[8],
+				  bytes[9],
+				  bytes[10],
+				  bytes[11],
+				  bytes[12],
+				  bytes[13],
+				  bytes[14],
+				  bytes[15]);
+	return buffer;
+}
 }  // namespace
 
 struct PacketEngine::Session
@@ -139,6 +175,10 @@ struct PacketEngine::State
 	std::vector<ProfileStats>			  profile_stats;
 	std::vector<std::shared_ptr<Session>> active_sessions;
 	std::vector<std::thread>			  cleanup_threads;
+	HANDLE 								 discovery_handle = INVALID_HANDLE_VALUE;
+	std::thread 							 discovery_thread;
+	std::mutex 							 discovery_mutex;
+	std::string 							 discovered_server;
 };
 
 PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(options)), state_(new State(options_.profiles.size()))
@@ -241,7 +281,17 @@ std::string PacketEngine::server_filter(const ProfileOptions& profile) const
 {
 	const std::string& filter		= profile.filter.value_or(options_.global_filter);
 	const size_t	   server_index = server_index_.load();
-	if (server_index == 0 || !profile.windivert_options.server_direction)
+	if (!profile.windivert_options.server_direction)
+		return filter;
+	std::string server_address;
+	if (server_index == 0)
+	{
+		std::lock_guard<std::mutex> lock(state_->discovery_mutex);
+		server_address = state_->discovered_server;
+	}
+	else
+		server_address = options_.servers[server_index - 1].address;
+	if (server_address.empty())
 		return filter;
 
 	const char* address_field = "ip.Addr";
@@ -256,13 +306,17 @@ std::string PacketEngine::server_filter(const ProfileOptions& profile) const
 		case WinDivertOptions::ServerDirection::both:
 			break;
 	}
-	return "(" + filter + ") and " + address_field + " == " + options_.servers[server_index - 1].address;
+	return "(" + filter + ") and " + address_field + " == " + server_address;
 }
 
 std::string PacketEngine::current_server() const
 {
+	std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
 	const size_t server_index = server_index_.load();
-	return server_index == 0 ? "none" : options_.servers[server_index - 1].name;
+	if (server_index != 0)
+		return options_.servers[server_index - 1].name;
+	std::lock_guard<std::mutex> lock(state_->discovery_mutex);
+	return state_->discovered_server.empty() ? "none" : state_->discovered_server;
 }
 
 void PacketEngine::cycle_server(int direction)
@@ -624,13 +678,118 @@ void PacketEngine::teardown()
 
 void PacketEngine::start_workers()
 {
+	if (!options_.discovery_port)
+		return;
+	const uint16_t port = *options_.discovery_port;
+	const std::string filter = "tcp.DstPort == " + std::to_string(port) + " or tcp.SrcPort == " + std::to_string(port) +
+							  " or udp.DstPort == " + std::to_string(port) + " or udp.SrcPort == " + std::to_string(port);
+	state_->discovery_handle = WinDivertOpen(filter.c_str(), WINDIVERT_LAYER_NETWORK, 0, WINDIVERT_FLAG_SNIFF);
+	if (state_->discovery_handle == INVALID_HANDLE_VALUE)
+	{
+		const DWORD error = GetLastError();
+		LOG_ERROR("Server discovery setup: failed to open WinDivert handle %lu: %s", error, format_win32_error(error).c_str());
+		return;
+	}
+	WinDivertSetParam(state_->discovery_handle, WINDIVERT_PARAM_QUEUE_LENGTH, 4096);
+	WinDivertSetParam(state_->discovery_handle, WINDIVERT_PARAM_QUEUE_TIME, 1024);
+	LOG_INFO("Server discovery enabled on port %u with a %s window", port, logging::format_duration(options_.discovery_window_ms).c_str());
+	state_->discovery_thread = std::thread(&PacketEngine::discover_packets, this);
 }
 
 void PacketEngine::stop_workers()
 {
 	shutdown_ = true;
+	if (state_->discovery_handle != INVALID_HANDLE_VALUE)
+		WinDivertShutdown(state_->discovery_handle, WINDIVERT_SHUTDOWN_RECV);
 	teardown();
 	for (std::thread& cleanup_thread : state_->cleanup_threads)
 		if (cleanup_thread.joinable())
 			cleanup_thread.join();
+	if (state_->discovery_thread.joinable())
+		state_->discovery_thread.join();
+	if (state_->discovery_handle != INVALID_HANDLE_VALUE)
+	{
+		WinDivertClose(state_->discovery_handle);
+		state_->discovery_handle = INVALID_HANDLE_VALUE;
+	}
+}
+
+void PacketEngine::discover_packets()
+{
+	std::unordered_map<std::string, uint64_t> packet_counts;
+	uint64_t window_started = GetTickCount64();
+	BYTE packet_data[0xFFFF];
+	while (!shutdown_)
+	{
+		WINDIVERT_ADDRESS address;
+		UINT received_length = 0;
+		if (WinDivertRecv(state_->discovery_handle, packet_data, sizeof(packet_data), &received_length, &address))
+		{
+			PWINDIVERT_IPHDR ip_header = nullptr;
+			PWINDIVERT_IPV6HDR ipv6_header = nullptr;
+			if (WinDivertHelperParsePacket(packet_data,
+										  received_length,
+										  &ip_header,
+										  &ipv6_header,
+										  nullptr,
+										  nullptr,
+										  nullptr,
+										  nullptr,
+										  nullptr,
+										  nullptr,
+										  nullptr,
+										  nullptr,
+										  nullptr))
+			{
+				std::string address_text;
+				if (ip_header)
+					address_text = format_ipv4_address(address.Outbound ? ip_header->DstAddr : ip_header->SrcAddr);
+				else if (ipv6_header)
+					address_text = format_ipv6_address(address.Outbound ? ipv6_header->DstAddr : ipv6_header->SrcAddr);
+				if (!address_text.empty())
+					++packet_counts[address_text];
+			}
+		}
+		else if (!shutdown_)
+		{
+			const DWORD error = GetLastError();
+			if (error != ERROR_INVALID_HANDLE && error != ERROR_OPERATION_ABORTED)
+				LOG_ERROR("Server discovery recv: WinDivertRecv error %lu: %s", error, format_win32_error(error).c_str());
+		}
+
+		const uint64_t now = GetTickCount64();
+		if (now - window_started < options_.discovery_window_ms)
+			continue;
+		if (!packet_counts.empty())
+		{
+			const auto winner = std::max_element(packet_counts.begin(), packet_counts.end(), [](const auto& left, const auto& right) {
+				return left.second < right.second;
+			});
+			std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
+			std::lock_guard<std::mutex> lock(state_->discovery_mutex);
+			if (state_->discovered_server != winner->first)
+			{
+				auto existing_server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](const ServerOptions& server) {
+					return server.address == winner->first;
+				});
+				if (existing_server == options_.servers.end())
+				{
+					options_.servers.push_back({winner->first, winner->first});
+					existing_server = options_.servers.end() - 1;
+				}
+				else
+					LOG_WARN("Discovered server '%s' already exists in the server list; switching to '%s'",
+							 winner->first.c_str(),
+							 existing_server->name.c_str());
+				state_->discovered_server = winner->first;
+				server_index_ = static_cast<size_t>(std::distance(options_.servers.begin(), existing_server)) + 1;
+				LOG_INFO("Server discovered: %s (%llu packets in %s)",
+						 winner->first.c_str(),
+						 static_cast<unsigned long long>(winner->second),
+						 logging::format_duration(options_.discovery_window_ms).c_str());
+			}
+		}
+		packet_counts.clear();
+		window_started = now;
+	}
 }

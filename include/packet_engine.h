@@ -71,6 +71,8 @@ struct PacketEngineOptions
 	std::vector<ServerOptions> servers;
 	std::vector<ProfileOptions> profiles;
 	std::optional<std::string> initial_server;
+	std::optional<uint16_t> discovery_port;
+	uint64_t discovery_window_ms = 5000;
 };
 
 class PacketMode;
@@ -102,6 +104,7 @@ private:
 	struct Session;
 	void read_packets(const std::shared_ptr<Session>& session);
 	void write_packets(const std::shared_ptr<Session>& session);
+	void discover_packets();
 	std::string server_filter(const ProfileOptions& profile) const;
 
 	PacketEngineOptions options_;

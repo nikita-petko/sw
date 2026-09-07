@@ -58,6 +58,12 @@ The configuration file must be supplied explicitly:
 lagsw.exe --config profiles/test.yml
 ```
 
+To discover the busiest server on a port while the program runs:
+
+```powershell
+lagsw.exe --config profiles/test.yml --discover 55000 --discover-window 5000
+```
+
 Options:
 
 | Option | Description |
@@ -65,6 +71,8 @@ Options:
 | `--config <file>` | Load profiles from a YAML file. Required. |
 | `--log-level <level>`, `-l <level>` | Set the minimum log level: `error`, `warn`, `info`, or `debug`. |
 | `--server <server>`, `-s <server>` | Select the initial configured server by name or address. Unknown values warn and use `none`. |
+| `--discover <port>` | Observe TCP and UDP traffic on the port and select the remote address receiving the most packets in each discovery window. |
+| `--discover-window <ms>` | Discovery window length in milliseconds. Defaults to `5000`. |
 | `--help`, `-h` | Print command help and exit. |
 
 While the program is running:
@@ -83,6 +91,15 @@ key press activates or deactivates every matching toggle profile, while hold
 profiles follow the key state independently. Each active profile has its own
 capture handle and packet queue. `Tab` is reserved for displaying state and
 cannot be used as a profile key.
+
+When discovery is enabled, lagsw opens a sniff-only handle and counts packets
+to and from the selected port without delaying them. At the end of each window,
+the remote address with the highest packet count becomes the current server,
+is added to the server list, and is logged. If that address is already in the
+list, lagsw warns and reuses the existing entry. Profiles with
+`server_direction` use the discovered address when they are next activated. A
+manually selected `--server` remains active until a discovery result replaces
+it.
 
 ## Configuration
 

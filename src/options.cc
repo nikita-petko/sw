@@ -5,7 +5,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -498,6 +500,8 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 	options.global_filter = kDefaultFilter;
 	options.profiles.clear();
 	options.initial_server.reset();
+	options.discovery_port.reset();
+	options.discovery_window_ms = 5000;
 	bool config_loaded = false;
 	for (int index = 1; index < argc; ++index)
 	{
@@ -540,12 +544,56 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 			}
 			options.initial_server = argv[++index];
 		}
+		else if (std::strcmp(argv[index], "--discover") == 0 || std::strcmp(argv[index], "--discover-port") == 0)
+		{
+			if (index + 1 >= argc)
+			{
+				LOG_ERROR("%s requires a port from 1 to 65535", argv[index]);
+				return false;
+			}
+			try
+			{
+				size_t consumed = 0;
+				const unsigned long port = std::stoul(argv[++index], &consumed);
+				if (consumed != std::strlen(argv[index]) || port == 0 || port > (std::numeric_limits<uint16_t>::max)())
+					throw std::invalid_argument("invalid port");
+				options.discovery_port = static_cast<uint16_t>(port);
+			}
+			catch (...)
+			{
+				LOG_ERROR("Invalid discovery port: %s", argv[index]);
+				return false;
+			}
+		}
+		else if (std::strcmp(argv[index], "--discover-window") == 0)
+		{
+			if (index + 1 >= argc)
+			{
+				LOG_ERROR("--discover-window requires a positive duration in milliseconds");
+				return false;
+			}
+			try
+			{
+				size_t consumed = 0;
+				const unsigned long long window = std::stoull(argv[++index], &consumed);
+				if (consumed != std::strlen(argv[index]) || window == 0)
+					throw std::invalid_argument("invalid window");
+				options.discovery_window_ms = window;
+			}
+			catch (...)
+			{
+				LOG_ERROR("Invalid discovery window: %s", argv[index]);
+				return false;
+			}
+		}
 		else if (std::strcmp(argv[index], "--help") == 0 || std::strcmp(argv[index], "-h") == 0 || argc == 1)
 		{
 			std::printf("Usage: %s [options]\nOptions:\n", argv[0]);
 			std::printf("  --config <file> Load profiles from YAML\n");
 			std::printf("  --log-level, -l <level> Set log level: error, warn, info, or debug\n");
 			std::printf("  --server, -s <server> Select the initial configured server\n");
+			std::printf("  --discover <port>      Discover the busiest server on a TCP/UDP port\n");
+			std::printf("  --discover-window <ms> Discovery window (default: 5000)\n");
 			std::printf("  --help, -h              Show this help message\n");
 			return false;
 		}
