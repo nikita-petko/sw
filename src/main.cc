@@ -220,12 +220,11 @@ int main(int argc, char* argv[])
 		}
 
 		const std::vector<bool> active_profiles = find_active_profiles(options);
-		std::vector<bool> disabled_profiles(options.profiles.size(), false);
-		auto all_shared_profiles_running = [&](size_t index) {
+		std::vector<bool>		disabled_profiles(options.profiles.size(), false);
+		auto					all_shared_profiles_running = [&](size_t index) {
 			for (size_t target = 0; target < options.profiles.size(); ++target)
 			{
-				if (!active_profiles[target] ||
-					!profiles_share_activation_key(options.profiles[index], options.profiles[target]))
+				if (!active_profiles[target] || !profiles_share_activation_key(options.profiles[index], options.profiles[target]))
 					continue;
 				if (!engine.is_running(static_cast<int>(target + 1)))
 					return false;
@@ -235,8 +234,7 @@ int main(int argc, char* argv[])
 		auto shared_group_has_new_activation = [&](size_t index) {
 			for (size_t target = 0; target < options.profiles.size(); ++target)
 			{
-				if (!active_profiles[target] ||
-					!profiles_share_activation_key(options.profiles[index], options.profiles[target]))
+				if (!active_profiles[target] || !profiles_share_activation_key(options.profiles[index], options.profiles[target]))
 					continue;
 				if (!activation_key_held[target])
 					return true;
@@ -248,7 +246,7 @@ int main(int argc, char* argv[])
 		for (size_t index = 0; index < options.profiles.size(); ++index)
 		{
 			shared_profiles_running[index] = all_shared_profiles_running(index);
-			shared_group_activated[index] = shared_group_has_new_activation(index);
+			shared_group_activated[index]  = shared_group_has_new_activation(index);
 		}
 		auto profile_disables = [&](size_t source, size_t target) {
 			return std::find(options.profiles[source].disables.begin(), options.profiles[source].disables.end(), "*") !=

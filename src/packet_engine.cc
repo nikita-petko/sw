@@ -808,7 +808,7 @@ void PacketEngine::discover_packets()
 		return server == options_.servers.end() ? address : server->name + " [" + address + "]";
 	};
 	uint64_t window_started = GetTickCount64();
-	bool	   was_running   = false;
+	bool	 was_running	= false;
 	BYTE	 packet_data[0xFFFF];
 	while (!shutdown_)
 	{
@@ -830,7 +830,7 @@ void PacketEngine::discover_packets()
 			if (was_running)
 			{
 				LOG_DEBUG("Server discovery enabled after all profiles were deactivated");
-				was_running   = false;
+				was_running	   = false;
 				window_started = GetTickCount64();
 			}
 			PWINDIVERT_IPHDR   ip_header   = nullptr;
