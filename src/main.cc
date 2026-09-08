@@ -1,6 +1,7 @@
 #include <windows.h>
 
 #include <conio.h>
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <limits>
@@ -33,6 +34,14 @@ int get_key_without_waiting()
 bool is_key_held(int key)
 {
 	return (::GetAsyncKeyState(key) & 0x8000) != 0;
+}
+
+bool profiles_share_activation_key(const ProfileOptions& first, const ProfileOptions& second)
+{
+	for (const int first_key : first.keys)
+		if (std::find(second.keys.begin(), second.keys.end(), first_key) != second.keys.end())
+			return true;
+	return false;
 }
 
 std::vector<bool> find_active_profiles(const PacketEngineOptions& options)
@@ -212,6 +221,35 @@ int main(int argc, char* argv[])
 
 		const std::vector<bool> active_profiles = find_active_profiles(options);
 		std::vector<bool> disabled_profiles(options.profiles.size(), false);
+		auto all_shared_profiles_running = [&](size_t index) {
+			for (size_t target = 0; target < options.profiles.size(); ++target)
+			{
+				if (!active_profiles[target] ||
+					!profiles_share_activation_key(options.profiles[index], options.profiles[target]))
+					continue;
+				if (!engine.is_running(static_cast<int>(target + 1)))
+					return false;
+			}
+			return true;
+		};
+		auto shared_group_has_new_activation = [&](size_t index) {
+			for (size_t target = 0; target < options.profiles.size(); ++target)
+			{
+				if (!active_profiles[target] ||
+					!profiles_share_activation_key(options.profiles[index], options.profiles[target]))
+					continue;
+				if (!activation_key_held[target])
+					return true;
+			}
+			return false;
+		};
+		std::vector<bool> shared_profiles_running(options.profiles.size(), false);
+		std::vector<bool> shared_group_activated(options.profiles.size(), false);
+		for (size_t index = 0; index < options.profiles.size(); ++index)
+		{
+			shared_profiles_running[index] = all_shared_profiles_running(index);
+			shared_group_activated[index] = shared_group_has_new_activation(index);
+		}
 		auto profile_disables = [&](size_t source, size_t target) {
 			return std::find(options.profiles[source].disables.begin(), options.profiles[source].disables.end(), "*") !=
 					   options.profiles[source].disables.end() ||
@@ -299,9 +337,10 @@ int main(int argc, char* argv[])
 					LOG_DEBUG("Profile %d deactivated (hold mode)", profile);
 				}
 			}
-			else if (!switch_profiles[index] && active_profiles[index] && !activation_key_held[index])
+			else if (!switch_profiles[index] && active_profiles[index] && shared_group_activated[index])
 			{
-				if (engine.is_running(profile) && options.profiles[index].delay_mode == PacketDelayMode::drop_until_toggle)
+				if (shared_profiles_running[index] && engine.is_running(profile) &&
+					options.profiles[index].delay_mode == PacketDelayMode::drop_until_toggle)
 				{
 					LOG_DEBUG("Toggling profile %d", profile);
 					if (engine.toggle(profile))
@@ -310,7 +349,7 @@ int main(int argc, char* argv[])
 						LOG_DEBUG("Profile %d released and deactivated (drop_until_toggle mode)", profile);
 					}
 				}
-				else if (engine.is_running(profile))
+				else if (shared_profiles_running[index] && engine.is_running(profile))
 				{
 					LOG_DEBUG("Disabling profile %d", profile);
 					engine.teardown(profile);

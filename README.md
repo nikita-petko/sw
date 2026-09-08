@@ -89,10 +89,11 @@ While the program is running:
 - Press `q`, `Q`, or Backspace to quit.
 
 Multiple profiles can be active at the same time. Profiles may share keys; a
-key press activates or deactivates every matching toggle profile, while hold
-profiles follow the key state independently. Each active profile has its own
-capture handle and packet queue. `Tab` is reserved for displaying state and
-cannot be used as a profile key.
+key press enables every matching toggle profile when the group is only partly
+active, and deactivates the group only when every matching profile is active.
+Hold profiles follow the key state independently. Each active profile has its
+own capture handle and packet queue. `Tab` is reserved for displaying state
+and cannot be used as a profile key.
 
 When discovery is enabled, lagsw opens a sniff-only handle and counts packets
 to and from the selected port without delaying them. At the end of each window,
