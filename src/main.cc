@@ -123,14 +123,14 @@ int main(int argc, char* argv[])
 																	   profile.delay_mode == PacketDelayMode::send_all_after_delay ||
 																	   profile.delay_mode == PacketDelayMode::drop_and_send);
 		const std::string delay_description =
-			indefinite_delay && profile.delay_mode == PacketDelayMode::send_all_after_delay ? "Send all until"
-			: indefinite_delay && profile.delay_mode == PacketDelayMode::drop_and_send		? "Drop, then send until"
-			: indefinite_delay																? "Delay each until"
-			: profile.delay_mode == PacketDelayMode::send_all_after_delay					? "Send all in"
+			indefinite_delay && profile.delay_mode == PacketDelayMode::send_all_after_delay ? "Send all after"
+			: indefinite_delay && profile.delay_mode == PacketDelayMode::drop_and_send		? "Drop, then send after"
+			: indefinite_delay																? "Delay each by"
+			: profile.delay_mode == PacketDelayMode::send_all_after_delay					? "after"
 			: profile.delay_mode == PacketDelayMode::ratio
 				? "Send " + std::to_string(profile.ratio) + (profile.ratio_percent ? "% per" : " packets per")
-			: profile.delay_mode == PacketDelayMode::drop_and_send	   ? "Drop, then send in"
-			: profile.delay_mode == PacketDelayMode::drop_until_toggle ? "Drop, hold, then send"
+			: profile.delay_mode == PacketDelayMode::drop_and_send	   ? "Drop, then send after"
+			: profile.delay_mode == PacketDelayMode::drop_until_toggle ? "Drop, hold, then send after"
 			: profile.delay_mode == PacketDelayMode::drop			   ? "Drop packets"
 																	   : "Delay each by";
 		const std::string delay_value = indefinite_delay ? "profile is deactivated"
