@@ -12,3 +12,6 @@ target("lagsw")
 
     -- Link user32 for GetAsyncKeyState
     add_links("user32")
+
+    -- Link winhttp for optional server region lookups
+    add_links("winhttp")

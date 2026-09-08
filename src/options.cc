@@ -596,6 +596,7 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 	options.initial_server.reset();
 	options.discovery_port.reset();
 	options.discovery_window_ms = 5000;
+	options.resolve_region		 = false;
 	bool config_loaded			= false;
 	for (int index = 1; index < argc; ++index)
 	{
@@ -680,6 +681,10 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 				return false;
 			}
 		}
+		else if (std::strcmp(argv[index], "--resolve-region") == 0)
+		{
+			options.resolve_region = true;
+		}
 		else if (std::strcmp(argv[index], "--help") == 0 || std::strcmp(argv[index], "-h") == 0 || argc == 1)
 		{
 			std::printf("Usage: %s [options]\nOptions:\n", argv[0]);
@@ -688,6 +693,7 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 			std::printf("  --server, -s <server> Select the initial configured server\n");
 			std::printf("  --discover <port>      Discover the busiest server on a TCP/UDP port\n");
 			std::printf("  --discover-window <ms> Discovery window (default: 5000)\n");
+			std::printf("  --resolve-region        Resolve the geographic region of discovered servers\n");
 			std::printf("  --help, -h              Show this help message\n");
 			return false;
 		}

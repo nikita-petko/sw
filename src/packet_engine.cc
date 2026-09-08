@@ -13,7 +13,9 @@
 #include <windows.h>
 
 #include <mmsystem.h>
+#include <winhttp.h>
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
@@ -160,6 +162,181 @@ std::string format_ipv6_address(const UINT32* address)
 				  bytes[15]);
 	return buffer;
 }
+
+// avoids wasted lookups for local/test infrastructure that has no meaningful geographic region
+bool is_public_address(const std::string& address)
+{
+	if (address.empty())
+		return false;
+	if (address.rfind("10.", 0) == 0 || address.rfind("127.", 0) == 0 || address.rfind("192.168.", 0) == 0 ||
+		address.rfind("169.254.", 0) == 0 || address == "::1" || address.rfind("fe80:", 0) == 0 || address.rfind("fc", 0) == 0 ||
+		address.rfind("fd", 0) == 0)
+		return false;
+	if (address.rfind("172.", 0) == 0)
+	{
+		const size_t next_dot = address.find('.', 4);
+		if (next_dot != std::string::npos)
+		{
+			try
+			{
+				const int second_octet = std::stoi(address.substr(4, next_dot - 4));
+				if (second_octet >= 16 && second_octet <= 31)
+					return false;
+			}
+			catch (...)
+			{
+			}
+		}
+	}
+	return true;
+}
+
+std::optional<std::string> extract_json_string(const std::string& json, const std::string& key)
+{
+	const std::string needle = "\"" + key + "\":";
+	auto			  start	 = json.find(needle);
+	if (start == std::string::npos)
+		return std::nullopt;
+	start += needle.size();
+	while (start < json.size() && (json[start] == ' ' || json[start] == '\t'))
+		++start;
+	if (start >= json.size() || json[start] != '"')
+		return std::nullopt;
+	const auto value_start = start + 1;
+	const auto value_end	= json.find('"', value_start);
+	if (value_end == std::string::npos)
+		return std::nullopt;
+	return json.substr(value_start, value_end - value_start);
+}
+
+std::optional<double> extract_json_number(const std::string& json, const std::string& key)
+{
+	const std::string needle = "\"" + key + "\":";
+	auto			  start	 = json.find(needle);
+	if (start == std::string::npos)
+		return std::nullopt;
+	start += needle.size();
+	while (start < json.size() && (json[start] == ' ' || json[start] == '\t'))
+		++start;
+	size_t end = start;
+	while (end < json.size() && (std::isdigit(static_cast<unsigned char>(json[end])) || json[end] == '-' || json[end] == '+' || json[end] == '.'))
+		++end;
+	if (end == start)
+		return std::nullopt;
+	try
+	{
+		return std::stod(json.substr(start, end - start));
+	}
+	catch (...)
+	{
+		return std::nullopt;
+	}
+}
+
+std::string last_ip_segment(const std::string& address)
+{
+	const size_t dot = address.find_last_of('.');
+	if (dot != std::string::npos)
+		return address.substr(dot + 1);
+	const size_t colon = address.find_last_of(':');
+	if (colon != std::string::npos)
+		return address.substr(colon + 1);
+	return address;
+}
+
+// coarse west/east split per region group, since ipapi.co has no notion of "US-West" vs "US-East" etc.
+std::string country_region_code(const std::optional<std::string>& country_code,
+								 const std::optional<std::string>& continent_code,
+								 const std::optional<double>&		longitude)
+{
+	static const std::unordered_map<std::string, double> longitude_thresholds = {
+		{"US", -98.0},
+		{"CA", -98.0},
+		{"NA", -98.0},
+		{"EU", 10.0},
+		{"AS", 100.0},
+		{"OC", 135.0},
+		{"SA", -60.0},
+		{"AF", 20.0},
+	};
+	const std::string group = country_code && *country_code == "US" ? "US" : continent_code.value_or(country_code.value_or("XX"));
+	const auto		  threshold_it = longitude_thresholds.find(group);
+	const double	  threshold	   = threshold_it == longitude_thresholds.end() ? 0.0 : threshold_it->second;
+	const char		  suffix	   = longitude.value_or(0.0) < threshold ? 'W' : 'E';
+	return group + suffix;
+}
+
+// e.g. "IA-USE-19" for region_code IA, country_region USE, and address ending in .19
+std::string build_server_name(const std::string& address, const std::string& response)
+{
+	const auto region_code	   = extract_json_string(response, "region_code");
+	const auto country_code   = extract_json_string(response, "country_code");
+	const auto continent_code = extract_json_string(response, "continent_code");
+	const auto longitude	   = extract_json_number(response, "longitude");
+	return region_code.value_or("XX") + "-" + country_region_code(country_code, continent_code, longitude) + "-" + last_ip_segment(address);
+}
+
+// queries ipapi.co over HTTPS; returns an empty string on any failure so callers can skip silently
+std::string https_get(const std::wstring& host, const std::wstring& path)
+{
+	std::string result;
+	HINTERNET	session = WinHttpOpen(L"lagsw/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+	if (!session)
+	{
+		LOG_DEBUG("https_get: WinHttpOpen failed %lu", GetLastError());
+		return result;
+	}
+	WinHttpSetTimeouts(session, 3000, 3000, 3000, 3000);
+	if (HINTERNET connect = WinHttpConnect(session, host.c_str(), INTERNET_DEFAULT_HTTPS_PORT, 0))
+	{
+		LOG_DEBUG("https_get: connected to host");
+		if (HINTERNET request = WinHttpOpenRequest(connect,
+													L"GET",
+													path.c_str(),
+													nullptr,
+													WINHTTP_NO_REFERER,
+													WINHTTP_DEFAULT_ACCEPT_TYPES,
+													WINHTTP_FLAG_SECURE))
+		{
+			LOG_DEBUG("https_get: request opened, sending");
+			if (WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+				WinHttpReceiveResponse(request, nullptr))
+			{
+				DWORD status		= 0;
+				DWORD status_size = sizeof(status);
+				if (WinHttpQueryHeaders(request,
+										WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+										WINHTTP_HEADER_NAME_BY_INDEX,
+										&status,
+										&status_size,
+										WINHTTP_NO_HEADER_INDEX))
+					LOG_DEBUG("https_get: response received, status %lu, reading body", status);
+				else
+					LOG_DEBUG("https_get: response received, status unknown, reading body");
+				DWORD available = 0;
+				while (WinHttpQueryDataAvailable(request, &available) && available > 0)
+				{
+					std::vector<char> buffer(available);
+					DWORD			  read = 0;
+					if (!WinHttpReadData(request, buffer.data(), available, &read))
+						break;
+					result.append(buffer.data(), read);
+				}
+				LOG_DEBUG("https_get: finished reading %zu total bytes", result.size());
+			}
+			else
+				LOG_DEBUG("https_get: send/receive failed %lu", GetLastError());
+			WinHttpCloseHandle(request);
+		}
+		else
+			LOG_DEBUG("https_get: WinHttpOpenRequest failed %lu", GetLastError());
+		WinHttpCloseHandle(connect);
+	}
+	else
+		LOG_DEBUG("https_get: WinHttpConnect failed %lu", GetLastError());
+	WinHttpCloseHandle(session);
+	return result;
+}
 }  // namespace
 
 struct PacketEngine::Session
@@ -213,6 +390,10 @@ struct PacketEngine::State
 	std::unordered_map<std::string, uint64_t> discovery_counts;
 	bool									  authoritative_server		  = false;
 	bool									  select_authoritative_server = false;
+	std::mutex								  region_mutex;
+	std::unordered_map<std::string, std::string> server_regions;
+	std::unordered_set<std::string>			  region_lookups_started;
+	std::vector<std::thread>				  region_threads;
 };
 
 PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(options)), state_(new State(options_.profiles.size()))
@@ -474,9 +655,19 @@ void PacketEngine::print_state() const
 	}
 	if (options_.discovery_port)
 	{
+		std::unordered_map<std::string, std::string> server_regions;
+		{
+			std::lock_guard<std::mutex> lock(state_->region_mutex);
+			server_regions = state_->server_regions;
+		}
+		LOG_DEBUG("print_state: snapshotted %zu resolved region(s)", server_regions.size());
+		auto region_suffix = [&](const std::string& address) -> std::string {
+			const auto region = server_regions.find(address);
+			return region == server_regions.end() ? "" : " (" + region->second + ")";
+		};
 		LOG_INFO("%s", format_state_divider(state_width, "server discovery").c_str());
 		log_state_line(state_width,
-					   "authoritative:   " + highlight(discovered_server.empty() ? "none" : discovered_server) +
+					   "authoritative:   " + highlight(discovered_server.empty() ? "none" : discovered_server + region_suffix(discovered_server)) +
 						   (authoritative_server ? " (selected)" : " (observed)"));
 		log_state_line(state_width, "ranked servers:  " + highlight(std::to_string(discovery_counts.size())));
 		for (size_t index = 0; index < discovery_counts.size(); ++index)
@@ -486,7 +677,8 @@ void PacketEngine::print_state() const
 				return item.address == address;
 			});
 			const std::string label =
-				server == options_.servers.end() || server->name == server->address ? address : server->name + " [" + address + "]";
+				(server == options_.servers.end() || server->name == server->address ? address : server->name + " [" + address + "]") +
+				region_suffix(address);
 			log_state_line(state_width, std::to_string(index + 1) + ". " + label + " - " + highlight(std::to_string(count)) + " packets");
 		}
 		LOG_INFO("%s", format_state_divider(state_width).c_str());
@@ -790,11 +982,72 @@ void PacketEngine::stop_workers()
 			cleanup_thread.join();
 	if (state_->discovery_thread.joinable())
 		state_->discovery_thread.join();
+	for (std::thread& region_thread : state_->region_threads)
+		if (region_thread.joinable())
+			region_thread.join();
+	state_->region_threads.clear();
 	if (state_->discovery_handle != INVALID_HANDLE_VALUE)
 	{
 		WinDivertClose(state_->discovery_handle);
 		state_->discovery_handle = INVALID_HANDLE_VALUE;
 	}
+}
+
+void PacketEngine::resolve_region(const std::string& address)
+{
+	{
+		std::lock_guard<std::mutex> lock(state_->region_mutex);
+		if (!state_->region_lookups_started.insert(address).second)
+		{
+			LOG_DEBUG("Region lookup for '%s': already started, skipping", address.c_str());
+			return;
+		}
+	}
+	LOG_DEBUG("Region lookup for '%s': queued", address.c_str());
+	state_->region_threads.emplace_back([this, address] {
+		LOG_DEBUG("Region lookup for '%s': requesting https://ipapi.co/%s/json/", address.c_str(), address.c_str());
+		const std::wstring path	   = L"/" + std::wstring(address.begin(), address.end()) + L"/json/";
+		const std::string	response = https_get(L"ipapi.co", path);
+		if (response.empty())
+		{
+			LOG_DEBUG("Region lookup for '%s': empty response, giving up", address.c_str());
+			return;
+		}
+		LOG_DEBUG("Region lookup for '%s': received %zu byte response", address.c_str(), response.size());
+		const auto region  = extract_json_string(response, "region");
+		const auto country = extract_json_string(response, "country_name");
+		if (!region && !country)
+		{
+			LOG_DEBUG("Region lookup for '%s': response missing region/country fields, body: %s",
+					  address.c_str(),
+					  response.substr(0, 300).c_str());
+			return;
+		}
+		std::string label = region.value_or("");
+		if (region && country)
+			label += ", ";
+		label += country.value_or("");
+		{
+			std::lock_guard<std::mutex> lock(state_->region_mutex);
+			state_->server_regions[address] = label;
+		}
+		LOG_DEBUG("Region lookup for '%s': cached result", address.c_str());
+		LOG_INFO("Resolved region for server '%s': %s", address.c_str(), label.c_str());
+
+		const std::string new_name = build_server_name(address, response);
+		LOG_DEBUG("Region lookup for '%s': rewriting server name to '%s'", address.c_str(), new_name.c_str());
+		{
+			std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
+			const auto					 server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](ServerOptions& item) {
+				return item.address == address;
+			});
+			if (server != options_.servers.end())
+				server->name = new_name;
+			else
+				LOG_DEBUG("Region lookup for '%s': server no longer tracked, skipping rename", address.c_str());
+		}
+		LOG_INFO("Server '%s' renamed to '%s'", address.c_str(), new_name.c_str());
+	});
 }
 
 void PacketEngine::discover_packets()
@@ -870,6 +1123,16 @@ void PacketEngine::discover_packets()
 					{
 						const std::string server_label = format_server_label(address_text);
 						LOG_INFO("Server '%s' is potentially the authoritative server (first packet received)", server_label.c_str());
+						if (options_.resolve_region)
+						{
+							if (is_public_address(address_text))
+							{
+								LOG_DEBUG("Server discovery: '%s' is public, triggering region lookup", address_text.c_str());
+								resolve_region(address_text);
+							}
+							else
+								LOG_DEBUG("Server discovery: '%s' is private/local, skipping region lookup", address_text.c_str());
+						}
 					}
 					++packet_counts[address_text];
 					state_->discovery_counts = packet_counts;

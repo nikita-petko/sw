@@ -84,6 +84,7 @@ struct PacketEngineOptions
 	std::optional<std::string> initial_server;
 	std::optional<uint16_t> discovery_port;
 	uint64_t discovery_window_ms = 5000;
+	bool resolve_region = false;
 };
 
 class PacketMode;
@@ -118,6 +119,7 @@ private:
 	void read_packets(const std::shared_ptr<Session>& session);
 	void write_packets(const std::shared_ptr<Session>& session);
 	void discover_packets();
+	void resolve_region(const std::string& address);
 	std::string server_filter(const ProfileOptions& profile) const;
 
 	PacketEngineOptions options_;
