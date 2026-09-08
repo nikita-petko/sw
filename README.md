@@ -102,8 +102,10 @@ added to the server list. If that address is already in the list, lagsw warns
 and reuses the existing entry. Discovery switches to the authoritative server
 when no concrete server was selected. Both an omitted `--server` argument and
 explicit `--server none` request automatic selection. A concrete `--server`
-selection is never replaced by discovery. Profiles with `server_direction` use
-the selected server when they are next activated.
+selection is never replaced by discovery. Discovery is temporarily paused while
+any profile is active and resumes with a fresh window after all profiles are
+deactivated. Profiles with `server_direction` use the selected server when they
+are next activated.
 
 ## Configuration
 

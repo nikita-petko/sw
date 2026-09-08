@@ -677,6 +677,10 @@ void PacketEngine::setup(int profile)
 	WinDivertSetParam(handle, WINDIVERT_PARAM_QUEUE_TIME, 1024);
 	state_->active_sessions[profile - 1] = session;
 	state_->active_profiles[profile - 1] = true;
+	{
+		std::lock_guard<std::mutex> discovery_lock(state_->discovery_mutex);
+		state_->discovery_counts.clear();
+	}
 	packet_modes_[profile - 1]->reset();
 	running_				= true;
 	session->receive_thread = std::thread(&PacketEngine::read_packets, this, session);
@@ -804,6 +808,7 @@ void PacketEngine::discover_packets()
 		return server == options_.servers.end() ? address : server->name + " [" + address + "]";
 	};
 	uint64_t window_started = GetTickCount64();
+	bool	   was_running   = false;
 	BYTE	 packet_data[0xFFFF];
 	while (!shutdown_)
 	{
@@ -811,6 +816,23 @@ void PacketEngine::discover_packets()
 		UINT			  received_length = 0;
 		if (WinDivertRecv(state_->discovery_handle, packet_data, sizeof(packet_data), &received_length, &address))
 		{
+			if (running_.load())
+			{
+				if (!was_running)
+					LOG_DEBUG("Server discovery disabled while a profile is active");
+				was_running = true;
+				packet_counts.clear();
+				std::lock_guard<std::mutex> lock(state_->discovery_mutex);
+				state_->discovery_counts.clear();
+				window_started = GetTickCount64();
+				continue;
+			}
+			if (was_running)
+			{
+				LOG_DEBUG("Server discovery enabled after all profiles were deactivated");
+				was_running   = false;
+				window_started = GetTickCount64();
+			}
 			PWINDIVERT_IPHDR   ip_header   = nullptr;
 			PWINDIVERT_IPV6HDR ipv6_header = nullptr;
 			if (WinDivertHelperParsePacket(packet_data,
