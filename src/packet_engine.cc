@@ -343,7 +343,55 @@ std::string region_cache_path()
 	const char* local_app_data = std::getenv("LOCALAPPDATA");
 	if (!local_app_data || *local_app_data == '\0')
 		return {};
-	return std::string(local_app_data) + "\\lagsw\\region-cache.tsv";
+	return std::string(local_app_data) + "\\lagsw\\region-cache.csv";
+}
+
+std::string csv_field(const std::string& value)
+{
+	if (value.find_first_of(",\"\r\n") == std::string::npos)
+		return value;
+	std::string escaped = "\"";
+	for (const char character : value)
+	{
+		if (character == '"')
+			escaped += '"';
+		escaped += character;
+	}
+	escaped += '"';
+	return escaped;
+}
+
+std::optional<std::vector<std::string>> parse_csv_line(const std::string& line)
+{
+	std::vector<std::string> fields;
+	std::string field;
+	bool quoted = false;
+	for (size_t index = 0; index < line.size(); ++index)
+	{
+		const char character = line[index];
+		if (quoted)
+		{
+			if (character == '"' && index + 1 < line.size() && line[index + 1] == '"')
+				field += line[++index];
+			else if (character == '"')
+				quoted = false;
+			else
+				field += character;
+		}
+		else if (character == '"' && field.empty())
+			quoted = true;
+		else if (character == ',')
+		{
+			fields.push_back(field);
+			field.clear();
+		}
+		else
+			field += character;
+	}
+	if (quoted)
+		return std::nullopt;
+	fields.push_back(field);
+	return fields;
 }
 
 void load_region_cache(std::unordered_map<std::string, RegionCacheEntry>& cache)
@@ -352,19 +400,40 @@ void load_region_cache(std::unordered_map<std::string, RegionCacheEntry>& cache)
 	if (path.empty())
 		return;
 	std::ifstream file(path);
-	std::string address;
-	std::string label;
-	std::string server_name;
-	std::string expires_at;
-	const uint64_t now = static_cast<uint64_t>(std::time(nullptr));
-	while (std::getline(file, address, '\t') && std::getline(file, label, '\t') && std::getline(file, server_name, '\t') &&
-		   std::getline(file, expires_at))
+	bool legacy_tsv = false;
+	if (!file)
 	{
+		const std::string legacy_path = path.substr(0, path.size() - 4) + ".tsv";
+		file.open(legacy_path);
+		legacy_tsv = true;
+	}
+	const uint64_t now = static_cast<uint64_t>(std::time(nullptr));
+	std::string line;
+	while (std::getline(file, line))
+	{
+		std::optional<std::vector<std::string>> fields;
+		if (legacy_tsv)
+		{
+			fields = std::vector<std::string>();
+			size_t start = 0;
+			while (true)
+			{
+				const size_t separator = line.find('\t', start);
+				fields->push_back(line.substr(start, separator == std::string::npos ? std::string::npos : separator - start));
+				if (separator == std::string::npos)
+					break;
+				start = separator + 1;
+			}
+		}
+		else
+			fields = parse_csv_line(line);
+		if (!fields || fields->size() != 4)
+			continue;
 		try
 		{
-			const uint64_t expiry = std::stoull(expires_at);
-			if (!address.empty() && expiry > now)
-				cache[address] = {label, server_name, expiry};
+			const uint64_t expiry = std::stoull((*fields)[3]);
+			if (!(*fields)[0].empty() && expiry > now)
+				cache[(*fields)[0]] = {(*fields)[1], (*fields)[2], expiry};
 		}
 		catch (const std::exception&)
 		{
@@ -385,7 +454,7 @@ void save_region_cache(const std::unordered_map<std::string, RegionCacheEntry>& 
 	if (!file)
 		return;
 	for (const auto& [address, entry] : cache)
-		file << address << '\t' << entry.label << '\t' << entry.server_name << '\t' << entry.expires_at << '\n';
+		file << csv_field(address) << ',' << csv_field(entry.label) << ',' << csv_field(entry.server_name) << ',' << entry.expires_at << '\n';
 	file.close();
 	if (!MoveFileExA(temporary_path.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
 		DeleteFileA(temporary_path.c_str());
