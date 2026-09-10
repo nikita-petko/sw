@@ -58,10 +58,17 @@ The configuration file must be supplied explicitly:
 lagsw.exe --config profiles/test.yml
 ```
 
-To discover the busiest server on a port while the program runs:
+To discover the busiest server on a port while the program runs, configure
+`servers` as an object with `discovery_port` (see [Configuration](#configuration)):
+
+```yaml
+servers:
+  discovery_port: 55000
+  interval: 5000
+```
 
 ```powershell
-lagsw.exe --config profiles/test.yml --discover 55000 --discover-window 5000
+lagsw.exe --config profiles/test.yml
 ```
 
 Options:
@@ -71,8 +78,7 @@ Options:
 | `--config <file>` | Load profiles from a YAML file. Required. |
 | `--log-level <level>`, `-l <level>` | Set the minimum log level: `error`, `warn`, `info`, or `debug`. |
 | `--server <server>`, `-s <server>` | Select the initial configured server by name or address. Unknown values warn and use `none`. |
-| `--discover <port>` | Observe TCP and UDP traffic on the port and select the remote address receiving the most packets in each discovery window. |
-| `--discover-window <ms>` | Discovery window length in milliseconds. Defaults to `5000`. |
+| `--resolve-region` | Resolve the geographic region of discovered servers. |
 | `--help`, `-h` | Print command help and exit. |
 
 While the program is running:
@@ -95,17 +101,18 @@ Hold profiles follow the key state independently. Each active profile has its
 own capture handle and packet queue. `Tab` is reserved for displaying state
 and cannot be used as a profile key.
 
-When discovery is enabled, lagsw opens a sniff-only handle and counts packets
-to and from the selected port without delaying them. At the end of each window,
-the remote address with the highest packet count is logged as authoritative and
-added to the server list. If that address is already in the list, lagsw warns
-and reuses the existing entry. Discovery switches to the authoritative server
-when no concrete server was selected. Both an omitted `--server` argument and
-explicit `--server none` request automatic selection. A concrete `--server`
-selection is never replaced by discovery. Discovery is temporarily paused while
-any profile is active and resumes with a fresh window after all profiles are
-deactivated. Profiles with `server_direction` use the selected server when they
-are next activated.
+When discovery is enabled (via `servers.discovery_port` in the configuration),
+lagsw opens a sniff-only handle and counts packets to and from the selected
+port without delaying them. At the end of each window, the remote address with
+the highest packet count is logged as authoritative and added to the server
+list. If that address is already in the list, lagsw warns and reuses the
+existing entry. Discovery switches to the authoritative server when no
+concrete server was selected. Both an omitted `--server` argument and explicit
+`--server none` request automatic selection. A concrete `--server` selection is
+never replaced by discovery. Discovery is temporarily paused while any profile
+is active and resumes with a fresh window after all profiles are deactivated.
+Profiles with `server_direction` use the selected server when they are next
+activated.
 
 ## Configuration
 
@@ -138,8 +145,30 @@ profiles:
 | Field | Required | Description |
 | --- | --- | --- |
 | `global_filter` | No | WinDivert filter used by profiles that do not define `filter`. Defaults to `tcp.DstPort == 55000 or tcp.SrcPort == 55000`. |
-| `servers` | No | String array of server addresses. An entry may use `address:name` to provide the status-bar name. |
+| `servers` | No | Either a string array of server addresses, or an object enabling server discovery (see below). |
 | `profiles` | Yes | A non-empty list of profile definitions. |
+
+`servers` as a list is a set of known server addresses. An entry may use
+`address:name` to provide the status-bar name:
+
+```yaml
+servers:
+  - "34.90.202.108:game server"
+  - "203.0.113.10:backup server"
+```
+
+`servers` as an object enables server discovery instead of a fixed list:
+
+```yaml
+servers:
+  discovery_port: 55000
+  interval: 5000
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `discovery_port` | Yes | Port (1-65535) to observe TCP and UDP traffic on; the remote address receiving the most packets in each discovery window is selected. |
+| `interval` | No | Discovery window length in milliseconds. Defaults to `5000`. |
 
 ### Profile fields
 

@@ -112,6 +112,8 @@ public:
 	uint64_t next_batch_in_ms() const;
 	void cycle_server(int direction);
 	std::string current_server() const;
+	std::string current_server_region() const;
+	std::string client_region() const;
 	void print_state() const;
 
 private:
@@ -120,6 +122,7 @@ private:
 	void write_packets(const std::shared_ptr<Session>& session);
 	void discover_packets();
 	void resolve_region(const std::string& address);
+	void resolve_client_region();
 	std::string server_filter(const ProfileOptions& profile) const;
 
 	PacketEngineOptions options_;

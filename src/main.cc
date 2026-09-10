@@ -187,8 +187,13 @@ int main(int argc, char* argv[])
 					active_profiles += ", ";
 				active_profiles += options.profiles[index].name;
 			}
+			const std::string server_region = engine.current_server_region();
+			const std::string client_region	 = engine.client_region();
+			std::string		  region;
+			if (!server_region.empty() || !client_region.empty())
+				region = (server_region.empty() ? "unknown" : server_region) + "/" + (client_region.empty() ? "unknown" : client_region);
 			const std::string server_status =
-				"server: " + engine.current_server() + (engine.is_authoritative_server() ? " (authoritative)" : "");
+				engine.current_server() + (engine.is_authoritative_server() ? " (authoritative)" : "") + (region.empty() ? "" : " | " + region);
 			logging::set_status(status, server_status + (active_profiles.empty() ? "" : " | " + active_profiles));
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		}

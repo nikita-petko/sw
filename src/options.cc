@@ -227,6 +227,44 @@ bool add_server(const std::string& value, PacketEngineOptions& options, const ch
 	return true;
 }
 
+bool set_discovery_port(const std::string& value, PacketEngineOptions& options, const char* path, int line_number)
+{
+	try
+	{
+		const std::string	   item	  = unquote(trim(value));
+		size_t				   consumed = 0;
+		const unsigned long   port	  = std::stoul(item, &consumed);
+		if (consumed != item.size() || port == 0 || port > (std::numeric_limits<uint16_t>::max)())
+			throw std::invalid_argument("invalid port");
+		options.discovery_port = static_cast<uint16_t>(port);
+		return true;
+	}
+	catch (...)
+	{
+		LOG_ERROR("Invalid discovery_port in %s at line %d", path, line_number);
+		return false;
+	}
+}
+
+bool set_discovery_interval(const std::string& value, PacketEngineOptions& options, const char* path, int line_number)
+{
+	try
+	{
+		const std::string			  item	   = unquote(trim(value));
+		size_t						  consumed = 0;
+		const unsigned long long interval = std::stoull(item, &consumed);
+		if (consumed != item.size() || interval == 0)
+			throw std::invalid_argument("invalid interval");
+		options.discovery_window_ms = interval;
+		return true;
+	}
+	catch (...)
+	{
+		LOG_ERROR("Invalid interval in %s at line %d", path, line_number);
+		return false;
+	}
+}
+
 bool load_profiles(const char* path, PacketEngineOptions& options)
 {
 	std::ifstream file(path);
@@ -238,6 +276,8 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 
 	options.profiles.clear();
 	options.servers.clear();
+	options.discovery_port.reset();
+	options.discovery_window_ms = 5000;
 	std::string		line;
 	ProfileOptions* profile = nullptr;
 	std::string		section;
@@ -280,6 +320,23 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		}
 		std::string key	  = trim(content.substr(0, colon));
 		std::string value = trim(content.substr(colon + 1));
+		if (subsection == "servers" && indent > subsection_indent)
+		{
+			if (key == "discovery_port")
+			{
+				if (!set_discovery_port(value, options, path, line_number))
+					return false;
+				continue;
+			}
+			if (key == "interval")
+			{
+				if (!set_discovery_interval(value, options, path, line_number))
+					return false;
+				continue;
+			}
+			LOG_ERROR("Invalid servers configuration key '%s' in %s at line %d", key.c_str(), path, line_number);
+			return false;
+		}
 		if (key == "- name")
 		{
 			options.profiles.push_back({});
@@ -594,10 +651,9 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 	options.global_filter = kDefaultFilter;
 	options.profiles.clear();
 	options.initial_server.reset();
-	options.discovery_port.reset();
-	options.discovery_window_ms = 5000;
-	options.resolve_region		 = false;
-	bool config_loaded			= false;
+	options.resolve_region = false;
+	bool config_loaded		= false;
+
 	for (int index = 1; index < argc; ++index)
 	{
 		if (std::strcmp(argv[index], "--config") == 0)
@@ -639,48 +695,6 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 			}
 			options.initial_server = argv[++index];
 		}
-		else if (std::strcmp(argv[index], "--discover") == 0 || std::strcmp(argv[index], "--discover-port") == 0)
-		{
-			if (index + 1 >= argc)
-			{
-				LOG_ERROR("%s requires a port from 1 to 65535", argv[index]);
-				return false;
-			}
-			try
-			{
-				size_t				consumed = 0;
-				const unsigned long port	 = std::stoul(argv[++index], &consumed);
-				if (consumed != std::strlen(argv[index]) || port == 0 || port > (std::numeric_limits<uint16_t>::max)())
-					throw std::invalid_argument("invalid port");
-				options.discovery_port = static_cast<uint16_t>(port);
-			}
-			catch (...)
-			{
-				LOG_ERROR("Invalid discovery port: %s", argv[index]);
-				return false;
-			}
-		}
-		else if (std::strcmp(argv[index], "--discover-window") == 0)
-		{
-			if (index + 1 >= argc)
-			{
-				LOG_ERROR("--discover-window requires a positive duration in milliseconds");
-				return false;
-			}
-			try
-			{
-				size_t					 consumed = 0;
-				const unsigned long long window	  = std::stoull(argv[++index], &consumed);
-				if (consumed != std::strlen(argv[index]) || window == 0)
-					throw std::invalid_argument("invalid window");
-				options.discovery_window_ms = window;
-			}
-			catch (...)
-			{
-				LOG_ERROR("Invalid discovery window: %s", argv[index]);
-				return false;
-			}
-		}
 		else if (std::strcmp(argv[index], "--resolve-region") == 0)
 		{
 			options.resolve_region = true;
@@ -691,8 +705,6 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 			std::printf("  --config <file> Load profiles from YAML\n");
 			std::printf("  --log-level, -l <level> Set log level: error, warn, info, or debug\n");
 			std::printf("  --server, -s <server> Select the initial configured server\n");
-			std::printf("  --discover <port>      Discover the busiest server on a TCP/UDP port\n");
-			std::printf("  --discover-window <ms> Discovery window (default: 5000)\n");
 			std::printf("  --resolve-region        Resolve the geographic region of discovered servers\n");
 			std::printf("  --help, -h              Show this help message\n");
 			return false;

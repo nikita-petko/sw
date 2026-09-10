@@ -244,29 +244,35 @@ std::string last_ip_segment(const std::string& address)
 	return address;
 }
 
-// coarse west/east split per region group, since ipapi.co has no notion of "US-West" vs "US-East" etc.
+// coarse west/central/east split per region group, since ipapi.co has no notion of "US-West" vs "US-East" etc.
 std::string country_region_code(const std::optional<std::string>& country_code,
 								 const std::optional<std::string>& continent_code,
 								 const std::optional<double>&		longitude)
 {
-	static const std::unordered_map<std::string, double> longitude_thresholds = {
-		{"US", -98.0},
-		{"CA", -98.0},
-		{"NA", -98.0},
-		{"EU", 10.0},
-		{"AS", 100.0},
-		{"OC", 135.0},
-		{"SA", -60.0},
-		{"AF", 20.0},
+	struct LongitudeBand
+	{
+		double west_max;
+		double east_min;
 	};
-	const std::string group = country_code && *country_code == "US" ? "US" : continent_code.value_or(country_code.value_or("XX"));
-	const auto		  threshold_it = longitude_thresholds.find(group);
-	const double	  threshold	   = threshold_it == longitude_thresholds.end() ? 0.0 : threshold_it->second;
-	const char		  suffix	   = longitude.value_or(0.0) < threshold ? 'W' : 'E';
+	static const std::unordered_map<std::string, LongitudeBand> longitude_bands = {
+		{"US", {-115.0, -90.0}},
+		{"CA", {-115.0, -90.0}},
+		{"NA", {-115.0, -90.0}},
+		{"EU", {-5.0, 25.0}},
+		{"AS", {70.0, 120.0}},
+		{"OC", {130.0, 150.0}},
+		{"SA", {-70.0, -50.0}},
+		{"AF", {10.0, 30.0}},
+	};
+	const std::string	 group	   = country_code && *country_code == "US" ? "US" : continent_code.value_or(country_code.value_or("XX"));
+	const auto			 band_it   = longitude_bands.find(group);
+	const LongitudeBand	 band	   = band_it == longitude_bands.end() ? LongitudeBand{-30.0, 30.0} : band_it->second;
+	const double		 lon	   = longitude.value_or(0.0);
+	const char			 suffix	   = lon < band.west_max ? 'W' : lon > band.east_min ? 'E' : 'C';
 	return group + suffix;
 }
 
-// e.g. "IA-USE-19" for region_code IA, country_region USE, and address ending in .19
+// e.g. "IA-USC-19" for region_code IA, country_region USC, and address ending in .19
 std::string build_server_name(const std::string& address, const std::string& response)
 {
 	const auto region_code	   = extract_json_string(response, "region_code");
@@ -274,6 +280,19 @@ std::string build_server_name(const std::string& address, const std::string& res
 	const auto continent_code = extract_json_string(response, "continent_code");
 	const auto longitude	   = extract_json_number(response, "longitude");
 	return region_code.value_or("XX") + "-" + country_region_code(country_code, continent_code, longitude) + "-" + last_ip_segment(address);
+}
+
+std::optional<std::string> extract_region_label(const std::string& response)
+{
+	const auto region  = extract_json_string(response, "region");
+	const auto country = extract_json_string(response, "country_name");
+	if (!region && !country)
+		return std::nullopt;
+	std::string label = region.value_or("");
+	if (region && country)
+		label += ", ";
+	label += country.value_or("");
+	return label;
 }
 
 // queries ipapi.co over HTTPS; returns an empty string on any failure so callers can skip silently
@@ -394,6 +413,7 @@ struct PacketEngine::State
 	std::unordered_map<std::string, std::string> server_regions;
 	std::unordered_set<std::string>			  region_lookups_started;
 	std::vector<std::thread>				  region_threads;
+	std::string								  client_region;
 };
 
 PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(options)), state_(new State(options_.profiles.size()))
@@ -532,6 +552,27 @@ std::string PacketEngine::current_server() const
 		return server.name == server.address ? server.address : server.name + " [" + server.address + "]";
 	}
 	return "none";
+}
+
+std::string PacketEngine::current_server_region() const
+{
+	std::string address;
+	{
+		std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
+		const size_t				server_index = server_index_.load();
+		if (server_index == 0)
+			return "";
+		address = options_.servers[server_index - 1].address;
+	}
+	std::lock_guard<std::mutex> region_lock(state_->region_mutex);
+	const auto					 region = state_->server_regions.find(address);
+	return region == state_->server_regions.end() ? "" : region->second;
+}
+
+std::string PacketEngine::client_region() const
+{
+	std::lock_guard<std::mutex> region_lock(state_->region_mutex);
+	return state_->client_region;
 }
 
 void PacketEngine::cycle_server(int direction)
@@ -953,6 +994,8 @@ void PacketEngine::teardown()
 
 void PacketEngine::start_workers()
 {
+	if (options_.resolve_region)
+		resolve_client_region();
 	if (!options_.discovery_port)
 		return;
 	const uint16_t	  port	 = *options_.discovery_port;
@@ -1014,25 +1057,20 @@ void PacketEngine::resolve_region(const std::string& address)
 			return;
 		}
 		LOG_DEBUG("Region lookup for '%s': received %zu byte response", address.c_str(), response.size());
-		const auto region  = extract_json_string(response, "region");
-		const auto country = extract_json_string(response, "country_name");
-		if (!region && !country)
+		const auto label = extract_region_label(response);
+		if (!label)
 		{
 			LOG_DEBUG("Region lookup for '%s': response missing region/country fields, body: %s",
 					  address.c_str(),
 					  response.substr(0, 300).c_str());
 			return;
 		}
-		std::string label = region.value_or("");
-		if (region && country)
-			label += ", ";
-		label += country.value_or("");
 		{
 			std::lock_guard<std::mutex> lock(state_->region_mutex);
-			state_->server_regions[address] = label;
+			state_->server_regions[address] = *label;
 		}
 		LOG_DEBUG("Region lookup for '%s': cached result", address.c_str());
-		LOG_INFO("Resolved region for server '%s': %s", address.c_str(), label.c_str());
+		LOG_INFO("Resolved region for server '%s': %s", address.c_str(), label->c_str());
 
 		const std::string new_name = build_server_name(address, response);
 		LOG_DEBUG("Region lookup for '%s': rewriting server name to '%s'", address.c_str(), new_name.c_str());
@@ -1047,6 +1085,33 @@ void PacketEngine::resolve_region(const std::string& address)
 				LOG_DEBUG("Region lookup for '%s': server no longer tracked, skipping rename", address.c_str());
 		}
 		LOG_INFO("Server '%s' renamed to '%s'", address.c_str(), new_name.c_str());
+	});
+}
+
+void PacketEngine::resolve_client_region()
+{
+	LOG_DEBUG("Client region lookup: queued");
+	state_->region_threads.emplace_back([this] {
+		LOG_DEBUG("Client region lookup: requesting https://ipapi.co/json/");
+		const std::string response = https_get(L"ipapi.co", L"/json/");
+		if (response.empty())
+		{
+			LOG_DEBUG("Client region lookup: empty response, giving up");
+			return;
+		}
+		LOG_DEBUG("Client region lookup: received %zu byte response", response.size());
+		const auto label = extract_region_label(response);
+		if (!label)
+		{
+			LOG_DEBUG("Client region lookup: response missing region/country fields, body: %s", response.substr(0, 300).c_str());
+			return;
+		}
+		{
+			std::lock_guard<std::mutex> lock(state_->region_mutex);
+			state_->client_region = *label;
+		}
+		LOG_DEBUG("Client region lookup: cached result");
+		LOG_INFO("Resolved client region: %s", label->c_str());
 	});
 }
 

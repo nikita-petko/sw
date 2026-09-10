@@ -1,10 +1,5 @@
 servers:
-  - "34.13.202.203:AMS-EUC-203"
-  - "34.90.202.108:AMS-EUC-108"
-  - "104.155.45.25:BRU-EUW-25"
-  - "34.76.248.132:BRU-EUW-132"
-  - "35.232.75.10:MCI-USC-10"
-  - "136.112.189.19:MCI-USC-19"
+  discovery_port: 55000
 
 profiles:
   - name: "RPM"
