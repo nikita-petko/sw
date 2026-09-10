@@ -9,7 +9,6 @@
 #endif
 
 #include "packet_engine.h"
-
 #include <windows.h>
 
 #include <mmsystem.h>
@@ -19,6 +18,9 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
+#include <cstdlib>
+#include <ctime>
+#include <fstream>
 #include <limits>
 #include <mutex>
 #include <string>
@@ -34,8 +36,8 @@
 namespace {
 std::string format_win32_error(DWORD error)
 {
-	char*		message = nullptr;
-	const DWORD length	= FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+	char* message = nullptr;
+	const DWORD length = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
 										 nullptr,
 										 error,
 										 0,
@@ -44,7 +46,6 @@ std::string format_win32_error(DWORD error)
 										 nullptr);
 	if (length == 0)
 		return "unknown error";
-
 	std::string result(message, length);
 	LocalFree(message);
 	while (!result.empty() && (result.back() == '\r' || result.back() == '\n'))
@@ -163,6 +164,38 @@ std::string format_ipv6_address(const UINT32* address)
 	return buffer;
 }
 
+struct PacketAddresses
+{
+	std::string source;
+	std::string destination;
+};
+
+PacketAddresses packet_addresses(const BYTE* packet_data, UINT packet_length)
+{
+	PWINDIVERT_IPHDR ip_header = nullptr;
+	PWINDIVERT_IPV6HDR ipv6_header = nullptr;
+	if (!WinDivertHelperParsePacket(packet_data,
+									packet_length,
+									&ip_header,
+									&ipv6_header,
+									nullptr,
+									nullptr,
+									nullptr,
+									nullptr,
+									nullptr,
+									nullptr,
+									nullptr,
+									nullptr,
+									nullptr))
+		return {};
+
+	if (ip_header != nullptr)
+		return {format_ipv4_address(ip_header->SrcAddr), format_ipv4_address(ip_header->DstAddr)};
+	if (ipv6_header != nullptr)
+		return {format_ipv6_address(ipv6_header->SrcAddr), format_ipv6_address(ipv6_header->DstAddr)};
+	return {};
+}
+
 // avoids wasted lookups for local/test infrastructure that has no meaningful geographic region
 bool is_public_address(const std::string& address)
 {
@@ -203,7 +236,7 @@ std::optional<std::string> extract_json_string(const std::string& json, const st
 	if (start >= json.size() || json[start] != '"')
 		return std::nullopt;
 	const auto value_start = start + 1;
-	const auto value_end	= json.find('"', value_start);
+	const auto value_end = json.find('"', value_start);
 	if (value_end == std::string::npos)
 		return std::nullopt;
 	return json.substr(value_start, value_end - value_start);
@@ -295,10 +328,80 @@ std::optional<std::string> extract_region_label(const std::string& response)
 	return label;
 }
 
-// queries ipapi.co over HTTPS; returns an empty string on any failure so callers can skip silently
-std::string https_get(const std::wstring& host, const std::wstring& path)
+struct RegionCacheEntry
 {
-	std::string result;
+	std::string label;
+	std::string server_name;
+	uint64_t expires_at = 0;
+};
+
+constexpr uint64_t region_cache_lifetime_seconds = 30 * 24 * 60 * 60;
+const char* client_region_cache_key = "@client";
+
+std::string region_cache_path()
+{
+	const char* local_app_data = std::getenv("LOCALAPPDATA");
+	if (!local_app_data || *local_app_data == '\0')
+		return {};
+	return std::string(local_app_data) + "\\lagsw\\region-cache.tsv";
+}
+
+void load_region_cache(std::unordered_map<std::string, RegionCacheEntry>& cache)
+{
+	const std::string path = region_cache_path();
+	if (path.empty())
+		return;
+	std::ifstream file(path);
+	std::string address;
+	std::string label;
+	std::string server_name;
+	std::string expires_at;
+	const uint64_t now = static_cast<uint64_t>(std::time(nullptr));
+	while (std::getline(file, address, '\t') && std::getline(file, label, '\t') && std::getline(file, server_name, '\t') &&
+		   std::getline(file, expires_at))
+	{
+		try
+		{
+			const uint64_t expiry = std::stoull(expires_at);
+			if (!address.empty() && expiry > now)
+				cache[address] = {label, server_name, expiry};
+		}
+		catch (const std::exception&)
+		{
+			LOG_DEBUG("Ignoring malformed region cache entry");
+		}
+	}
+}
+
+void save_region_cache(const std::unordered_map<std::string, RegionCacheEntry>& cache)
+{
+	const std::string path = region_cache_path();
+	if (path.empty())
+		return;
+	const std::string directory = path.substr(0, path.find_last_of("\\/"));
+	CreateDirectoryA(directory.c_str(), nullptr);
+	const std::string temporary_path = path + ".tmp";
+	std::ofstream file(temporary_path, std::ios::trunc);
+	if (!file)
+		return;
+	for (const auto& [address, entry] : cache)
+		file << address << '\t' << entry.label << '\t' << entry.server_name << '\t' << entry.expires_at << '\n';
+	file.close();
+	if (!MoveFileExA(temporary_path.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+		DeleteFileA(temporary_path.c_str());
+}
+
+struct HttpResponse
+{
+	DWORD status = 0;
+	DWORD retry_after_seconds = 0;
+	std::string body;
+};
+
+// queries ipapi.co over HTTPS; callers use the status to avoid caching errors
+HttpResponse https_get(const std::wstring& host, const std::wstring& path)
+{
+	HttpResponse result;
 	HINTERNET	session = WinHttpOpen(L"lagsw/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
 	if (!session)
 	{
@@ -329,7 +432,39 @@ std::string https_get(const std::wstring& host, const std::wstring& path)
 										&status,
 										&status_size,
 										WINHTTP_NO_HEADER_INDEX))
+				{
+					result.status = status;
+					// Retry-After can be a delta-seconds count or an HTTP-date, so it isn't queryable via WINHTTP_QUERY_FLAG_NUMBER
+					DWORD retry_after_bytes = 0;
+					WinHttpQueryHeaders(request,
+										WINHTTP_QUERY_RETRY_AFTER,
+										WINHTTP_HEADER_NAME_BY_INDEX,
+										WINHTTP_NO_OUTPUT_BUFFER,
+										&retry_after_bytes,
+										WINHTTP_NO_HEADER_INDEX);
+					if (retry_after_bytes > 0)
+					{
+						std::wstring retry_after_text(retry_after_bytes / sizeof(wchar_t), L'\0');
+						if (WinHttpQueryHeaders(request,
+												WINHTTP_QUERY_RETRY_AFTER,
+												WINHTTP_HEADER_NAME_BY_INDEX,
+												retry_after_text.data(),
+												&retry_after_bytes,
+												WINHTTP_NO_HEADER_INDEX))
+						{
+							retry_after_text.resize(wcsnlen(retry_after_text.c_str(), retry_after_text.size()));
+							try
+							{
+								result.retry_after_seconds = std::stoul(retry_after_text);
+							}
+							catch (const std::exception&)
+							{
+								LOG_DEBUG("https_get: Retry-After header is not a delta-seconds value, ignoring");
+							}
+						}
+					}
 					LOG_DEBUG("https_get: response received, status %lu, reading body", status);
+				}
 				else
 					LOG_DEBUG("https_get: response received, status unknown, reading body");
 				DWORD available = 0;
@@ -339,9 +474,9 @@ std::string https_get(const std::wstring& host, const std::wstring& path)
 					DWORD			  read = 0;
 					if (!WinHttpReadData(request, buffer.data(), available, &read))
 						break;
-					result.append(buffer.data(), read);
+					result.body.append(buffer.data(), read);
 				}
-				LOG_DEBUG("https_get: finished reading %zu total bytes", result.size());
+				LOG_DEBUG("https_get: finished reading %zu total bytes", result.body.size());
 			}
 			else
 				LOG_DEBUG("https_get: send/receive failed %lu", GetLastError());
@@ -355,6 +490,22 @@ std::string https_get(const std::wstring& host, const std::wstring& path)
 		LOG_DEBUG("https_get: WinHttpConnect failed %lu", GetLastError());
 	WinHttpCloseHandle(session);
 	return result;
+}
+
+HttpResponse https_get_until_not_rate_limited(const std::wstring& host, const std::wstring& path)
+{
+	while (true)
+	{
+		HttpResponse response = https_get(host, path);
+		if (response.status != 429)
+			return response;
+		const DWORD delay_seconds = response.retry_after_seconds == 0 ? 1 : response.retry_after_seconds;
+		LOG_DEBUG("https_get: rate limited, retrying in %lu second(s)", delay_seconds);
+		const DWORD delay_ms = delay_seconds > (std::numeric_limits<DWORD>::max)() / 1000
+			? (std::numeric_limits<DWORD>::max)()
+			: delay_seconds * 1000;
+		Sleep(delay_ms);
+	}
 }
 }  // namespace
 
@@ -411,6 +562,7 @@ struct PacketEngine::State
 	bool									  select_authoritative_server = false;
 	std::mutex								  region_mutex;
 	std::unordered_map<std::string, std::string> server_regions;
+	std::unordered_map<std::string, RegionCacheEntry> region_cache;
 	std::unordered_set<std::string>			  region_lookups_started;
 	std::vector<std::thread>				  region_threads;
 	std::string								  client_region;
@@ -418,6 +570,7 @@ struct PacketEngine::State
 
 PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(options)), state_(new State(options_.profiles.size()))
 {
+	load_region_cache(state_->region_cache);
 	packet_modes_.reserve(options_.profiles.size());
 	for (const ProfileOptions& profile : options_.profiles)
 		packet_modes_.push_back(create_packet_mode(profile));
@@ -761,6 +914,7 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 			session->packet_changed.notify_one();
 		}
 		PWINDIVERT_TCPHDR tcp_header = nullptr;
+		const PacketAddresses addresses = packet_addresses(packet_data, received_length);
 		if (WinDivertHelperParsePacket(packet_data,
 									   received_length,
 									   nullptr,
@@ -776,24 +930,30 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 									   nullptr) &&
 			tcp_header != nullptr)
 		{
-			LOG_DEBUG("%s recv: TCP packet: Length = %u, Sequence = %u, Ack = %u, Timestamp = %lld",
+			LOG_DEBUG("%s recv: TCP packet: Length = %u, Sequence = %u, Ack = %u, Src = %s, Dst = %s",
 					  profile_label.c_str(),
 					  received_length,
 					  WinDivertHelperNtohl(tcp_header->SeqNum),
 					  WinDivertHelperNtohl(tcp_header->AckNum),
-					  address.Timestamp);
+					  addresses.source.c_str(),
+					  addresses.destination.c_str());
 		}
 		else
 		{
-			LOG_DEBUG("%s recv: packet: Length = %u, Timestamp = %lld", profile_label.c_str(), received_length, address.Timestamp);
+			LOG_DEBUG("%s recv: packet: Length = %u, Src = %s, Dst = %s",
+					  profile_label.c_str(),
+					  received_length,
+					  addresses.source.c_str(),
+					  addresses.destination.c_str());
 		}
 	}
 }
 
 void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
+
 {
 	const ProfileOptions& profile_options = options_.profiles[session->profile - 1];
-	const std::string	  profile_label	  = "profile #" + std::to_string(session->profile) + " - " + profile_options.name;
+	const std::string profile_label = "profile #" + std::to_string(session->profile) + " - " + profile_options.name;
 	while (!session->stopping)
 	{
 		while (!session->stopping)
@@ -831,10 +991,12 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 				else if (sent != 0)
 				{
 					state_->profile_stats[session->profile - 1].delayed_packets_sent.fetch_add(1);
-					LOG_DEBUG("%s send: delayed packet: Length = %u, Timestamp = %llu, SendLen = %u",
+					const PacketAddresses addresses = packet_addresses(node->packet, node->length);
+					LOG_DEBUG("%s send: delayed packet: Length = %u, Src = %s, Dst = %s, SendLen = %u",
 							  profile_label.c_str(),
 							  node->length,
-							  static_cast<unsigned long long>(node->address->Timestamp),
+							  addresses.source.c_str(),
+							  addresses.destination.c_str(),
 							  sent);
 				}
 			}
@@ -861,10 +1023,12 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 			else if (sent != 0)
 			{
 				state_->profile_stats[session->profile - 1].teardown_packets_sent.fetch_add(1);
-				LOG_DEBUG("%s flush: sent packet: Length = %u, Timestamp = %llu, SendLen = %u",
+				const PacketAddresses addresses = packet_addresses(node->packet, node->length);
+				LOG_DEBUG("%s flush: sent packet: Length = %u, Src = %s, Dst = %s, SendLen = %u",
 						  profile_label.c_str(),
 						  node->length,
-						  static_cast<unsigned long long>(node->address->Timestamp),
+						  addresses.source.c_str(),
+						  addresses.destination.c_str(),
 						  sent);
 			}
 			destroy_packet_node(node);
@@ -1038,6 +1202,30 @@ void PacketEngine::stop_workers()
 
 void PacketEngine::resolve_region(const std::string& address)
 {
+	RegionCacheEntry cached;
+	{
+		std::lock_guard<std::mutex> lock(state_->region_mutex);
+		const auto cache_entry = state_->region_cache.find(address);
+		if (cache_entry != state_->region_cache.end() && cache_entry->second.expires_at > static_cast<uint64_t>(std::time(nullptr)))
+		{
+			cached = cache_entry->second;
+			state_->server_regions[address] = cached.label;
+		}
+	}
+	if (!cached.label.empty())
+	{
+		LOG_DEBUG("Region lookup for '%s': using local cache", address.c_str());
+		// resolve_region is only ever called by discover_packets, which already holds lifecycle_mutex here
+		if (!cached.server_name.empty())
+		{
+			const auto server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](ServerOptions& item) {
+				return item.address == address;
+			});
+			if (server != options_.servers.end())
+				server->name = cached.server_name;
+		}
+		return;
+	}
 	{
 		std::lock_guard<std::mutex> lock(state_->region_mutex);
 		if (!state_->region_lookups_started.insert(address).second)
@@ -1050,29 +1238,31 @@ void PacketEngine::resolve_region(const std::string& address)
 	state_->region_threads.emplace_back([this, address] {
 		LOG_DEBUG("Region lookup for '%s': requesting https://ipapi.co/%s/json/", address.c_str(), address.c_str());
 		const std::wstring path	   = L"/" + std::wstring(address.begin(), address.end()) + L"/json/";
-		const std::string	response = https_get(L"ipapi.co", path);
-		if (response.empty())
+		const HttpResponse response = https_get_until_not_rate_limited(L"ipapi.co", path);
+		if (response.status < 200 || response.status >= 300 || response.body.empty())
 		{
-			LOG_DEBUG("Region lookup for '%s': empty response, giving up", address.c_str());
+			LOG_DEBUG("Region lookup for '%s': unsuccessful response (status %lu), giving up", address.c_str(), response.status);
 			return;
 		}
-		LOG_DEBUG("Region lookup for '%s': received %zu byte response", address.c_str(), response.size());
-		const auto label = extract_region_label(response);
+		LOG_DEBUG("Region lookup for '%s': received %zu byte response", address.c_str(), response.body.size());
+		const auto label = extract_region_label(response.body);
 		if (!label)
 		{
 			LOG_DEBUG("Region lookup for '%s': response missing region/country fields, body: %s",
 					  address.c_str(),
-					  response.substr(0, 300).c_str());
+					  response.body.substr(0, 300).c_str());
 			return;
 		}
+		const std::string new_name = build_server_name(address, response.body);
 		{
 			std::lock_guard<std::mutex> lock(state_->region_mutex);
 			state_->server_regions[address] = *label;
+			state_->region_cache[address] = {*label, new_name, static_cast<uint64_t>(std::time(nullptr)) + region_cache_lifetime_seconds};
+			save_region_cache(state_->region_cache);
 		}
 		LOG_DEBUG("Region lookup for '%s': cached result", address.c_str());
 		LOG_INFO("Resolved region for server '%s': %s", address.c_str(), label->c_str());
 
-		const std::string new_name = build_server_name(address, response);
 		LOG_DEBUG("Region lookup for '%s': rewriting server name to '%s'", address.c_str(), new_name.c_str());
 		{
 			std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
@@ -1090,25 +1280,37 @@ void PacketEngine::resolve_region(const std::string& address)
 
 void PacketEngine::resolve_client_region()
 {
+	{
+		std::lock_guard<std::mutex> lock(state_->region_mutex);
+		const auto cache_entry = state_->region_cache.find(client_region_cache_key);
+		if (cache_entry != state_->region_cache.end() && cache_entry->second.expires_at > static_cast<uint64_t>(std::time(nullptr)))
+		{
+			state_->client_region = cache_entry->second.label;
+			LOG_DEBUG("Client region lookup: using local cache");
+			return;
+		}
+	}
 	LOG_DEBUG("Client region lookup: queued");
 	state_->region_threads.emplace_back([this] {
 		LOG_DEBUG("Client region lookup: requesting https://ipapi.co/json/");
-		const std::string response = https_get(L"ipapi.co", L"/json/");
-		if (response.empty())
+		const HttpResponse response = https_get_until_not_rate_limited(L"ipapi.co", L"/json/");
+		if (response.status < 200 || response.status >= 300 || response.body.empty())
 		{
-			LOG_DEBUG("Client region lookup: empty response, giving up");
+			LOG_DEBUG("Client region lookup: unsuccessful response (status %lu), giving up", response.status);
 			return;
 		}
-		LOG_DEBUG("Client region lookup: received %zu byte response", response.size());
-		const auto label = extract_region_label(response);
+		LOG_DEBUG("Client region lookup: received %zu byte response", response.body.size());
+		const auto label = extract_region_label(response.body);
 		if (!label)
 		{
-			LOG_DEBUG("Client region lookup: response missing region/country fields, body: %s", response.substr(0, 300).c_str());
+			LOG_DEBUG("Client region lookup: response missing region/country fields, body: %s", response.body.substr(0, 300).c_str());
 			return;
 		}
 		{
 			std::lock_guard<std::mutex> lock(state_->region_mutex);
 			state_->client_region = *label;
+			state_->region_cache[client_region_cache_key] = {*label, "", static_cast<uint64_t>(std::time(nullptr)) + region_cache_lifetime_seconds};
+			save_region_cache(state_->region_cache);
 		}
 		LOG_DEBUG("Client region lookup: cached result");
 		LOG_INFO("Resolved client region: %s", label->c_str());

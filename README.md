@@ -78,7 +78,7 @@ Options:
 | `--config <file>` | Load profiles from a YAML file. Required. |
 | `--log-level <level>`, `-l <level>` | Set the minimum log level: `error`, `warn`, `info`, or `debug`. |
 | `--server <server>`, `-s <server>` | Select the initial configured server by name or address. Unknown values warn and use `none`. |
-| `--resolve-region` | Resolve the geographic region of discovered servers. |
+| `--resolve-region` | Resolve the geographic region of discovered servers. Successful lookups are cached locally for 30 days. |
 | `--help`, `-h` | Print command help and exit. |
 
 While the program is running:
