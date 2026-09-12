@@ -55,6 +55,19 @@ std::optional<ProfileKeyMode> parse_key_mode(const std::string& value)
 	return std::nullopt;
 }
 
+std::optional<WinDivertOptions::ClientAddressEnforcement> parse_client_address_enforcement(const std::string& value)
+{
+	if (value == "none")
+		return WinDivertOptions::ClientAddressEnforcement::none;
+	if (value == "source")
+		return WinDivertOptions::ClientAddressEnforcement::source;
+	if (value == "destination")
+		return WinDivertOptions::ClientAddressEnforcement::destination;
+	if (value == "both")
+		return WinDivertOptions::ClientAddressEnforcement::both;
+	return std::nullopt;
+}
+
 std::optional<WinDivertOptions::ServerDirection> parse_server_direction(const std::string& value)
 {
 	if (value == "source")
@@ -507,6 +520,17 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				profile->windivert_options.server_direction = *direction;
 				continue;
 			}
+			if (key == "client_address_enforcement")
+			{
+				const auto enforcement = parse_client_address_enforcement(unquote(value));
+				if (!enforcement)
+				{
+					LOG_ERROR("Invalid client_address_enforcement in %s at line %d: expected none, source, destination, or both", path, line_number);
+					return false;
+				}
+				profile->windivert_options.client_address_enforcement = *enforcement;
+				continue;
+			}
 			const auto parsed = parse_bool(value);
 			if (!parsed)
 			{
@@ -716,6 +740,20 @@ bool validate_filters(const char* path, const PacketEngineOptions& options)
 		for (size_t server_index = 0; server_index <= options.servers.size(); ++server_index)
 		{
 			std::string server_filter = filter;
+			const auto enforcement = profile.windivert_options.client_address_enforcement.value_or(WinDivertOptions::ClientAddressEnforcement::both);
+			std::string client_filter;
+			if (enforcement == WinDivertOptions::ClientAddressEnforcement::source || enforcement == WinDivertOptions::ClientAddressEnforcement::both)
+				if (options.client_source_address)
+					client_filter = "ip.SrcAddr == " + *options.client_source_address;
+			if (enforcement == WinDivertOptions::ClientAddressEnforcement::destination || enforcement == WinDivertOptions::ClientAddressEnforcement::both)
+				if (options.client_destination_address)
+				{
+					if (!client_filter.empty())
+						client_filter += " or ";
+					client_filter += "ip.DstAddr == " + *options.client_destination_address;
+				}
+			if (!client_filter.empty())
+				server_filter = "(" + server_filter + ") and (" + client_filter + ")";
 			if (server_index != 0 && profile.windivert_options.server_direction)
 			{
 				const char* address_field = "ip.Addr";
@@ -760,6 +798,8 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 	options.global_filter = kDefaultFilter;
 	options.profiles.clear();
 	options.initial_server.reset();
+	options.client_source_address.reset();
+	options.client_destination_address.reset();
 	options.resolve_region = false;
 	options.features = {};
 	bool config_loaded		= false;
@@ -805,6 +845,25 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 			}
 			options.initial_server = argv[++index];
 		}
+		else if (std::strcmp(argv[index], "--client-address") == 0 || std::strcmp(argv[index], "--client-source-address") == 0 ||
+				 std::strcmp(argv[index], "--client-destination-address") == 0)
+		{
+			if (index + 1 >= argc)
+			{
+				LOG_ERROR("%s requires an IPv4 or IPv6 address", argv[index]);
+				return false;
+			}
+			const std::string address = argv[++index];
+			if (std::strcmp(argv[index - 1], "--client-destination-address") == 0)
+				options.client_destination_address = address;
+			else if (std::strcmp(argv[index - 1], "--client-source-address") == 0)
+				options.client_source_address = address;
+			else
+			{
+				options.client_source_address = address;
+				options.client_destination_address = address;
+			}
+		}
 		else if (std::strcmp(argv[index], "--resolve-region") == 0)
 		{
 			options.resolve_region = true;
@@ -815,6 +874,9 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 			std::printf("  --config <file> Load profiles from YAML\n");
 			std::printf("  --log-level, -l <level> Set log level: error, warn, info, or debug\n");
 			std::printf("  --server, -s <server> Select the initial configured server\n");
+			std::printf("  --client-address <address> Set both client source and destination addresses\n");
+			std::printf("  --client-source-address <address> Set the client source address\n");
+			std::printf("  --client-destination-address <address> Set the client destination address\n");
 			std::printf("  --resolve-region        Resolve the geographic region of discovered servers\n");
 			std::printf("  --help, -h              Show this help message\n");
 			return false;

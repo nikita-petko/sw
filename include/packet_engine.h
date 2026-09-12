@@ -16,6 +16,14 @@ struct WinDivertOptions
 	std::optional<bool> sniff;
 	std::optional<bool> forward;
 	std::optional<bool> outbound;
+	enum class ClientAddressEnforcement
+	{
+		none,
+		source,
+		destination,
+		both,
+	};
+	std::optional<ClientAddressEnforcement> client_address_enforcement;
 	enum class ServerDirection
 	{
 		source,
@@ -94,6 +102,8 @@ struct PacketEngineOptions
 	std::vector<ServerOptions> servers;
 	std::vector<ProfileOptions> profiles;
 	std::optional<std::string> initial_server;
+	std::optional<std::string> client_source_address;
+	std::optional<std::string> client_destination_address;
 	std::optional<uint16_t> discovery_port;
 	uint64_t discovery_window_ms = 5000;
 	bool resolve_region = false;

@@ -40,6 +40,8 @@ profiles:
     delay_ms: 500
     windivert_options:
       forward: true
+      client_address_enforcement: both
+
 
   - name: "Long (Recv)"
     keys:
@@ -57,6 +59,7 @@ profiles:
     windivert_options:
       forward: true
       server_direction: source
+      client_address_enforcement: destination
       
   - name: "Long (Send)"
     keys:
@@ -74,3 +77,4 @@ profiles:
     windivert_options:
       forward: true
       server_direction: destination
+      client_address_enforcement: source

@@ -803,8 +803,24 @@ std::string PacketEngine::server_filter(const ProfileOptions& profile) const
 {
 	const std::string& filter		= profile.filter.value_or(options_.global_filter);
 	const size_t	   server_index = server_index_.load();
+	std::string combined_filter = filter;
+	const auto enforcement = profile.windivert_options.client_address_enforcement.value_or(WinDivertOptions::ClientAddressEnforcement::both);
+	std::string client_filter;
+	if (enforcement == WinDivertOptions::ClientAddressEnforcement::source || enforcement == WinDivertOptions::ClientAddressEnforcement::both)
+		if (options_.client_source_address)
+			client_filter = "ip.SrcAddr == " + *options_.client_source_address;
+	if (enforcement == WinDivertOptions::ClientAddressEnforcement::destination || enforcement == WinDivertOptions::ClientAddressEnforcement::both)
+		if (options_.client_destination_address)
+		{
+			if (!client_filter.empty())
+				client_filter += " or ";
+			client_filter += "ip.DstAddr == " + *options_.client_destination_address;
+		}
+	if (!client_filter.empty())
+		combined_filter = "(" + combined_filter + ") and (" + client_filter + ")";
+
 	if (server_index == 0 || !profile.windivert_options.server_direction)
-		return filter;
+		return combined_filter;
 	const std::string& server_address = options_.servers[server_index - 1].address;
 
 	const char* address_field = "ip.Addr";
@@ -830,7 +846,7 @@ std::string PacketEngine::server_filter(const ProfileOptions& profile) const
 			address_filter += address_field + std::string(" == ") + server.address;
 		}
 	}
-	return "(" + filter + ") and (" + address_filter + ")";
+	return "(" + combined_filter + ") and (" + address_filter + ")";
 }
 
 std::string PacketEngine::current_server() const

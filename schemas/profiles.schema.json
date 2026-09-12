@@ -237,6 +237,17 @@
               "default": false,
               "description": "Restrict filter capture to outbound packets."
             },
+            "client_address_enforcement": {
+              "type": "string",
+              "enum": [
+                "none",
+                "source",
+                "destination",
+                "both"
+              ],
+              "default": "both",
+              "description": "Controls whether the configured client source address, destination address, neither, or both are included in the filter."
+            },
             "server_direction": {
               "type": "string",
               "enum": [

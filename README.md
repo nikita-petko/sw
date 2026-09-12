@@ -1,3 +1,7 @@
+| `--client-address <address>` | Set both the client source and destination addresses. |
+| `--client-source-address <address>` | Set the client source address. |
+| `--client-destination-address <address>` | Set the client destination address. |
+  client_address_enforcement: both
 # lagsw
 
 `lagsw` is a Windows console utility that temporarily delays matching network
@@ -78,6 +82,7 @@ Options:
 | `--config <file>` | Load profiles from a YAML file. Required. |
 | `--log-level <level>`, `-l <level>` | Set the minimum log level: `error`, `warn`, `info`, or `debug`. |
 | `--server <server>`, `-s <server>` | Select the initial configured server by name or address. Unknown values warn and use `none`. |
+| `--client-address <address>` | Only filter packets coming from or going to this IPv4 or IPv6 address. |
 | `--resolve-region` | Resolve the geographic region of discovered servers. Successful lookups are cached locally for 30 days. |
 | `--help`, `-h` | Print command help and exit. |
 
@@ -233,10 +238,13 @@ windivert_options:
   sniff: false
   forward: false
   outbound: false
+  client_address_enforcement: both
   server_direction: destination
 ```
 
-Each option is a boolean:
+The `client_address_enforcement` option defaults to `both` and accepts
+`none`, `source`, `destination`, or `both`. It controls which configured
+client address clauses are included in the profile filter.
 
 - `sniff`: Capture packets without diverting them from the normal network path.
   Sniffed packets are observed but are not delayed or reinjected by `lagsw`.
