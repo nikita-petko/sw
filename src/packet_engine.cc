@@ -635,10 +635,33 @@ struct PacketEngine::State
 	std::unordered_set<std::string>			  region_lookups_started;
 	std::vector<std::thread>				  region_threads;
 	std::string								  client_region;
+
+	HANDLE									  probe_handle = INVALID_HANDLE_VALUE;
+	std::thread								  probe_thread;
+	HANDLE									  region_enforcement_handle = INVALID_HANDLE_VALUE;
+	std::thread								  region_enforcement_recv_thread;
+	std::thread								  region_enforcement_send_thread;
+	std::mutex								  region_enforcement_mutex;
+	std::condition_variable					  region_enforcement_changed;
+	std::atomic<bool>						  region_enforcement_stopping = false;
+	mutable std::mutex						  probe_mutex;
+	bool									  probe_received = false;
+	uint64_t								  probe_window_end = 0;
+	uint64_t								  next_check_time = 0;
+	std::unordered_set<std::string>			  probed_addresses_in_window;
+
+	struct DelayedEnforcementPacket
+	{
+		std::vector<BYTE>  data;
+		WINDIVERT_ADDRESS address;
+		uint64_t		  release_at = 0;
+	};
+	std::vector<DelayedEnforcementPacket>	  enforcement_queue;
 };
 
 PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(options)), state_(new State(options_.profiles.size()))
 {
+	std::srand(static_cast<unsigned int>(std::time(nullptr)));
 	load_region_cache(state_->region_cache);
 	packet_modes_.reserve(options_.profiles.size());
 	for (const ProfileOptions& profile : options_.profiles)
@@ -699,6 +722,28 @@ bool PacketEngine::is_authoritative_server() const
 {
 	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
 	return state_->authoritative_server;
+}
+
+bool PacketEngine::is_region_enforcement_enabled() const
+{
+	return options_.features.region_enforcement.enabled;
+}
+
+std::string PacketEngine::region_enforcement_status() const
+{
+	if (!options_.features.region_enforcement.enabled)
+		return {};
+
+	std::lock_guard<std::mutex> lock(state_->probe_mutex);
+	if (!state_->probe_received)
+		return "Waiting for probes...";
+
+	const uint64_t now = GetTickCount64();
+	if (now >= state_->next_check_time)
+		return "~0s";
+
+	const uint64_t remaining_ms = state_->next_check_time - now;
+	return "~" + logging::format_duration(remaining_ms);
 }
 
 uint64_t PacketEngine::running_time_ms() const
@@ -801,6 +846,41 @@ std::string PacketEngine::current_server() const
 	return "none";
 }
 
+std::vector<std::string> PacketEngine::configured_regions() const
+{
+	std::vector<std::string> regions;
+	for (const ServerOptions& server : options_.servers)
+	{
+		if (!server.group.empty())
+		{
+			if (std::find(regions.begin(), regions.end(), server.group) == regions.end())
+				regions.push_back(server.group);
+		}
+	}
+	if (regions.empty())
+	{
+		for (const ServerOptions& server : options_.servers)
+		{
+			const std::string& name = server.name.empty() ? server.address : server.name;
+			if (!name.empty() && std::find(regions.begin(), regions.end(), name) == regions.end())
+				regions.push_back(name);
+		}
+	}
+	return regions;
+}
+
+std::string PacketEngine::current_enforced_region() const
+{
+	std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
+	const auto					regions		 = configured_regions();
+	const size_t				region_index = enforced_region_index_.load();
+	if (region_index != 0 && region_index <= regions.size())
+	{
+		return regions[region_index - 1];
+	}
+	return "none";
+}
+
 std::string PacketEngine::current_server_region() const
 {
 	std::string address;
@@ -848,6 +928,24 @@ void PacketEngine::cycle_server(int direction)
 		teardown(profile);
 	for (const int profile : active_profiles)
 		setup(profile);
+}
+
+void PacketEngine::cycle_enforced_region(int direction)
+{
+	const auto regions = configured_regions();
+	if (regions.empty() || direction == 0)
+		return;
+	const size_t option_count = regions.size() + 1;
+	size_t		 current	  = enforced_region_index_.load();
+	if (direction > 0)
+		current = (current + 1) % option_count;
+	else
+		current = current == 0 ? option_count - 1 : current - 1;
+	enforced_region_index_ = current;
+	LOG_INFO("Enforced region changed to: %s", current_enforced_region().c_str());
+
+	stop_region_enforcement();
+	start_region_enforcement();
 }
 
 void PacketEngine::print_state() const
@@ -969,6 +1067,14 @@ void PacketEngine::print_state() const
 				region_suffix(address);
 			log_state_line(state_width, std::to_string(index + 1) + ". " + label + " - " + highlight(std::to_string(count)) + " packets");
 		}
+		LOG_INFO("%s", format_state_divider(state_width).c_str());
+	}
+	if (options_.features.region_enforcement.enabled)
+	{
+		LOG_INFO("%s", format_state_divider(state_width, "region enforcement").c_str());
+		log_state_line(state_width, "probe port:      " + highlight(std::to_string(options_.features.region_enforcement.probe_port)));
+		log_state_line(state_width, "probe status:    " + highlight(region_enforcement_status()));
+		log_state_line(state_width, "enforced region: " + highlight(current_enforced_region()));
 		LOG_INFO("%s", format_state_divider(state_width).c_str());
 	}
 	LOG_INFO("+%s+", std::string(state_width - 2, '-').c_str());
@@ -1250,26 +1356,125 @@ void PacketEngine::teardown()
 		teardown(static_cast<int>(index + 1));
 }
 
+void PacketEngine::start_region_enforcement()
+{
+	const std::string filter = region_enforcement_filter();
+	if (filter.empty())
+		return;
+
+	state_->region_enforcement_stopping = false;
+	state_->region_enforcement_handle	= WinDivertOpen(filter.c_str(), WINDIVERT_LAYER_NETWORK, -100, 0);
+	if (state_->region_enforcement_handle == INVALID_HANDLE_VALUE)
+	{
+		const DWORD error = GetLastError();
+		LOG_ERROR("Region enforcement setup: failed to open WinDivert handle %lu: %s", error, format_win32_error(error).c_str());
+		return;
+	}
+	WinDivertSetParam(state_->region_enforcement_handle, WINDIVERT_PARAM_QUEUE_LENGTH, 4096);
+	WinDivertSetParam(state_->region_enforcement_handle, WINDIVERT_PARAM_QUEUE_TIME, 1024);
+	LOG_INFO("Region enforcement filter active: %s", filter.c_str());
+	state_->region_enforcement_recv_thread = std::thread(&PacketEngine::region_enforcement_recv, this);
+	state_->region_enforcement_send_thread = std::thread(&PacketEngine::region_enforcement_send, this);
+}
+
+void PacketEngine::stop_region_enforcement()
+{
+	if (state_->region_enforcement_handle != INVALID_HANDLE_VALUE)
+	{
+		state_->region_enforcement_stopping = true;
+		WinDivertShutdown(state_->region_enforcement_handle, WINDIVERT_SHUTDOWN_RECV);
+		state_->region_enforcement_changed.notify_all();
+		if (state_->region_enforcement_recv_thread.joinable())
+			state_->region_enforcement_recv_thread.join();
+		if (state_->region_enforcement_send_thread.joinable())
+			state_->region_enforcement_send_thread.join();
+		WinDivertClose(state_->region_enforcement_handle);
+		state_->region_enforcement_handle = INVALID_HANDLE_VALUE;
+	}
+}
+
+std::string PacketEngine::region_enforcement_filter() const
+{
+	if (!options_.features.region_enforcement.enabled || options_.features.region_enforcement.probe_port == 0)
+		return {};
+
+	const std::string enforced_region = current_enforced_region();
+	if (enforced_region == "none" || enforced_region.empty())
+		return {};
+
+	const uint16_t port = options_.features.region_enforcement.probe_port;
+
+	std::vector<std::string> delayed_addresses;
+	for (const ServerOptions& s : options_.servers)
+	{
+		const std::string s_region = !s.group.empty() ? s.group : s.name;
+		if (s_region != enforced_region)
+		{
+			if (std::find(delayed_addresses.begin(), delayed_addresses.end(), s.address) == delayed_addresses.end())
+				delayed_addresses.push_back(s.address);
+		}
+	}
+
+	if (delayed_addresses.empty())
+		return {};
+
+	if (delayed_addresses.size() == 1)
+		return "tcp.Psh and ip.SrcAddr == " + delayed_addresses[0] + " and tcp.SrcPort == " + std::to_string(port);
+
+	std::string address_chain;
+	for (const std::string& addr : delayed_addresses)
+	{
+		if (!address_chain.empty())
+			address_chain += " or ";
+		address_chain += "ip.SrcAddr == " + addr;
+	}
+	return "tcp.Psh and (" + address_chain + ") and tcp.SrcPort == " + std::to_string(port);
+}
+
 void PacketEngine::start_workers()
 {
 	if (options_.resolve_region)
 		resolve_client_region();
-	if (!options_.discovery_port)
-		return;
-	const uint16_t	  port	 = *options_.discovery_port;
-	const std::string filter = "tcp.DstPort == " + std::to_string(port) + " or tcp.SrcPort == " + std::to_string(port) +
-							   " or udp.DstPort == " + std::to_string(port) + " or udp.SrcPort == " + std::to_string(port);
-	state_->discovery_handle = WinDivertOpen(filter.c_str(), WINDIVERT_LAYER_NETWORK, 0, WINDIVERT_FLAG_SNIFF);
-	if (state_->discovery_handle == INVALID_HANDLE_VALUE)
+	if (options_.discovery_port)
 	{
-		const DWORD error = GetLastError();
-		LOG_ERROR("Server discovery setup: failed to open WinDivert handle %lu: %s", error, format_win32_error(error).c_str());
-		return;
+		const uint16_t	  port	 = *options_.discovery_port;
+		const std::string filter = "tcp.DstPort == " + std::to_string(port) + " or tcp.SrcPort == " + std::to_string(port) +
+								   " or udp.DstPort == " + std::to_string(port) + " or udp.SrcPort == " + std::to_string(port);
+		state_->discovery_handle = WinDivertOpen(filter.c_str(), WINDIVERT_LAYER_NETWORK, 0, WINDIVERT_FLAG_SNIFF);
+		if (state_->discovery_handle == INVALID_HANDLE_VALUE)
+		{
+			const DWORD error = GetLastError();
+			LOG_ERROR("Server discovery setup: failed to open WinDivert handle %lu: %s", error, format_win32_error(error).c_str());
+		}
+		else
+		{
+			WinDivertSetParam(state_->discovery_handle, WINDIVERT_PARAM_QUEUE_LENGTH, 4096);
+			WinDivertSetParam(state_->discovery_handle, WINDIVERT_PARAM_QUEUE_TIME, 1024);
+			LOG_INFO("Server discovery enabled on port %u with a %s window", port, logging::format_duration(options_.discovery_window_ms).c_str());
+			state_->discovery_thread = std::thread(&PacketEngine::discover_packets, this);
+		}
 	}
-	WinDivertSetParam(state_->discovery_handle, WINDIVERT_PARAM_QUEUE_LENGTH, 4096);
-	WinDivertSetParam(state_->discovery_handle, WINDIVERT_PARAM_QUEUE_TIME, 1024);
-	LOG_INFO("Server discovery enabled on port %u with a %s window", port, logging::format_duration(options_.discovery_window_ms).c_str());
-	state_->discovery_thread = std::thread(&PacketEngine::discover_packets, this);
+
+	if (options_.features.region_enforcement.enabled && options_.features.region_enforcement.probe_port != 0)
+	{
+		const uint16_t	  port	 = options_.features.region_enforcement.probe_port;
+		const std::string filter = "tcp.Syn and (tcp.DstPort == " + std::to_string(port) + " or tcp.SrcPort == " + std::to_string(port) + ")";
+		state_->probe_handle	 = WinDivertOpen(filter.c_str(), WINDIVERT_LAYER_NETWORK, 0, WINDIVERT_FLAG_SNIFF);
+		if (state_->probe_handle == INVALID_HANDLE_VALUE)
+		{
+			const DWORD error = GetLastError();
+			LOG_ERROR("Probe detection setup: failed to open WinDivert handle %lu: %s", error, format_win32_error(error).c_str());
+		}
+		else
+		{
+			WinDivertSetParam(state_->probe_handle, WINDIVERT_PARAM_QUEUE_LENGTH, 4096);
+			WinDivertSetParam(state_->probe_handle, WINDIVERT_PARAM_QUEUE_TIME, 1024);
+			LOG_INFO("Probe detection enabled on port %u", port);
+			state_->probe_thread = std::thread(&PacketEngine::probe_packets, this);
+		}
+
+		start_region_enforcement();
+	}
 }
 
 void PacketEngine::stop_workers()
@@ -1277,12 +1482,17 @@ void PacketEngine::stop_workers()
 	shutdown_ = true;
 	if (state_->discovery_handle != INVALID_HANDLE_VALUE)
 		WinDivertShutdown(state_->discovery_handle, WINDIVERT_SHUTDOWN_RECV);
+	if (state_->probe_handle != INVALID_HANDLE_VALUE)
+		WinDivertShutdown(state_->probe_handle, WINDIVERT_SHUTDOWN_RECV);
+	stop_region_enforcement();
 	teardown();
 	for (std::thread& cleanup_thread : state_->cleanup_threads)
 		if (cleanup_thread.joinable())
 			cleanup_thread.join();
 	if (state_->discovery_thread.joinable())
 		state_->discovery_thread.join();
+	if (state_->probe_thread.joinable())
+		state_->probe_thread.join();
 	for (std::thread& region_thread : state_->region_threads)
 		if (region_thread.joinable())
 			region_thread.join();
@@ -1291,6 +1501,11 @@ void PacketEngine::stop_workers()
 	{
 		WinDivertClose(state_->discovery_handle);
 		state_->discovery_handle = INVALID_HANDLE_VALUE;
+	}
+	if (state_->probe_handle != INVALID_HANDLE_VALUE)
+	{
+		WinDivertClose(state_->probe_handle);
+		state_->probe_handle = INVALID_HANDLE_VALUE;
 	}
 }
 
@@ -1554,5 +1769,226 @@ void PacketEngine::discover_packets()
 			state_->discovery_counts.clear();
 		}
 		window_started = now;
+	}
+}
+
+void PacketEngine::probe_packets()
+{
+	BYTE packet_data[0xFFFF];
+	while (!shutdown_)
+	{
+		WINDIVERT_ADDRESS address;
+		UINT			  received_length = 0;
+		if (WinDivertRecv(state_->probe_handle, packet_data, sizeof(packet_data), &received_length, &address))
+		{
+			PWINDIVERT_IPHDR   ip_header   = nullptr;
+			PWINDIVERT_IPV6HDR ipv6_header = nullptr;
+			PWINDIVERT_TCPHDR  tcp_header  = nullptr;
+			if (WinDivertHelperParsePacket(packet_data,
+										   received_length,
+										   &ip_header,
+										   &ipv6_header,
+										   nullptr,
+										   nullptr,
+										   nullptr,
+										   &tcp_header,
+										   nullptr,
+										   nullptr,
+										   nullptr,
+										   nullptr,
+										   nullptr) &&
+				tcp_header && tcp_header->Syn)
+			{
+				const uint64_t now = GetTickCount64();
+				std::string	   server_address;
+				if (ip_header)
+					server_address = format_ipv4_address(address.Outbound ? ip_header->DstAddr : ip_header->SrcAddr);
+				else if (ipv6_header)
+					server_address = format_ipv6_address(address.Outbound ? ipv6_header->DstAddr : ipv6_header->SrcAddr);
+
+				bool is_new_window = false;
+				{
+					std::lock_guard<std::mutex> probe_lock(state_->probe_mutex);
+					if (!state_->probe_received || now >= state_->probe_window_end)
+					{
+						state_->probe_received	 = true;
+						state_->probe_window_end = now + 30000;
+						state_->next_check_time	 = now + 300000;
+						state_->probed_addresses_in_window.clear();
+						is_new_window = true;
+					}
+				}
+				if (is_new_window)
+					LOG_INFO("Region probe detected on port %u; next check in ~5m", options_.features.region_enforcement.probe_port);
+
+				if (!server_address.empty())
+				{
+					bool first_in_window = false;
+					{
+						std::lock_guard<std::mutex> probe_lock(state_->probe_mutex);
+						first_in_window = state_->probed_addresses_in_window.insert(server_address).second;
+					}
+					if (first_in_window)
+					{
+						const std::string enforced_region = current_enforced_region();
+						auto			  server		  = std::find_if(options_.servers.begin(), options_.servers.end(), [&](const ServerOptions& s) {
+							return s.address == server_address;
+						});
+						if (server != options_.servers.end())
+						{
+							const std::string server_region = !server->group.empty() ? server->group : server->name;
+							const std::string server_label =
+								server->name == server->address ? server->address : server->name + " [" + server->address + "]";
+							if (enforced_region != "none" && !enforced_region.empty() && server_region == enforced_region)
+							{
+								LOG_INFO("Server '%s' within enforced region '%s' was probed", server_label.c_str(), enforced_region.c_str());
+							}
+							else
+							{
+								LOG_DEBUG("Server '%s' (region '%s') was probed", server_label.c_str(), server_region.c_str());
+							}
+						}
+						else
+						{
+							LOG_DEBUG("Unknown server '%s' was probed", server_address.c_str());
+						}
+					}
+				}
+			}
+		}
+		else if (!shutdown_)
+		{
+			const DWORD error = GetLastError();
+			if (error != ERROR_INVALID_HANDLE && error != ERROR_OPERATION_ABORTED)
+				LOG_ERROR("Probe detection recv: WinDivertRecv error %lu: %s", error, format_win32_error(error).c_str());
+		}
+	}
+}
+
+void PacketEngine::region_enforcement_recv()
+{
+	BYTE packet_data[0xFFFF];
+	while (!state_->region_enforcement_stopping && !shutdown_)
+	{
+		WINDIVERT_ADDRESS address;
+		UINT			  received_length = 0;
+		if (!WinDivertRecv(state_->region_enforcement_handle, packet_data, sizeof(packet_data), &received_length, &address))
+		{
+			const DWORD error = GetLastError();
+			if (!state_->region_enforcement_stopping && !shutdown_ && error != ERROR_INVALID_HANDLE && error != ERROR_OPERATION_ABORTED)
+				LOG_ERROR("Region enforcement recv: WinDivertRecv error %lu: %s", error, format_win32_error(error).c_str());
+			continue;
+		}
+
+		const uint64_t now		  = GetTickCount64();
+		const uint64_t delay_ms	  = 1000 + (static_cast<uint64_t>(std::rand()) % 501);
+		const uint64_t release_at = now + delay_ms;
+
+		const PacketAddresses addresses = packet_addresses(packet_data, received_length);
+		LOG_DEBUG("Region enforcement recv: TCP PSH packet (delaying for %llums): Length = %u, Src = %s, Dst = %s",
+				  static_cast<unsigned long long>(delay_ms),
+				  received_length,
+				  addresses.source.c_str(),
+				  addresses.destination.c_str());
+
+		{
+			std::lock_guard<std::mutex> lock(state_->region_enforcement_mutex);
+			if (state_->region_enforcement_stopping)
+			{
+				UINT sent = 0;
+				WinDivertSend(state_->region_enforcement_handle, packet_data, received_length, &sent, &address);
+				continue;
+			}
+			State::DelayedEnforcementPacket delayed_pkt;
+			delayed_pkt.data.assign(packet_data, packet_data + received_length);
+			delayed_pkt.address	   = address;
+			delayed_pkt.release_at = release_at;
+			state_->enforcement_queue.push_back(std::move(delayed_pkt));
+			state_->region_enforcement_changed.notify_one();
+		}
+	}
+}
+
+void PacketEngine::region_enforcement_send()
+{
+	while (!state_->region_enforcement_stopping && !shutdown_)
+	{
+		std::vector<State::DelayedEnforcementPacket> ready_packets;
+		{
+			std::unique_lock<std::mutex> lock(state_->region_enforcement_mutex);
+			while (state_->enforcement_queue.empty() && !state_->region_enforcement_stopping && !shutdown_)
+				state_->region_enforcement_changed.wait(lock);
+			if (state_->region_enforcement_stopping || shutdown_)
+				break;
+
+			const uint64_t now				= GetTickCount64();
+			uint64_t	   earliest_release = (std::numeric_limits<uint64_t>::max)();
+			for (const auto& pkt : state_->enforcement_queue)
+			{
+				if (pkt.release_at < earliest_release)
+					earliest_release = pkt.release_at;
+			}
+
+			if (earliest_release > now)
+			{
+				const uint64_t wait_ms = earliest_release - now;
+				state_->region_enforcement_changed.wait_for(lock, std::chrono::milliseconds(wait_ms));
+				continue;
+			}
+
+			auto it = state_->enforcement_queue.begin();
+			while (it != state_->enforcement_queue.end())
+			{
+				if (it->release_at <= now)
+				{
+					ready_packets.push_back(std::move(*it));
+					it = state_->enforcement_queue.erase(it);
+				}
+				else
+				{
+					++it;
+				}
+			}
+		}
+
+		for (auto& pkt : ready_packets)
+		{
+			UINT sent = 0;
+			if (!WinDivertSend(state_->region_enforcement_handle, pkt.data.data(), static_cast<UINT>(pkt.data.size()), &sent, &pkt.address))
+			{
+				const DWORD error = GetLastError();
+				if (!state_->region_enforcement_stopping && !shutdown_ && error != ERROR_INVALID_HANDLE && error != ERROR_OPERATION_ABORTED)
+					LOG_ERROR("Region enforcement delayed send: WinDivertSend failed %lu: %s", error, format_win32_error(error).c_str());
+			}
+			else if (sent != 0)
+			{
+				const PacketAddresses addresses = packet_addresses(pkt.data.data(), static_cast<UINT>(pkt.data.size()));
+				LOG_DEBUG("Region enforcement send: delayed packet: Length = %zu, Src = %s, Dst = %s, SendLen = %u",
+						  pkt.data.size(),
+						  addresses.source.c_str(),
+						  addresses.destination.c_str(),
+						  sent);
+			}
+		}
+	}
+
+	std::vector<State::DelayedEnforcementPacket> pending_packets;
+	{
+		std::lock_guard<std::mutex> lock(state_->region_enforcement_mutex);
+		pending_packets = std::move(state_->enforcement_queue);
+		state_->enforcement_queue.clear();
+	}
+	for (auto& pkt : pending_packets)
+	{
+		UINT sent = 0;
+		if (WinDivertSend(state_->region_enforcement_handle, pkt.data.data(), static_cast<UINT>(pkt.data.size()), &sent, &pkt.address) && sent != 0)
+		{
+			const PacketAddresses addresses = packet_addresses(pkt.data.data(), static_cast<UINT>(pkt.data.size()));
+			LOG_DEBUG("Region enforcement flush: sent packet: Length = %zu, Src = %s, Dst = %s, SendLen = %u",
+					  pkt.data.size(),
+					  addresses.source.c_str(),
+					  addresses.destination.c_str(),
+					  sent);
+		}
 	}
 }

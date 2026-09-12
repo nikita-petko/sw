@@ -77,6 +77,17 @@ struct ProfileOptions
 	WinDivertOptions windivert_options;
 };
 
+struct RegionEnforcementOptions
+{
+	bool enabled = false;
+	uint16_t probe_port = 0;
+};
+
+struct FeaturesOptions
+{
+	RegionEnforcementOptions region_enforcement;
+};
+
 struct PacketEngineOptions
 {
 	std::string global_filter;
@@ -86,6 +97,7 @@ struct PacketEngineOptions
 	std::optional<uint16_t> discovery_port;
 	uint64_t discovery_window_ms = 5000;
 	bool resolve_region = false;
+	FeaturesOptions features;
 };
 
 class PacketMode;
@@ -108,13 +120,18 @@ public:
 	bool is_running() const;
 	bool is_running(int profile) const;
 	bool is_authoritative_server() const;
+	bool is_region_enforcement_enabled() const;
 	uint64_t running_time_ms() const;
 	size_t pending_packets() const;
 	uint64_t next_batch_in_ms() const;
 	void cycle_server(int direction);
+	void cycle_enforced_region(int direction);
 	std::string current_server() const;
+	std::string current_enforced_region() const;
+	std::vector<std::string> configured_regions() const;
 	std::string current_server_region() const;
 	std::string client_region() const;
+	std::string region_enforcement_status() const;
 	void print_state() const;
 
 private:
@@ -122,6 +139,12 @@ private:
 	void read_packets(const std::shared_ptr<Session>& session);
 	void write_packets(const std::shared_ptr<Session>& session);
 	void discover_packets();
+	void probe_packets();
+	void region_enforcement_recv();
+	void region_enforcement_send();
+	void start_region_enforcement();
+	void stop_region_enforcement();
+	std::string region_enforcement_filter() const;
 	void resolve_region(const std::string& address);
 	void resolve_client_region();
 	std::string server_filter(const ProfileOptions& profile) const;
@@ -130,6 +153,7 @@ private:
 	std::atomic<bool> running_ = false;
 	std::atomic<bool> shutdown_ = false;
 	std::atomic<size_t> server_index_ = 0;
+	std::atomic<size_t> enforced_region_index_ = 0;
 	std::vector<std::unique_ptr<PacketMode>> packet_modes_;
 
 	struct State;

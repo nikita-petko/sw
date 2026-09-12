@@ -24,7 +24,11 @@ servers:
     # Oceania Servers (Sydney)
     - "34.116.109.80:NSW-OCE-80"
     - "34.151.127.98:NSW-OCE-98"
-    
+
+features:
+  region_enforcement:
+    enabled: true
+    probe_port: 55002
 
 profiles:
   - name: "RPM"

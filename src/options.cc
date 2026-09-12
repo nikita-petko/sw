@@ -279,6 +279,8 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 	options.servers.clear();
 	options.discovery_port.reset();
 	options.discovery_window_ms = 5000;
+	options.features.region_enforcement.enabled = false;
+	options.features.region_enforcement.probe_port = 0;
 	std::string	line;
 	ProfileOptions* profile = nullptr;
 	std::string	section;
@@ -286,6 +288,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 	std::string	server_group;
 	int				subsection_indent  = -1;
 	int				servers_base_indent = -1;
+	int				features_base_indent = -1;
 	int				line_number		  = 0;
 	while (std::getline(file, line))
 	{
@@ -324,6 +327,49 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		}
 		std::string key	  = trim(content.substr(0, colon));
 		std::string value = trim(content.substr(colon + 1));
+		if (features_base_indent != -1 && section == "features" && indent > features_base_indent)
+		{
+			if (key == "region_enforcement" && value.empty())
+			{
+				subsection = "region_enforcement";
+				subsection_indent = indent;
+				continue;
+			}
+			if (subsection == "region_enforcement" && indent > subsection_indent)
+			{
+				if (key == "enabled")
+				{
+					const auto parsed = parse_bool(unquote(value));
+					if (!parsed)
+					{
+						LOG_ERROR("Invalid boolean in %s at line %d", path, line_number);
+						return false;
+					}
+					options.features.region_enforcement.enabled = *parsed;
+					continue;
+				}
+				if (key == "probe_port")
+				{
+					try
+					{
+						const std::string item = unquote(trim(value));
+						size_t consumed = 0;
+						const unsigned long port = std::stoul(item, &consumed);
+						if (consumed != item.size() || port == 0 || port > (std::numeric_limits<uint16_t>::max)())
+							throw std::invalid_argument("invalid port");
+						options.features.region_enforcement.probe_port = static_cast<uint16_t>(port);
+						continue;
+					}
+					catch (...)
+					{
+						LOG_ERROR("Invalid probe_port in %s at line %d", path, line_number);
+						return false;
+					}
+				}
+			}
+			LOG_ERROR("Invalid features configuration key '%s' in %s at line %d", key.c_str(), path, line_number);
+			return false;
+		}
 		if (servers_base_indent != -1 && section != "profiles" && indent > servers_base_indent)
 		{
 			if (key == "discovery_port")
@@ -384,19 +430,31 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			subsection_indent = -1;
 			continue;
 		}
+		if (key == "features" && value.empty())
+		{
+			section = "features";
+			subsection.clear();
+			subsection_indent  = -1;
+			servers_base_indent = -1;
+			features_base_indent = indent;
+			continue;
+		}
 		if (key == "profiles" && value.empty())
 		{
 			section = "profiles";
 			subsection.clear();
 			subsection_indent  = -1;
 			servers_base_indent = -1;
+			features_base_indent = -1;
 			continue;
 		}
 		if (key == "servers" && value.empty())
 		{
+			section = "servers";
 			subsection		  = "servers";
 			subsection_indent = indent;
 			servers_base_indent = indent;
+			features_base_indent = -1;
 			continue;
 		}
 		if (key == "windivert_options" && value.empty() && profile)
@@ -599,6 +657,11 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		LOG_ERROR("No profiles found in %s", path);
 		return false;
 	}
+	if (options.features.region_enforcement.enabled && options.features.region_enforcement.probe_port == 0)
+	{
+		LOG_ERROR("Feature region_enforcement is enabled but probe_port is missing or invalid in %s", path);
+		return false;
+	}
 
 	return true;
 }
@@ -609,6 +672,34 @@ bool validate_filters(const char* path, const PacketEngineOptions& options)
 	{
 		LOG_ERROR("A profiles YAML file must contain at least one profile: %s", path);
 		return false;
+	}
+	if (options.features.region_enforcement.enabled && options.features.region_enforcement.probe_port != 0)
+	{
+		const std::string probe_filter = "tcp.Syn and (tcp.DstPort == " + std::to_string(options.features.region_enforcement.probe_port) +
+										 " or tcp.SrcPort == " + std::to_string(options.features.region_enforcement.probe_port) + ")";
+		const char* error		   = nullptr;
+		UINT		error_position = 0;
+		if (!WinDivertHelperCompileFilter(probe_filter.c_str(), WINDIVERT_LAYER_NETWORK, nullptr, 0, &error, &error_position))
+		{
+			LOG_ERROR("Invalid filter for region probe detection on port %u: %s",
+					  options.features.region_enforcement.probe_port,
+					  error ? error : "unknown error");
+			return false;
+		}
+
+		for (const ServerOptions& server : options.servers)
+		{
+			const std::string filter = "tcp.Psh and ip.SrcAddr == " + server.address +
+									   " and tcp.SrcPort == " + std::to_string(options.features.region_enforcement.probe_port);
+			if (!WinDivertHelperCompileFilter(filter.c_str(), WINDIVERT_LAYER_NETWORK, nullptr, 0, &error, &error_position))
+			{
+				LOG_ERROR("Invalid filter for region enforcement on server '%s' port %u: %s",
+						  server.address.c_str(),
+						  options.features.region_enforcement.probe_port,
+						  error ? error : "unknown error");
+				return false;
+			}
+		}
 	}
 	for (const ProfileOptions& profile : options.profiles)
 	{
@@ -670,6 +761,7 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 	options.profiles.clear();
 	options.initial_server.reset();
 	options.resolve_region = false;
+	options.features = {};
 	bool config_loaded		= false;
 
 	for (int index = 1; index < argc; ++index)

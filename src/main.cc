@@ -24,6 +24,10 @@ int get_key_without_waiting()
 	if (key != 0 && key != 0xE0)
 		return key;
 	const int extended_key = _getch();
+	if (extended_key == 0x4B)
+		return VK_LEFT;
+	if (extended_key == 0x4D)
+		return VK_RIGHT;
 	if (extended_key == 0x49)
 		return VK_PRIOR;
 	if (extended_key == 0x51)
@@ -159,7 +163,7 @@ int main(int argc, char* argv[])
 	::SetConsoleCtrlHandler(nullptr, TRUE);
 
 	PacketEngine engine(options);
-	LOG_INFO("Hold a configured profile key to start/stop packet capture, 'q' or backspace to quit.");
+	LOG_INFO("Hold a configured profile key to start/stop packet capture, pgup/pgdn to cycle servers, left/right to cycle enforced server, 'q' or backspace to quit.");
 	engine.start_workers();
 	std::atomic<bool> status_shutdown = false;
 	std::thread		  status_thread([&] {
@@ -192,8 +196,15 @@ int main(int argc, char* argv[])
 			std::string		  region;
 			if (!server_region.empty() || !client_region.empty())
 				region = (server_region.empty() ? "unknown" : server_region) + "/" + (client_region.empty() ? "unknown" : client_region);
-			const std::string server_status =
+			std::string server_status =
 				engine.current_server() + (engine.is_authoritative_server() ? " (authoritative)" : "") + (region.empty() ? "" : " | " + region);
+			if (engine.is_region_enforcement_enabled())
+			{
+				const std::string re_status = engine.region_enforcement_status();
+				server_status += " | enforce: " + engine.current_enforced_region();
+				if (!re_status.empty())
+					server_status += " (" + re_status + ")";
+			}
 			logging::set_status(status, server_status + (active_profiles.empty() ? "" : " | " + active_profiles));
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		}
@@ -216,6 +227,16 @@ int main(int argc, char* argv[])
 		if (key == VK_NEXT)
 		{
 			engine.cycle_server(1);
+			continue;
+		}
+		if (key == VK_LEFT)
+		{
+			engine.cycle_enforced_region(-1);
+			continue;
+		}
+		if (key == VK_RIGHT)
+		{
+			engine.cycle_enforced_region(1);
 			continue;
 		}
 		if (key == VK_TAB)

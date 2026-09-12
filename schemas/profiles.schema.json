@@ -46,6 +46,34 @@
         }
       }
     },
+    "features": {
+      "type": "object",
+      "description": "Optional feature configurations.",
+      "properties": {
+        "region_enforcement": {
+          "type": "object",
+          "description": "Region enforcement settings.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Whether region enforcement is enabled."
+            },
+            "probe_port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "description": "Port used for region probe latency checks."
+            }
+          },
+          "required": [
+            "enabled",
+            "probe_port"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "profiles": {
       "type": "array",
       "description": "List of packet interception profile definitions.",
