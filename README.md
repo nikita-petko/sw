@@ -140,6 +140,16 @@ profiles:
       server_direction: destination
 ```
 
+Servers may also be grouped. Selecting any server in a group applies the
+profile filter to every server in that group:
+
+```yaml
+servers:
+  EU:
+    - "34.13.202.203:GR-EUC-203"
+    - "34.90.202.108:GR-EUC-108"
+```
+
 ### Top-level fields
 
 | Field | Required | Description |

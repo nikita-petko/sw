@@ -202,7 +202,7 @@ bool add_disabled_profiles(const std::string& value, ProfileOptions& profile, co
 	return true;
 }
 
-bool add_server(const std::string& value, PacketEngineOptions& options, const char* path, int line_number)
+bool add_server(const std::string& value, PacketEngineOptions& options, const std::string& group, const char* path, int line_number)
 {
 	const std::string item = unquote(trim(value));
 	if (item.empty())
@@ -214,6 +214,7 @@ bool add_server(const std::string& value, PacketEngineOptions& options, const ch
 	ServerOptions server;
 	server.address = trim(item.substr(0, separator));
 	server.name	   = separator == std::string::npos ? server.address : trim(item.substr(separator + 1));
+	server.group   = group;
 	if (server.address.empty() || server.name.empty())
 	{
 		LOG_ERROR("Invalid server '%s' in %s at line %d; expected address or address:name", item.c_str(), path, line_number);
@@ -278,10 +279,11 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 	options.servers.clear();
 	options.discovery_port.reset();
 	options.discovery_window_ms = 5000;
-	std::string		line;
+	std::string	line;
 	ProfileOptions* profile = nullptr;
-	std::string		section;
-	std::string		subsection;
+	std::string	section;
+	std::string	subsection;
+	std::string	server_group;
 	int				subsection_indent  = -1;
 	int				servers_base_indent = -1;
 	int				line_number		  = 0;
@@ -307,9 +309,10 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				return false;
 			continue;
 		}
-		if (subsection == "addresses" && content.front() == '-')
+		if ((subsection == "addresses" || subsection == "server_group") && content.front() == '-')
 		{
-			if (indent <= subsection_indent || !add_server(content.substr(1), options, path, line_number))
+			if (indent <= subsection_indent ||
+				!add_server(content.substr(1), options, subsection == "server_group" ? server_group : "", path, line_number))
 				return false;
 			continue;
 		}
@@ -354,12 +357,19 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				{
 					const size_t end = list.find(',', start);
 					if (!add_server(
-							list.substr(start, end == std::string::npos ? std::string::npos : end - start), options, path, line_number))
+							list.substr(start, end == std::string::npos ? std::string::npos : end - start), options, "", path, line_number))
 						return false;
 					if (end == std::string::npos)
 						break;
 					start = end + 1;
 				}
+				continue;
+			}
+			if (value.empty())
+			{
+				subsection = "server_group";
+				server_group = unquote(key);
+				subsection_indent = indent;
 				continue;
 			}
 			LOG_ERROR("Invalid servers configuration key '%s' in %s at line %d", key.c_str(), path, line_number);

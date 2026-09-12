@@ -645,6 +645,19 @@ PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(opt
 		packet_modes_.push_back(create_packet_mode(profile));
 	state_->active_profiles.resize(options_.profiles.size());
 	state_->active_sessions.resize(options_.profiles.size());
+	std::unordered_set<std::string> logged_server_groups;
+	for (const ServerOptions& server : options_.servers)
+	{
+		const std::string label = server.name == server.address ? server.address : server.name + " [" + server.address + "]";
+		if (server.group.empty())
+			LOG_INFO("Pre-configured server: %s", label.c_str());
+		else
+		{
+			if (logged_server_groups.insert(server.group).second)
+				LOG_INFO("Pre-configured server group '%s':", server.group.c_str());
+			LOG_INFO("  %s", label.c_str());
+		}
+	}
 	state_->select_authoritative_server = !options_.initial_server || *options_.initial_server == "none";
 	if (options_.initial_server)
 	{
@@ -761,7 +774,18 @@ std::string PacketEngine::server_filter(const ProfileOptions& profile) const
 		case WinDivertOptions::ServerDirection::both:
 			break;
 	}
-	return "(" + filter + ") and " + address_field + " == " + server_address;
+	const std::string& server_group = options_.servers[server_index - 1].group;
+	std::string address_filter;
+	for (const ServerOptions& server : options_.servers)
+	{
+		if (server_group.empty() ? server.address == server_address : server.group == server_group)
+		{
+			if (!address_filter.empty())
+				address_filter += " or ";
+			address_filter += address_field + std::string(" == ") + server.address;
+		}
+	}
+	return "(" + filter + ") and (" + address_filter + ")";
 }
 
 std::string PacketEngine::current_server() const
@@ -771,7 +795,8 @@ std::string PacketEngine::current_server() const
 	if (server_index != 0)
 	{
 		const ServerOptions& server = options_.servers[server_index - 1];
-		return server.name == server.address ? server.address : server.name + " [" + server.address + "]";
+		const std::string label = server.name == server.address ? server.address : server.name + " [" + server.address + "]";
+		return server.group.empty() ? label : server.group + ": " + label;
 	}
 	return "none";
 }
@@ -1450,6 +1475,7 @@ void PacketEngine::discover_packets()
 					auto existing_server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](const ServerOptions& server) {
 						return server.address == address_text;
 					});
+					const bool configured_server = existing_server != options_.servers.end();
 					if (existing_server == options_.servers.end())
 					{
 						options_.servers.push_back({address_text, address_text});
@@ -1459,7 +1485,7 @@ void PacketEngine::discover_packets()
 					{
 						const std::string server_label = format_server_label(address_text);
 						LOG_INFO("Server '%s' is potentially the authoritative server (first packet received)", server_label.c_str());
-						if (options_.resolve_region)
+						if (options_.resolve_region && !configured_server)
 						{
 							if (is_public_address(address_text))
 							{
@@ -1469,6 +1495,8 @@ void PacketEngine::discover_packets()
 							else
 								LOG_DEBUG("Server discovery: '%s' is private/local, skipping region lookup", address_text.c_str());
 						}
+						else if (options_.resolve_region && configured_server)
+							LOG_DEBUG("Server discovery: '%s' is already configured, skipping region lookup", address_text.c_str());
 					}
 					++packet_counts[address_text];
 					state_->discovery_counts = packet_counts;

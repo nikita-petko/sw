@@ -15,18 +15,6 @@
     "servers": {
       "type": "object",
       "description": "Configured target servers, combining pre-known addresses with automatic server discovery settings.",
-      "anyOf": [
-        {
-          "required": [
-            "discovery_port"
-          ]
-        },
-        {
-          "required": [
-            "addresses"
-          ]
-        }
-      ],
       "properties": {
         "discovery_port": {
           "type": "integer",
@@ -49,7 +37,14 @@
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": {
+        "type": "array",
+        "description": "Named server group. Selecting any server in the group filters traffic for every server in the group.",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     },
     "profiles": {
       "type": "array",

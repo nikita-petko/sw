@@ -29,6 +29,7 @@ struct ServerOptions
 {
 	std::string address;
 	std::string name;
+	std::string group;
 };
 
 enum class ProfileActivationMode
