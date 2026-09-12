@@ -1,0 +1,298 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "lagsw Profiles Configuration Schema",
+  "description": "Validation schema for lagsw packet interceptor YAML profiles configuration.",
+  "type": "object",
+  "required": [
+    "profiles"
+  ],
+  "properties": {
+    "global_filter": {
+      "type": "string",
+      "description": "Fallback WinDivert filter string applied to profiles that do not define a specific filter.",
+      "default": "tcp.DstPort == 55000 or tcp.SrcPort == 55000"
+    },
+    "servers": {
+      "description": "Configured target servers or automatic server discovery settings.",
+      "oneOf": [
+        {
+          "type": "array",
+          "description": "List of known server addresses, optionally formatted as 'address:name' or IP/hostname strings.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "type": "object",
+          "description": "Server discovery options.",
+          "required": [
+            "discovery_port"
+          ],
+          "properties": {
+            "discovery_port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "description": "Port to observe network traffic on for server discovery."
+            },
+            "interval": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 5000,
+              "description": "Length of discovery window in milliseconds."
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "profiles": {
+      "type": "array",
+      "description": "List of packet interception profile definitions.",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/profile"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "profile": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "key"
+          ]
+        },
+        {
+          "required": [
+            "keys"
+          ]
+        }
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Display name of the profile shown in log outputs and status reports."
+        },
+        "key": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "description": "Single key name (e.g. 'x', 'space', 'tab', 'ctrl', 'alt', 'shift') or key code."
+        },
+        "keys": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ]
+              }
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "List or comma-separated representation of activation keys."
+        },
+        "key_mode": {
+          "type": "string",
+          "enum": [
+            "combination",
+            "oneof"
+          ],
+          "default": "combination",
+          "description": "'combination' requires holding all keys simultaneously; 'oneof' triggers on any key in the list."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "toggle",
+            "hold"
+          ],
+          "default": "toggle",
+          "description": "Activation mode ('toggle' switches state on key press; 'hold' remains active while held)."
+        },
+        "disables": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "Name of a profile, '*', or array of profile names to keep disabled while this profile is active."
+        },
+        "delay_mode": {
+          "type": "string",
+          "enum": [
+            "from_timestamp",
+            "send_all_after_delay",
+            "ratio",
+            "drop",
+            "drop_and_send",
+            "drop_until_toggle"
+          ],
+          "default": "from_timestamp",
+          "description": "Strategy for packet delaying, dropping, or reinjection."
+        },
+        "retransmission_mode": {
+          "type": "string",
+          "enum": [
+            "none",
+            "only_seq",
+            "only_ack",
+            "both"
+          ],
+          "default": "none",
+          "description": "TCP retransmission handling behavior."
+        },
+        "delay_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Packet delay duration in milliseconds."
+        },
+        "ratio": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*%$"
+            }
+          ],
+          "description": "Packet ratio expressed as a count (e.g., 3) or percentage (e.g., '50%'). Required for 'ratio' and 'drop_and_send' delay modes."
+        },
+        "filter": {
+          "type": "string",
+          "description": "Profile-specific WinDivert filter expression. Overrides top-level global_filter."
+        },
+        "windivert_options": {
+          "type": "object",
+          "properties": {
+            "sniff": {
+              "type": "boolean",
+              "default": false,
+              "description": "Sniff packets without diverting them from the stack."
+            },
+            "forward": {
+              "type": "boolean",
+              "default": false,
+              "description": "Open WinDivert NETWORK_FORWARD layer instead of normal NETWORK layer."
+            },
+            "outbound": {
+              "type": "boolean",
+              "default": false,
+              "description": "Restrict filter capture to outbound packets."
+            },
+            "server_direction": {
+              "type": "string",
+              "enum": [
+                "source",
+                "destination",
+                "both"
+              ],
+              "description": "Direction filter added when an active server is selected."
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "required": [
+                  "outbound"
+                ],
+                "properties": {
+                  "outbound": {
+                    "const": true
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "forward": {
+                    "const": false
+                  }
+                }
+              }
+            }
+          ],
+          "additionalProperties": false
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "delay_mode": {
+                "const": "drop_until_toggle"
+              }
+            },
+            "required": [
+              "delay_mode"
+            ]
+          },
+          "then": {
+            "properties": {
+              "mode": {
+                "enum": [
+                  "toggle"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "delay_mode": {
+                "enum": [
+                  "ratio",
+                  "drop_and_send"
+                ]
+              }
+            },
+            "required": [
+              "delay_mode"
+            ]
+          },
+          "then": {
+            "required": [
+              "ratio"
+            ],
+            "properties": {
+              "delay_ms": {
+                "minimum": 1
+              }
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    }
+  }
+}

@@ -11,6 +11,17 @@ profiles:
     delay_ms: 500
     windivert_options:
       forward: true
+      
+      
+  - name: "Latency Sim"
+    key: d
+    mode: toggle
+    disables: "*"
+    delay_mode: from_timestamp
+    filter: "tcp.Psh and (tcp.SrcPort == 55002) and (ip.SrcAddr != 104.155.45.25 and ip.SrcAddr != 34.76.248.132)"
+    delay_ms: 1000
+    windivert_options:
+      forward: true
 
   - name: "Long (Recv)"
     keys:
