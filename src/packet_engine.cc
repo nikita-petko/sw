@@ -1525,7 +1525,7 @@ void PacketEngine::stop_workers()
 	}
 }
 
-void PacketEngine::resolve_region(const std::string& address)
+void PacketEngine::resolve_region(const std::string& address, bool preserve_name)
 {
 	RegionCacheEntry cached;
 	{
@@ -1541,7 +1541,7 @@ void PacketEngine::resolve_region(const std::string& address)
 	{
 		LOG_DEBUG("Region lookup for '%s': using local cache", address.c_str());
 		// resolve_region is only ever called by discover_packets, which already holds lifecycle_mutex here
-		if (!cached.server_name.empty())
+		if (!preserve_name && !cached.server_name.empty())
 		{
 			const auto server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](ServerOptions& item) {
 				return item.address == address;
@@ -1560,7 +1560,7 @@ void PacketEngine::resolve_region(const std::string& address)
 		}
 	}
 	LOG_DEBUG("Region lookup for '%s': queued", address.c_str());
-	state_->region_threads.emplace_back([this, address] {
+	state_->region_threads.emplace_back([this, address, preserve_name] {
 		LOG_DEBUG("Region lookup for '%s': requesting https://ipapi.co/%s/json/", address.c_str(), address.c_str());
 		const std::wstring path	   = L"/" + std::wstring(address.begin(), address.end()) + L"/json/";
 		const HttpResponse response = https_get_until_not_rate_limited(L"ipapi.co", path);
@@ -1588,18 +1588,21 @@ void PacketEngine::resolve_region(const std::string& address)
 		LOG_DEBUG("Region lookup for '%s': cached result", address.c_str());
 		LOG_INFO("Resolved region for server '%s': %s", address.c_str(), label->c_str());
 
-		LOG_DEBUG("Region lookup for '%s': rewriting server name to '%s'", address.c_str(), new_name.c_str());
+		if (!preserve_name)
 		{
-			std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
-			const auto					 server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](ServerOptions& item) {
-				return item.address == address;
-			});
-			if (server != options_.servers.end())
-				server->name = new_name;
-			else
-				LOG_DEBUG("Region lookup for '%s': server no longer tracked, skipping rename", address.c_str());
+			LOG_DEBUG("Region lookup for '%s': rewriting server name to '%s'", address.c_str(), new_name.c_str());
+			{
+				std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
+				const auto					 server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](ServerOptions& item) {
+					return item.address == address;
+				});
+				if (server != options_.servers.end())
+					server->name = new_name;
+				else
+					LOG_DEBUG("Region lookup for '%s': server no longer tracked, skipping rename", address.c_str());
+			}
+			LOG_INFO("Server '%s' renamed to '%s'", address.c_str(), new_name.c_str());
 		}
-		LOG_INFO("Server '%s' renamed to '%s'", address.c_str(), new_name.c_str());
 	});
 }
 
@@ -1716,18 +1719,16 @@ void PacketEngine::discover_packets()
 					{
 						const std::string server_label = format_server_label(address_text);
 						LOG_INFO("Server '%s' is potentially the authoritative server (first packet received)", server_label.c_str());
-						if (options_.resolve_region && !configured_server)
+						if (options_.resolve_region)
 						{
 							if (is_public_address(address_text))
 							{
 								LOG_DEBUG("Server discovery: '%s' is public, triggering region lookup", address_text.c_str());
-								resolve_region(address_text);
+								resolve_region(address_text, configured_server);
 							}
 							else
 								LOG_DEBUG("Server discovery: '%s' is private/local, skipping region lookup", address_text.c_str());
 						}
-						else if (options_.resolve_region && configured_server)
-							LOG_DEBUG("Server discovery: '%s' is already configured, skipping region lookup", address_text.c_str());
 					}
 					++packet_counts[address_text];
 					state_->discovery_counts = packet_counts;

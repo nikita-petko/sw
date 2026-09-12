@@ -155,7 +155,7 @@ private:
 	void start_region_enforcement();
 	void stop_region_enforcement();
 	std::string region_enforcement_filter() const;
-	void resolve_region(const std::string& address);
+	void resolve_region(const std::string& address, bool preserve_name = false);
 	void resolve_client_region();
 	std::string server_filter(const ProfileOptions& profile) const;
 
