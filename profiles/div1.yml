@@ -1,5 +1,26 @@
 servers:
   discovery_port: 55000
+  addresses:
+    # Matchmaking servers (EU West - Brussels)
+    - "104.155.45.25:BRU-EUC-25"
+    - "34.76.248.132:BRU-EUC-132"
+
+    # Europe Servers (Netherlands - Groningen)
+    - "34.13.202.203:GR-EUC-203"
+    - "34.90.202.108:GR-EUC-108"
+
+    # Asia Servers (Tokyo)
+    - "136.110.106.37:13-ASE-37"
+    - "34.104.143.167:13-ASE-167"
+
+    # US Servers (Iowa)
+    - "136.112.189.19:IA-USC-19"
+    - "35.232.75.10:IA-USC-10"
+
+    # Oceania Servers (Sydney)
+    - "34.116.109.80:NSW-OCE-80"
+    - "34.151.127.98:NSW-OCE-98"
+    
 
 profiles:
   - name: "RPM"

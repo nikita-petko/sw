@@ -282,7 +282,8 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 	ProfileOptions* profile = nullptr;
 	std::string		section;
 	std::string		subsection;
-	int				subsection_indent = -1;
+	int				subsection_indent  = -1;
+	int				servers_base_indent = -1;
 	int				line_number		  = 0;
 	while (std::getline(file, line))
 	{
@@ -306,7 +307,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				return false;
 			continue;
 		}
-		if (subsection == "servers" && content.front() == '-')
+		if (subsection == "addresses" && content.front() == '-')
 		{
 			if (indent <= subsection_indent || !add_server(content.substr(1), options, path, line_number))
 				return false;
@@ -320,7 +321,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		}
 		std::string key	  = trim(content.substr(0, colon));
 		std::string value = trim(content.substr(colon + 1));
-		if (subsection == "servers" && indent > subsection_indent)
+		if (servers_base_indent != -1 && section != "profiles" && indent > servers_base_indent)
 		{
 			if (key == "discovery_port")
 			{
@@ -332,6 +333,33 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			{
 				if (!set_discovery_interval(value, options, path, line_number))
 					return false;
+				continue;
+			}
+			if (key == "addresses")
+			{
+				if (value.empty())
+				{
+					subsection		  = "addresses";
+					subsection_indent = indent;
+					continue;
+				}
+				std::string list = trim(value);
+				if (list.size() < 2 || list.front() != '[' || list.back() != ']')
+				{
+					LOG_ERROR("Invalid servers addresses list in %s at line %d", path, line_number);
+					return false;
+				}
+				list = list.substr(1, list.size() - 2);
+				for (size_t start = 0; start < list.size();)
+				{
+					const size_t end = list.find(',', start);
+					if (!add_server(
+							list.substr(start, end == std::string::npos ? std::string::npos : end - start), options, path, line_number))
+						return false;
+					if (end == std::string::npos)
+						break;
+					start = end + 1;
+				}
 				continue;
 			}
 			LOG_ERROR("Invalid servers configuration key '%s' in %s at line %d", key.c_str(), path, line_number);
@@ -350,35 +378,15 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		{
 			section = "profiles";
 			subsection.clear();
-			subsection_indent = -1;
+			subsection_indent  = -1;
+			servers_base_indent = -1;
 			continue;
 		}
 		if (key == "servers" && value.empty())
 		{
 			subsection		  = "servers";
 			subsection_indent = indent;
-			continue;
-		}
-		if (indent == 0 && key == "servers")
-		{
-			std::string list = trim(value);
-			if (list.size() < 2 || list.front() != '[' || list.back() != ']')
-			{
-				LOG_ERROR("Invalid servers list in %s at line %d", path, line_number);
-				return false;
-			}
-			list = list.substr(1, list.size() - 2);
-			for (size_t start = 0; start < list.size();)
-			{
-				const size_t end = list.find(',', start);
-				if (!add_server(list.substr(start, end == std::string::npos ? std::string::npos : end - start), options, path, line_number))
-					return false;
-				if (end == std::string::npos)
-					break;
-				start = end + 1;
-			}
-			subsection.clear();
-			subsection_indent = -1;
+			servers_base_indent = indent;
 			continue;
 		}
 		if (key == "windivert_options" && value.empty() && profile)

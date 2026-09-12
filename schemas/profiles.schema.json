@@ -13,39 +13,43 @@
       "default": "tcp.DstPort == 55000 or tcp.SrcPort == 55000"
     },
     "servers": {
-      "description": "Configured target servers or automatic server discovery settings.",
-      "oneOf": [
+      "type": "object",
+      "description": "Configured target servers, combining pre-known addresses with automatic server discovery settings.",
+      "anyOf": [
         {
+          "required": [
+            "discovery_port"
+          ]
+        },
+        {
+          "required": [
+            "addresses"
+          ]
+        }
+      ],
+      "properties": {
+        "discovery_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Port to observe network traffic on for server discovery."
+        },
+        "interval": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 5000,
+          "description": "Length of discovery window in milliseconds."
+        },
+        "addresses": {
           "type": "array",
-          "description": "List of known server addresses, optionally formatted as 'address:name' or IP/hostname strings.",
+          "description": "List of pre-known server addresses, optionally formatted as 'address:name' or IP/hostname strings.",
           "items": {
             "type": "string",
             "minLength": 1
           }
-        },
-        {
-          "type": "object",
-          "description": "Server discovery options.",
-          "required": [
-            "discovery_port"
-          ],
-          "properties": {
-            "discovery_port": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 65535,
-              "description": "Port to observe network traffic on for server discovery."
-            },
-            "interval": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 5000,
-              "description": "Length of discovery window in milliseconds."
-            }
-          },
-          "additionalProperties": false
         }
-      ]
+      },
+      "additionalProperties": false
     },
     "profiles": {
       "type": "array",
