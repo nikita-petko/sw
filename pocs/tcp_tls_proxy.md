@@ -2,9 +2,9 @@
 
 ## 1. Summary
 
-Build a user-space TCP relay for server traffic that can make filtering decisions on reassembled application data, including plaintext exposed by a TLS termination point. The relay accepts client connections on a local or server-facing listen address, optionally terminates TLS, applies ordered content rules to the byte stream, and opens a separate upstream TCP/TLS connection to the real server.
+Build a user-space TCP relay for server traffic that can make filtering decisions on reassembled application data, including plaintext exposed by a TLS termination point. The relay accepts client connections either via an explicit local/server-facing listen address or via network-level redirection (transparent proxying where traffic targeting remote server IP/ports is overridden and redirected into the proxy). It optionally terminates TLS, applies ordered content rules to the byte stream, and opens a separate upstream TCP/TLS connection to the real destination.
 
-This PoC is intentionally a proxy, not an extension of the existing WinDivert packet engine. WinDivert can match packet headers and individual payload bytes, but it does not reassemble an ordered TCP stream or decrypt TLS. A proxy is the correct ownership boundary for this behavior because it sees complete byte streams before encryption and after TLS termination.
+This PoC is intentionally a stream proxy, not a direct extension of the existing WinDivert packet engine. WinDivert can match packet headers and individual payload bytes, but it does not reassemble an ordered TCP stream or decrypt TLS. However, WinDivert or Windows Filtering Platform (WFP) rules can serve as the network-level interception mechanism that redirects connection attempts into the proxy without client application modification.
 
 The PoC must only be used for traffic and endpoints for which the operator is authorized to intercept and decrypt data. It must not attempt to bypass certificate validation or silently decrypt arbitrary third-party connections.
 
@@ -34,23 +34,24 @@ The first PoC should demonstrate the complete path for one controlled TCP/TLS pr
 8. Emit counters and structured logs that make each decision explainable.
 9. Shut down cleanly without leaking sockets, TLS objects, or buffered data.
 
-The PoC should support both of these useful modes:
+The PoC should support these access modes:
 
-- **Plain relay:** TCP to TCP, with filtering on plaintext application data.
-- **TLS termination relay:** client TLS to proxy, plaintext filtering inside the proxy, and optional independent TLS from proxy to upstream.
+- **Explicit endpoint relay:** TCP/TLS proxy where clients connect explicitly to the proxy's designated address and port.
+- **Network-level transparent proxy:** Inline redirection where client traffic sent to existing server IP/ports is overridden via network routing (WinDivert packet/flow redirection, WFP, or DNS override) and redirected to the proxy listener without modifying client endpoint configuration.
+- **Plain or TLS-terminated stream relay:** Plaintext TCP to TCP, or client TLS termination with optional re-encryption to the upstream server.
 
 ## 4. Non-goals
 
 The PoC does not initially attempt to:
 
-- transparently intercept arbitrary existing client connections with WinDivert;
-- decrypt TLS without endpoint configuration, a trusted test certificate, or application cooperation;
+- decrypt TLS without client trust configuration (e.g. installing a local root CA or configuring client trust stores);
+- bypass TLS certificate pinning or Encrypted Client Hello (ECH) implemented in target applications;
 - support every TLS version, cipher, ALPN protocol, or application protocol;
-- provide a production-grade certificate authority or certificate issuance service;
-- infer message boundaries for an unknown protocol;
-- modify the existing packet-mode behavior;
-- provide high availability, clustering, authentication, or a management API;
-- inspect encrypted bytes and claim they are equivalent to plaintext filtering.
+- provide an automated enterprise CA or public ACME certificate issuance service;
+- infer message boundaries for an unknown protocol without a protocol framer;
+- replace the existing packet-level delay/drop modes in `PacketEngine`;
+- provide high availability, clustering, user authentication, or an external management API;
+- inspect encrypted bytes without terminating TLS and claim it provides stream-level filtering.
 
 ## 5. Existing-code fit
 
@@ -82,12 +83,29 @@ flowchart LR
 
 ### 6.1 Components
 
-**Listener**
+**Listener & Interception Adapter**
 
-- Binds an explicit address and port.
-- Accepts connections and assigns a connection ID.
+- Binds an explicit local address and port (e.g. `127.0.0.1:56000`).
+- Accepts connection attempts and assigns a connection ID.
+- Supports two connection discovery modes:
+  - **Explicit mode:** Upstream server address is statically configured or determined via proxy settings.
+  - **Network-level transparent mode:** Upstream server address is resolved per connection by querying an original-destination state table populated by the network redirection layer (e.g., WinDivert or WFP driver).
 - Applies an allowlist for client addresses if configured.
 - Creates one bidirectional session object per accepted connection.
+
+**Network Redirection Engine (Transparent Mode)**
+
+When operating as a network-level proxy, connection routing to external servers is overridden and redirected locally:
+- **Redirection methods:**
+  1. *WinDivert L3/L4 NAT:* Intercepts outbound TCP SYN packets matching destination filter rules (e.g. `tcp.DstPort == 55000`) and rewrites the destination IP:port to `127.0.0.1:proxy_port`.
+  2. *Windows Filtering Platform (WFP) App/Socket Redirect:* Redirects connect calls at the transport/socket layer before packet emission.
+  3. *DNS / Hosts Override:* Maps server hostnames in `C:\Windows\System32\drivers\etc\hosts` or local DNS to loopback, directing standard TCP socket connections to the proxy.
+- **Original Destination Tracking:**
+  - Maintains a lookup map: `(client_ip, client_port) -> (original_dst_ip, original_dst_port)`.
+  - When WinDivert or WFP intercepts a new TCP SYN, it records the original target tuple before rewriting packet headers.
+  - When the listener accepts a redirected socket, it queries this table using the client socket's peer port to determine the real target upstream endpoint.
+- **Routing Loop / Self-Interception Avoidance:**
+  - Outbound TCP connections initiated by the proxy process itself must be excluded from redirection filters (e.g., WinDivert filter expression `outbound and processId != proxy_pid` or process ID bypass flags). Without this, the proxy's upstream `connect()` call would loop back into its own listener.
 
 **Transport adapters**
 
@@ -97,9 +115,9 @@ flowchart LR
 
 **TLS manager**
 
-- Loads a configured server certificate and private key for client-facing TLS.
+- Loads a configured server certificate and private key for static client-facing TLS termination, or uses a local Root CA to dynamically generate certificates matching the target host's SNI (Server Name Indication) in transparent proxy mode.
 - Optionally validates the upstream certificate using the OS or configured trust store.
-- Selects ALPN/SNI behavior explicitly.
+- Inspects `ClientHello` SNI to select or mint server certificates and determine upstream hostnames when DNS/IP redirection is active.
 - Exposes decrypted bytes only to the rule engine and never logs raw application data by default.
 
 **Stream buffer**
@@ -135,47 +153,55 @@ flowchart LR
 
 ## 7. TLS model
 
-TLS does not make plaintext available merely because the proxy sees packets. The proxy must be an endpoint in the TLS connection.
+TLS does not make plaintext available merely because the proxy sees packets. The proxy must be an active endpoint in the TLS connection on both sides.
 
 ### 7.1 Client-facing TLS
 
-For a controlled test client, configure the client to trust a test CA or a specific proxy certificate. The proxy presents a certificate whose name matches the configured service name, completes the TLS handshake, and receives decrypted application bytes.
+Client-facing TLS termination depends on the interception access mode:
 
-The PoC should use a fixed certificate and key supplied by configuration. Automatic per-host certificate generation is deliberately deferred because it increases key-management and trust risks.
+- **Explicit mode (fixed certificate):** The proxy presents a pre-configured server certificate and key matching a specific hostname or IP address.
+- **Network-level transparent mode (dynamic CA certificate generation):**
+  - When network routing overrides arbitrary target host IP/ports, the client expects a certificate matching the domain it attempted to contact (e.g. `game.example.test`).
+  - The proxy inspects the unencrypted `ClientHello` packet payload during the initial handshake to extract the requested **SNI (Server Name Indication)** hostname.
+  - Using a pre-generated local **Root Certificate Authority (Root CA)** installed in the host client system's trusted root store, the proxy dynamically generates and signs an in-memory X.509 leaf certificate for the extracted SNI hostname.
+  - Subsequent connections to the same host reuse cached leaf certificates to reduce handshake overhead.
 
 ### 7.2 Upstream TLS
 
-The proxy opens a separate TLS connection to the upstream server. Upstream certificate verification is enabled by default. The configuration may specify the expected server name for SNI and certificate verification. An insecure verification bypass must not be part of the normal path; a clearly labeled test-only option can be added only if the test environment requires it.
+The proxy opens a separate TLS connection to the real upstream server:
+- In explicit mode, the upstream server address and SNI are taken from static configuration.
+- In network-level transparent mode, the upstream target address is derived from the original destination lookup map, and the upstream SNI header is copied directly from the client's `ClientHello` SNI extension.
+- Upstream certificate and chain verification are enabled by default using the operating system trust store or a specified CA bundle.
 
-### 7.3 TLS limitations
+### 7.3 TLS and network interception limitations
 
-- Filtering TLS ciphertext is not equivalent to filtering application data.
-- TLS 1.3 encrypted records are opaque until the proxy terminates the client-side session.
-- Certificate pinning, mutual TLS, custom key exchange, or application-level signatures may prevent a terminating relay from functioning.
-- The proxy cannot preserve end-to-end TLS identity while also inspecting plaintext unless the application protocol provides a separate trusted inspection mechanism.
-- Session resumption, early data, renegotiation, and post-handshake authentication should be disabled or rejected in the first PoC unless the selected TLS library handles them explicitly.
+- **Certificate Pinning:** If target client applications enforce strict public key pinning (e.g., hardcoded SHA-256 cert hashes), transparent TLS decryption will be rejected by the client during handshake.
+- **Encrypted Client Hello (ECH):** In TLS 1.3 setups using ECH, the SNI extension is encrypted with the real server's public key before the client sends it. The proxy cannot inspect ECH SNI without the server's private key, falling back to IP-based routing or connection failure.
+- **Mutual TLS (mTLS):** If the server requires client certificate authentication, the proxy cannot complete the upstream handshake without access to the client's private key.
+- **Identity preservation:** The upstream server sees TLS connections originating from the proxy host, not the original client IP, unless protocol-level proxy headers (e.g. PROXY protocol v2) or explicit IP spoofing are supported.
+- Filtering TLS ciphertext without termination is impossible for application data inspection; session keys must be held by the proxy endpoint.
 
 ## 8. Rule and configuration design
 
-Use a small, explicit configuration for the PoC. The following is illustrative and is not an immediate extension to `profiles/div1.yml` or the current parser:
+Use a small, explicit configuration for the PoC. The proxy supports both explicit endpoint proxying and network-level transparent interception:
+
+### 8.1 Transparent Network Redirection Configuration
 
 ```yaml
-listen:
-  address: 127.0.0.1
-  port: 56000
-  tls:
-    enabled: true
-    certificate: test-certs/service.crt
-    private_key: test-certs/service.key
-    client_ca: test-certs/test-ca.crt
-    require_client_certificate: false
+interception:
+  mode: transparent_windivert # Mode: explicit | transparent_windivert | hosts_override
+  listen_address: 127.0.0.1
+  listen_port: 56000
+  windivert_filter: "outbound and tcp.DstPort == 55000 and ip.DstAddr != 127.0.0.1"
+  bypass_process_id: true # Automatically append processId != proxy_pid to prevent loops
 
-upstream:
-  address: game.example.test
-  port: 55000
-  tls:
-    enabled: true
-    server_name: game.example.test
+tls:
+  client_facing:
+    mode: dynamic_ca # Mode: static_cert | dynamic_ca
+    ca_certificate: test-certs/proxy-root-ca.crt
+    ca_private_key: test-certs/proxy-root-ca.key
+  upstream:
+    mode: original_destination # Connect to original intercepted IP:port
     verify_certificate: true
 
 protocol:
@@ -199,7 +225,36 @@ rules:
     action:
       type: delay
       milliseconds: 500
+```
 
+### 8.2 Explicit Proxy Configuration
+
+```yaml
+interception:
+  mode: explicit
+  listen_address: 127.0.0.1
+  listen_port: 56000
+
+upstream:
+  address: game.example.test
+  port: 55000
+  tls:
+    enabled: true
+    server_name: game.example.test
+    verify_certificate: true
+
+tls:
+  client_facing:
+    mode: static_cert
+    certificate: test-certs/service.crt
+    private_key: test-certs/service.key
+
+protocol:
+  framing: u32be_length_prefix
+  max_message_bytes: 1048576
+  max_buffer_bytes: 4194304
+
+rules:
   - id: observe-heartbeat
     direction: both
     match:
@@ -215,7 +270,7 @@ Recommended initial match types:
 - exact field equality after protocol decoding;
 - bounded byte-prefix or byte-substring match;
 - numeric comparison on a decoded field;
-- direction and connection metadata predicates.
+- direction and connection metadata predicates (including original destination IP/port and SNI domain name).
 
 Avoid a general-purpose expression language in the first PoC. It would create a second parser and make security review harder before stream semantics are validated.
 
@@ -237,24 +292,29 @@ The first implementation should not silently rewrite sequence numbers, retransmi
 
 For each accepted connection:
 
-1. Create a session ID and capture peer/local addresses.
-2. Establish the upstream TCP connection with a connection timeout.
-3. Complete client and upstream TLS handshakes, if configured.
-4. Read bytes from either side when that side is ready.
-5. Feed bytes through the appropriate TLS adapter and stream buffer.
-6. Extract complete protocol frames subject to `max_message_bytes`.
-7. Evaluate rules in the direction of travel.
-8. Queue allowed or delayed frames for the opposite transport.
-9. Drain writes while respecting backpressure.
-10. Propagate orderly half-closes after buffered data is flushed.
-11. On protocol, TLS, timeout, limit, or transport error, close both sides and record the reason.
+1. Create a session ID and capture peer/local socket addresses.
+2. In transparent mode, query the network redirection engine's original destination table using the client socket's peer port to find `(original_dst_ip, original_dst_port)`.
+3. Establish the upstream TCP connection to the target server with a connection timeout (excluding the proxy's process ID from network redirection rules to prevent loops).
+4. Inspect initial bytes if TLS is enabled:
+   - Extract SNI hostname from client `ClientHello`.
+   - In dynamic CA mode, retrieve or generate a matching leaf certificate.
+5. Complete client-side and upstream TLS handshakes.
+6. Read bytes from either side when that side is ready.
+7. Feed bytes through the appropriate TLS adapter and stream buffer.
+8. Extract complete protocol frames subject to `max_message_bytes`.
+9. Evaluate rules in the direction of travel.
+10. Queue allowed or delayed frames for the opposite transport.
+11. Drain writes while respecting backpressure.
+12. Propagate orderly half-closes after buffered data is flushed.
+13. On protocol, TLS, timeout, limit, or transport error, close both sides, purge the state map entry, and record the reason.
 
 A simple session state model is:
 
 ```text
 Accepted
+  -> ResolvingOriginalDestination
   -> ConnectingUpstream
-  -> HandshakingClient / HandshakingUpstream
+  -> HandshakingClient (SNI / Dynamic Cert) / HandshakingUpstream
   -> Relaying
   -> Draining
   -> Closed
@@ -280,49 +340,53 @@ Use a single-threaded event loop for the first PoC if the selected Windows netwo
 
 ## 12. Security and privacy requirements
 
-- Bind only to explicitly configured addresses; default to loopback for the PoC.
-- Require an explicit upstream target; do not implement an open CONNECT-style proxy.
-- Validate upstream certificates and hostnames by default.
-- Protect private-key files with filesystem permissions and never print key material.
-- Do not log plaintext payloads by default. If payload logging is enabled, cap length and redact configured fields.
-- Make TLS termination visible in startup logs and status output.
-- Require an explicit test setting for client certificate trust changes.
-- Reject oversized frames and buffers before allocation.
-- Avoid logging passwords, tokens, cookies, authorization headers, or private protocol fields.
-- Document that TLS termination changes the trust boundary: the proxy can read and alter application data.
-- Shut down by closing listeners, stopping new accepts, draining only bounded queues, and then destroying TLS objects and sockets.
+- **Loopback binding:** Bind listener sockets to explicitly configured local addresses (e.g. `127.0.0.1`); avoid binding to `0.0.0.0` unless explicitly requested.
+- **Self-Interception Loop Prevention:** Network redirection rules must filter by process ID (`outbound and processId != proxy_pid` or WinDivert process bypass flags) so outbound proxy connections to real servers never get re-diverted into the proxy itself.
+- **Original Destination State Table Lifecycle:** Entries in the `(client_ip, client_port) -> original_dst` lookup map must be explicitly expired and removed after a short timeout (e.g., 10 seconds) or when connection setup completes, preventing memory leaks from SYN scans or aborted handshakes.
+- **Local Root CA Key Security:** The private key of the local Root CA used for dynamic certificate generation must be stored securely with restricted file ACLs, and the Root CA certificate installation/uninstallation in the Windows Certificate Store (`certlm.msc`) should be handled cleanly with user authorization.
+- **Upstream Validation:** Validate upstream certificates and hostnames against the OS/configured trust store by default.
+- **Payload Redaction & Privacy:** Do not log plaintext payloads by default. If payload logging is enabled for debugging, enforce strict byte limits and redact sensitive fields (credentials, session tokens).
+- **Visibility:** Explicitly log TLS termination, dynamic SNI certificate generation, and network redirection status at application startup.
+- **Memory Safety:** Enforce `max_message_bytes` and `max_buffer_bytes` before allocating frame buffers to defend against memory exhaustion attacks.
+- **Clean Shutdown:** Unregister WinDivert/WFP network redirection rules, close listener sockets, drain active session queues, and destroy TLS contexts cleanly on termination.
 
 ## 13. Suggested implementation plan
 
 ### Phase 0: prove the environment
 
-- Select a test protocol with a known frame format.
-- Generate a local test CA, server certificate, and client trust configuration outside the application.
+- Select a test protocol with a known frame format (e.g. 4-byte length prefix).
+- Generate a local test CA, server certificate, and client trust configuration.
 - Build a tiny client and upstream test server that can send split frames, coalesced frames, binary data, and deliberate delays.
-- Decide on the TLS library available to the Windows C++20 build. OpenSSL or Schannel are candidates; the choice should be made before implementing the TLS adapter.
+- Decide on the TLS library for the C++20 build (Schannel or OpenSSL).
 
-### Phase 1: plain TCP relay
+### Phase 1: explicit plain TCP relay
 
 - Add a standalone PoC executable under `pocs/tcp_tls_proxy/`.
-- Implement listener, upstream connect, bidirectional copying, limits, timeouts, and clean shutdown.
+- Implement listener, static upstream connect, bidirectional copying, limits, timeouts, and clean shutdown.
 - Add the protocol framer and an allow/log/close rule engine.
 - Test messages split across reads and multiple messages received in one read.
 
-### Phase 2: TLS on both legs
+### Phase 2: static TLS termination & stream rules
 
-- Add client-facing TLS termination.
-- Add upstream TLS with certificate and hostname verification.
+- Add client-facing static TLS termination and upstream TLS with certificate/hostname verification.
 - Test handshake failures, certificate failures, partial TLS records, and orderly shutdown.
 - Confirm that rule matches operate on decrypted bytes and that ciphertext never reaches the rule engine.
 
-### Phase 3: delay and operational visibility
+### Phase 3: network-level transparent interception & dynamic CA
+
+- Implement WinDivert packet/flow redirection and original destination tracking (`(client_ip, client_port) -> original_dst`).
+- Implement process ID exclusion (`processId != proxy_pid`) in WinDivert filters to prevent self-interception loops.
+- Implement SNI parsing from client `ClientHello` messages.
+- Implement dynamic leaf certificate generation using the local Root CA for transparent TLS interception.
+
+### Phase 4: delay and operational visibility
 
 - Add bounded framed-message delays.
 - Add counters, rule IDs, connection IDs, and reason-coded close events.
 - Add configuration validation and startup checks for certificate/key paths.
 - Add a test-only payload trace with strict byte and field redaction.
 
-### Phase 4: evaluate integration
+### Phase 5: evaluate repository integration
 
 Only after the standalone PoC is reliable, decide whether to share:
 
@@ -337,45 +401,46 @@ Do not merge proxy stream logic into `PacketMode` merely to reuse profile names.
 
 ### Functional tests
 
-- Plain TCP allow path forwards bytes byte-for-byte.
-- TLS client-to-proxy-to-upstream path succeeds with a trusted test certificate.
-- A rule matches a message split across at least three TCP reads.
-- A rule matches a message whose bytes cross a TLS record boundary.
-- Multiple frames in one read are evaluated independently and remain ordered.
-- Client-to-server and server-to-client rules do not match the opposite direction.
-- Delay action forwards after the configured duration and preserves ordering.
-- Close action terminates the session with a rule-rejection reason.
-- No-match traffic uses the configured default action.
+- **Explicit mode:** Plain TCP allow path forwards bytes byte-for-byte; static TLS termination succeeds with trusted certs.
+- **Transparent network mode:** Outbound connection to override IP:port is redirected by WinDivert/hosts override, original destination is correctly resolved, and traffic reaches the true upstream host.
+- **Self-interception loop prevention:** Proxy's outbound connection to upstream does not trigger redirection rules back into the proxy.
+- **Dynamic TLS SNI:** Client `ClientHello` with SNI `game.example.test` receives a dynamically minted certificate signed by the proxy's Root CA.
+- **Stream rule matching:** A rule matches a message split across at least three TCP reads or crossing a TLS record boundary.
+- **Message ordering:** Multiple frames in one read are evaluated independently and remain ordered.
+- **Action semantics:** Delay action delays frame release without corrupting stream framing; Close action terminates session on rule violation.
 
 ### Failure and limit tests
 
 - Invalid certificate, key, CA, and upstream hostname fail at startup or handshake with actionable errors.
+- Unmapped client connections in transparent mode drop or close gracefully.
 - Upstream refusal and timeout close the client without hanging.
-- Malformed length prefixes are rejected.
-- Oversized frames and aggregate buffers are rejected before unbounded allocation.
+- Malformed length prefixes and oversized frames are rejected before memory allocation.
 - Slow readers apply backpressure and do not grow memory without limit.
 - Client and upstream half-closes drain correctly.
-- Abrupt resets free all session resources.
-- The listener stops accepting and exits cleanly on shutdown.
+- Abrupt resets free all session resources and remove state map entries.
+- Redirection rules are cleaned up on shutdown.
 
 ### Acceptance criteria
 
-The PoC is successful when a controlled TLS client sends a framed message whose bytes are split across TCP and TLS boundaries, the proxy matches the decoded content, performs the configured action, and produces a bounded, auditable log entry without logging the payload. An equivalent WinDivert packet filter must fail to provide that same result without an application protocol implementation, demonstrating why this is a separate transport-layer component.
+The PoC is successful when:
+1. A client attempts to connect to an external server IP/port overridden at the network level via routing/WinDivert rules.
+2. The proxy redirects the connection, queries the original destination, inspects the SNI, dynamically generates a matching TLS certificate, and establishes an upstream TLS session.
+3. Decrypted framed messages split across TCP/TLS boundaries are matched against stream content rules, and configured actions (allow/delay/close) execute deterministically without memory or socket leaks.
 
 ## 15. Risks and open decisions
 
-**TLS library:** Schannel aligns with native Windows certificate stores; OpenSSL may provide a more portable and familiar API. Select based on repository licensing, build integration, ALPN needs, and certificate-validation behavior.
+**Routing loops / Self-interception:** If the proxy process fails to exclude its own process ID (`processId != proxy_pid`) from network redirection rules, its outbound connection to the target server will be re-diverted into its own listener, causing infinite connection loops and stack/socket exhaustion.
 
-**Protocol framing:** A generic stream proxy can only provide bounded byte-window matching. Reliable semantic filtering requires a protocol adapter, and each adapter becomes a maintenance and security surface.
+**Original destination map leaks:** If client connection attempts are aborted mid-handshake or port allocation is reused rapidly, the original destination lookup table can leak memory or misroute connections. State map entries must have strict timeouts and TTLs.
 
-**Connection identity:** The upstream server sees the proxy as the client unless the protocol carries original-client identity or the proxy uses a separate authenticated mechanism. This can affect authorization, rate limits, and auditing.
+**Certificate Pinning & ECH:** Transparent proxying cannot decrypt TLS traffic if the client application uses Encrypted Client Hello (ECH) or hardcoded public key pinning. The connection will fail at the TLS handshake phase.
 
-**Mutual TLS:** If the upstream requires the original client's certificate, the proxy needs an explicit credential-delegation design. Passing through the client's TLS identity is not automatic.
+**TLS library choice:** Schannel aligns with native Windows certificate store and `certlm.msc`; OpenSSL offers portable dynamic X.509 cert generation APIs. Select based on build dependencies and dynamic CA minting convenience.
 
-**Latency:** TLS termination, buffering, framing, and content decisions add latency. Measure handshake, steady-state throughput, p50/p95 rule latency, and memory per active session.
+**Protocol framing:** A generic stream proxy can only provide bounded byte-window matching. Reliable semantic filtering requires a protocol adapter per framing format.
 
-**Failure behavior:** Dropping application messages can leave a peer waiting for a response. Prefer protocol-level rejection or session close when the protocol cannot safely tolerate silent drops.
+**Connection identity:** The upstream server sees the proxy as the client unless the proxy supports IP spoofing or protocol proxy headers.
 
 ## 16. Recommended first slice
 
-Implement a loopback-only, single-upstream relay for one length-prefixed test protocol with TLS on both legs. Support `allow`, `log`, `delay`, and `close`; omit arbitrary packet interception, certificate automation, and expression parsing. This slice proves the central claim: filtering decrypted, reassembled application data is reliable at the proxy boundary and is not something the current packet-mode abstraction can provide.
+Implement Phase 1 and 2 first (explicit loopback TCP/TLS relay with length-prefixed framing and static certificates). Once stream reassembly, TLS termination, and rule evaluation are proven, proceed to Phase 3 (WinDivert network redirection, original destination lookup map, `processId` bypass, and dynamic SNI certificate generation). This stepwise approach isolates stream/TLS bugs from driver/redirection issues.
