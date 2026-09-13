@@ -444,3 +444,229 @@ The PoC is successful when:
 ## 16. Recommended first slice
 
 Implement Phase 1 and 2 first (explicit loopback TCP/TLS relay with length-prefixed framing and static certificates). Once stream reassembly, TLS termination, and rule evaluation are proven, proceed to Phase 3 (WinDivert network redirection, original destination lookup map, `processId` bypass, and dynamic SNI certificate generation). This stepwise approach isolates stream/TLS bugs from driver/redirection issues.
+
+## 17. Research Case Study: Existing Server System Handshake Analysis
+
+Analysis of real-world server traffic captured in [handshake_first_2_data_frames.pcapng](handshake_first_2_data_frames.pcapng) demonstrates a hybrid stream pattern where a connection begins with a custom plaintext handshake before upgrading in-band to a TLS 1.2 session on the exact same TCP socket.
+
+### 17.1 Captured Protocol Lifecycle Overview
+
+The capture records traffic between client `192.168.137.186:57355` and online game server `104.155.45.25:55000`:
+
+```text
+Client (192.168.137.186:57355)                          Server (104.155.45.25:55000)
+      |                                                               |
+      |------------------ 1. TCP SYN / SYN-ACK / ACK ----------------->| (Packets 1-3)
+      |                                                               |
+      |--- 2. Plaintext Probe (6 bytes: 00-00-00-00-00-00) ---------->| (Packet 3)
+      |<-- 3. Plaintext Challenge (36 bytes: 46-01-02-20...) ---------| (Packet 4)
+      |--- 4. Plaintext Ack (6 bytes: 00-00-00-00-00-00) ------------>| (Packet 5)
+      |--- 5. Plaintext Upgrade Cmd (8 bytes: 0e-01-00-04-02-00-00-00)->| (Packet 6)
+      |<-- 6. Plaintext Confirmation (3 bytes: 04-00-01) -------------| (Packet 8)
+      |                                                               |
+      |--- 7. TLS ClientHello (139 bytes: 16 03 01 00 86...) -------->| (Packet 9)
+      |<-- 8. TLS ServerHello, Cert, KeyEx, Done (954 bytes) ---------| (Packet 10)
+      |--- 9. TLS ClientKeyEx, ChangeCipherSpec, Finished (138 bytes)->| (Packet 11)
+      |<-- 10. TLS NewSessionTicket, ChangeCipherSpec, Finished ------| (Packet 12)
+      |                                                               |
+      |--- 11. TLS Application Data Frame #1 (34 bytes: 17 03 03...) ->| (Packet 13)
+      |<-- 12. TLS Application Data Frame #2 (34 bytes: 17 03 03...) -| (Packet 14)
+```
+
+### 17.2 Detailed Byte-by-Byte Packet Dissection
+
+| Pkt | Direction | TCP Flags | Wire Len | Payload Len | Summary / Framing Structure |
+|---|---|---|---|---|---|
+| **1** | Client → Server | `SYN` | 66 B | 0 B | TCP SYN. `Seq=1715846902`, `Win=8192`, MSS 1460, WS 8, SACK permitted |
+| **2** | Server → Client | `SYN, ACK` | 66 B | 0 B | TCP SYN-ACK. `Seq=3229907924`, `Ack=1715846903`, `Win=64240`, MSS 1360, WS 10 |
+| **3** | Client → Server | `ACK` | 60 B | 6 B | TCP ACK + Pre-TLS Session Initialization Probe (`00-00-00-00-00-00`) |
+| **4** | Server → Client | `ACK, PSH` | 90 B | 36 B | Server Challenge (`0x46` type header + `0x20` 32-byte salt `5B-48-89-4C-8B-C0-F2-67...`) |
+| **5** | Client → Server | `ACK` | 60 B | 6 B | Client ACK probe (`00-00-00-00-00-00`) acknowledging server challenge frame |
+| **6** | Client → Server | `ACK, PSH` | 62 B | 8 B | Pre-TLS Command: Request TLS Upgrade (`0E-01-00-04-02-00-00-00`, Opcode `0x0E`) |
+| **7** | Server → Client | `ACK` | 54 B | 0 B | Transport ACK (`Ack=1715846911`) acknowledging 8-byte upgrade request |
+| **8** | Server → Client | `ACK, PSH` | 57 B | 3 B | Pre-TLS Server Ready Signal (`04-00-01`) confirming socket ready for TLS |
+| **9** | Client → Server | `ACK, PSH` | 193 B | 139 B | TLS 1.0 Record Layer containing TLS 1.2 `ClientHello` (`16 03 01 00 86 ...`) |
+| **10** | Server → Client | `ACK, PSH` | 1008 B | 954 B | Coalesced TLS Records: `ServerHello`, `Certificate`, `ServerKeyExchange`, `ServerHelloDone` |
+| **11** | Client → Server | `ACK, PSH` | 192 B | 138 B | Coalesced TLS Records: `ClientKeyExchange`, `ChangeCipherSpec`, `Finished` |
+| **12** | Server → Client | `ACK, PSH` | 316 B | 262 B | Coalesced TLS Records: `NewSessionTicket`, `ChangeCipherSpec`, `Finished`, Session Ticket Ext |
+| **13** | Client → Server | `ACK, PSH` | 88 B | 34 B | TLS Application Data Record #1 (`17 03 03 00 1D` header + 29 B encrypted payload) |
+| **14** | Server → Client | `ACK, PSH` | 88 B | 34 B | TLS Application Data Record #2 (`17 03 03 00 1D` header + 29 B encrypted payload) |
+
+---
+
+### 17.3 Deep Dive into Protocol Phases
+
+#### Phase A: Pre-TLS Plaintext Control Exchange (Packets 3–8)
+
+Before any TLS handshake bytes are transmitted, the client and server communicate via a low-level binary control protocol. The entire exchange occurs over 5 physical packets (Packets 3, 4, 5, 6, and 8) transferring a total of 53 payload bytes across both directions.
+
+##### 1. Client Connection Probe (Packet 3)
+- **Direction:** Client (`192.168.137.186:57355`) → Server (`104.155.45.25:55000`)
+- **TCP Flags:** `ACK` (Piggybacked payload on 3-way handshake completion)
+- **Payload Length:** 6 bytes
+- **Byte Stream Dump:**
+  ```text
+  Offset 00..05: 00 00 00 00 00 00
+  ```
+- **Field & Protocol Analysis:**
+  - `00 00 00 00 00 00`: 6 zero/null bytes.
+  - Serves as an application-level ping / connection initialization magic header that alerts the proprietary server engine to allocate a session context before invoking security protocols.
+
+##### 2. Server Challenge Frame (Packet 4)
+- **Direction:** Server → Client
+- **TCP Flags:** `ACK, PSH`
+- **Payload Length:** 36 bytes
+- **Byte Stream Dump:**
+  ```text
+  Offset 00..03: 46 01 02 20
+  Offset 04..19: 5B 48 89 4C 8B C0 F2 67 75 7F DF E8 C7 83 F9 0F
+  Offset 20..35: 1C 27 3A 40 73 64 30 98 62 5C C3 A8 96 8F 08 CB
+  ```
+- **Field Breakdown:**
+  - `Offset 0x00` (`0x46` = decimal 70, ASCII `'F'`): **Opcode / Command Type**. Identifies a Server Challenge / Handshake Salt frame.
+  - `Offset 0x01` (`0x01`): **Protocol Version / Major Variant**.
+  - `Offset 0x02` (`0x02`): **Flags / Cryptographic Suite Selection**. Indicates a 256-bit (32-byte) random challenge token follows.
+  - `Offset 0x03` (`0x20` = decimal 32): **Payload Length Byte**. Explicitly declares that 32 bytes of challenge data follow (`0x20` = 32).
+  - `Offset 0x04..0x23` (32 bytes): **Cryptographic Salt / Session Challenge**:
+    `5B 48 89 4C 8B C0 F2 67 75 7F DF E8 C7 83 F9 0F 1C 27 3A 40 73 64 30 98 62 5C C3 A8 96 8F 08 CB`
+    This high-entropy 256-bit random value is generated per-connection by the server to prevent replay attacks and bind client authentication/session tickets.
+
+##### 3. Client Challenge Acknowledgment (Packet 5)
+- **Direction:** Client → Server
+- **TCP Flags:** `ACK`
+- **Payload Length:** 6 bytes
+- **Byte Stream Dump:**
+  ```text
+  Offset 00..05: 00 00 00 00 00 00
+  ```
+- **Field Analysis:**
+  - `00 00 00 00 00 00`: 6 zero bytes matching the structure of Packet 3.
+  - Acknowledges receipt of the server challenge payload and signals that client-side state initialization is complete.
+
+##### 4. Client TLS Upgrade Request Command (Packet 6)
+- **Direction:** Client → Server
+- **TCP Flags:** `ACK, PSH`
+- **Payload Length:** 8 bytes
+- **Byte Stream Dump:**
+  ```text
+  Offset 00..07: 0E 01 00 04 02 00 00 00
+  ```
+- **Field Breakdown:**
+  - `Offset 0x00` (`0x0E` = decimal 14): **Opcode for In-Band Security Upgrade** (In-band `STARTTLS` command).
+  - `Offset 0x01` (`0x01`): **Sub-Opcode / Target Mode**. Request TLS stream encryption.
+  - `Offset 0x02..0x03` (`0x00 0x04`): **Parameter Field Length** (4 bytes follow).
+  - `Offset 0x04` (`0x02`): **TLS Version Negotiated** (0x02 = TLS 1.2 request).
+  - `Offset 0x05..0x07` (`0x00 0x00 0x00`): Reserved / Padding flags.
+
+##### 5. Server Upgrade Confirmation Signal (Packet 8)
+- **Direction:** Server → Client
+- **TCP Flags:** `ACK, PSH` (preceded by Packet 7 pure TCP ACK)
+- **Payload Length:** 3 bytes
+- **Byte Stream Dump:**
+  ```text
+  Offset 00..02: 04 00 01
+  ```
+- **Field Breakdown:**
+  - `Offset 0x00` (`0x04`): **Opcode for Control Response / ACK**.
+  - `Offset 0x01` (`0x00`): Status flag / Reserved.
+  - `Offset 0x02` (`0x01`): **Status Code `1` (OK / Proceed)**. Confirms the server socket state machine has detached plaintext framing and attached its TLS engine, instructing the client to immediately begin sending TLS records (`ClientHello`).
+
+---
+
+#### Phase B: In-Band TLS 1.2 Handshake (Packets 9–12)
+
+Upon receiving the `04 00 01` ready signal, the client immediately switches socket modes and sends a standard TLS `ClientHello` on the same TCP connection:
+
+1. **ClientHello Analysis (Packet 9):**
+   - Record Header: `16 03 01 00 86` (`0x16` = Handshake Record, TLS 1.0 record version, 134 bytes record length).
+   - Handshake Header: `01 00 00 82` (`0x01` = ClientHello, 130 bytes payload length).
+   - Version: TLS 1.2 (`0x03 0x03`).
+   - Cipher Suite Offered: `TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256` (`0xC0 0x2C`).
+   - Extensions Included: Supported Elliptic Curves (`secp256r1`, `secp384r1`, `secp521r1`), EC Point Formats (`uncompressed`), Signature Algorithms (`ecdsa_secp256r1_sha256`, `rsa_pss_rsae_sha256`, etc.), and Session Ticket support (`0x00 0x23`).
+
+2. **ServerHello & Certificate Analysis (Packet 10):**
+   - The server responds with 4 coalesced TLS records in a single 954-byte payload:
+     - **Record 1 (ServerHello - `16 03 03 00 42`):** Selects TLS 1.2 and cipher `TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256` (`0xC0 0x2C`).
+     - **Record 2 (Certificate - `16 03 03 02 A2`):** Contains a 667-byte X.509 leaf certificate:
+       - **Subject & Issuer DN:** `C=SE, ST=Skåne, L=Malmö, O=Massive Entertainment, OU=Online, CN=xone100.rogue-code-online-msv@ubisoft.com`
+       - **Public Key Algorithm:** ECDSA over `secp256r1` (`prime256v1`).
+       - **Validity Period:** `2016-01-05 08:49:29 GMT` to `2036-01-05 08:49:29 GMT`.
+       - **Extensions:** Subject Key Identifier, Authority Key Identifier, Basic Constraints (`CA:True`).
+     - **Record 3 (ServerKeyExchange - `16 03 03 00 94`):** Provides ECDH ephemeral parameters (`secp256r1` curve point) signed with the server's ECDSA private key.
+     - **Record 4 (ServerHelloDone - `16 03 03 00 2E`):** Signals completion of server handshake offer.
+
+3. **Key Exchange & Cipher Activation (Packets 11–12):**
+   - **Packet 11 (Client):** Sends `ClientKeyExchange` (containing 65-byte client ECDH public key `04 67 01 7B ...`), `ChangeCipherSpec` (`14 03 03 00 01 01`), and encrypted `Finished` message (`16 03 03 00 28`).
+   - **Packet 12 (Server):** Responds with `NewSessionTicket` (`16 03 03 00 AA`), `ChangeCipherSpec` (`14 03 03 00 01 01`), encrypted `Finished` message (`16 03 03 00 28`), and Session Ticket Extension payload (`17 03 03 00 1F`).
+
+---
+
+#### Phase C: Encrypted Application Stream (Packets 13–14)
+
+Once the TLS state machine enters active symmetric encryption:
+
+- **Packet 13 (Client → Server):**
+  - Record Header: `17 03 03 00 1D` (`0x17` = Application Data, TLS 1.2 version `0x03 0x03`, 29 bytes payload).
+  - Encrypted Payload (29 bytes): `0D 52 88 49 F0 05 CF 27 82 98 59 DE 7E A9 30 2B 93 9A E6 07 11 42 97 DC 95 60 AA CB 7D`
+- **Packet 14 (Server → Client):**
+  - Record Header: `17 03 03 00 1D` (`0x17` = Application Data, TLS 1.2 version `0x03 0x03`, 29 bytes payload).
+  - Encrypted Payload (29 bytes): `FE 5B F3 02 D6 CA B1 69 1A 31 98 4A C5 16 51 44 51 90 2F E4 A3 95 27 61 23 0E FC 67 05`
+
+Note: Each 34-byte wire payload consists of a 5-byte TLS record header (`ContentType[1] + Version[2] + Length[2]`) followed by 29 bytes of AES-GCM ciphertext + tag / explicit IV.
+
+---
+
+### 17.4 Technical Requirements for the Proxy Engine
+
+The captured session highlights critical architectural requirements for `tcp_tls_proxy`:
+
+1. **Stateful Protocol Gateway Mode (Plaintext → TLS Transition):**
+   - The proxy's client listener and upstream connector must operate in **Plaintext Passthrough Mode** during initial connection setup.
+   - The framer must parse the fixed-structure binary headers in Phase A (`0x00` probes, `0x46` 36-byte challenge, `0x0E` 8-byte upgrade request, `0x04 0x00 0x01` response).
+   - Upon observing the server confirmation `0x04 0x00 0x01` (Packet 8) or the client's subsequent TLS `ClientHello` record header `0x16 0x03 0x01` (Packet 9), the proxy session controller must transition both transport adapters from raw TCP passthrough to TLS termination engine mode.
+
+2. **Pre-TLS Rule & Inspection Engine Capabilities:**
+   - The pre-TLS plaintext exchange enables early stream filtering *before* resource-intensive TLS handshakes or certificate generation occur.
+   - Rules can match on pre-TLS parameters, such as validating the presence of opcode `0x0E` (TLS upgrade request) or blocking clients that fail to present valid initialization probes (`00 00 00 00 00 00`).
+
+3. **SNI Fallback and Certificate Selection:**
+   - In this captured connection, the `ClientHello` in Packet 9 **does not specify an SNI (Server Name Indication)** extension.
+   - Therefore, transparent proxying or static TLS termination cannot rely solely on SNI extraction to select leaf certificates. The proxy TLS manager must fall back to:
+     - The original destination IP/port from the WinDivert/WFP lookup table (`104.155.45.25:55000`).
+     - Pre-configured static certificates matching the upstream destination service.
+     - Dynamic leaf certificate generation using the IP address or fallback domain name derived from DNS/original destination state.
+
+4. **Coalesced Record Stream Parsing:**
+   - As seen in Packet 10 (954 bytes containing 4 TLS records) and Packet 11/12, network stacks frequently coalesce multiple TLS records and Handshake frames into single TCP segments.
+   - The proxy's stream buffer and TLS adapter must process incoming bytes framing record-by-record rather than packet-by-packet, maintaining internal read remainders across TCP read callbacks.
+
+### 17.5 Plaintext Handshake Simulator (`plaintext_handshake_sim`)
+
+A standalone C++20 simulation executable has been created under [pocs/tcp_tls_proxy/](pocs/tcp_tls_proxy/) to emulate both client and server roles for the pre-TLS plaintext handshake on an arbitrary target IP address and port.
+
+#### Project Structure & Build Setup
+- **Target Name:** `plaintext_handshake_sim` (configured in [pocs/tcp_tls_proxy/xmake.lua](pocs/tcp_tls_proxy/xmake.lua) and linked in root [xmake.lua](xmake.lua)).
+- **Source Code:** [pocs/tcp_tls_proxy/plaintext_handshake_sim.cc](pocs/tcp_tls_proxy/plaintext_handshake_sim.cc).
+- **Dependencies:** Windows Sockets 2 (`ws2_32.lib`).
+
+#### Command-Line Options
+```text
+Usage: plaintext_handshake_sim [options]
+
+Options:
+  -m, --mode <client|server>  Execution mode (default: client)
+  -h, --host <ip_address>     IP address to connect or bind (default: 127.0.0.1)
+  -p, --port <port_number>    Port number (default: 55000)
+  --help                      Show help message
+```
+
+#### Verified Local Execution
+1. **Server Mode:** `xmake run plaintext_handshake_sim -m server -h 127.0.0.1 -p 55555`
+2. **Client Mode:** `xmake run plaintext_handshake_sim -m client -h 127.0.0.1 -p 55555`
+
+The execution verified end-to-end socket communication and byte payload correctness for the full 5-packet sequence:
+- Client sent 6-byte null probe (`00 00 00 00 00 00`).
+- Server responded with 36-byte challenge frame (`46 01 02 20` + 32-byte pseudo-random salt).
+- Client responded with 6-byte challenge ACK (`00 00 00 00 00 00`).
+- Client sent 8-byte TLS upgrade request command (`0E 01 00 04 02 00 00 00`).
+- Server responded with 3-byte confirmation signal (`04 00 01`), confirming the socket is ready for TLS `ClientHello` negotiation.

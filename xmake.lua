@@ -42,3 +42,4 @@ set_languages("cxx20")
 set_symbols("debug")
 
 includes("src/")
+includes("pocs/tcp_tls_proxy")
