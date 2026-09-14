@@ -107,6 +107,79 @@ std::string format_keys(const ProfileOptions& profile)
 	return result;
 }
 
+std::string format_disable_targets(const ProfileOptions& profile)
+{
+	if (profile.disables.empty())
+		return "none";
+	std::string result;
+	for (size_t index = 0; index < profile.disables.size(); ++index)
+	{
+		if (index != 0)
+			result += ", ";
+		result += profile.disables[index];
+	}
+	return result;
+}
+
+const char* format_retransmission_mode(RetransmissionMode mode)
+{
+	switch (mode)
+	{
+		case RetransmissionMode::none:
+			return "none";
+		case RetransmissionMode::only_seq:
+			return "only_seq";
+		case RetransmissionMode::only_ack:
+			return "only_ack";
+		case RetransmissionMode::both:
+			return "both";
+	}
+	return "unknown";
+}
+
+const char* format_ratio_selection(RatioSelection selection)
+{
+	switch (selection)
+	{
+		case RatioSelection::first:
+			return "first";
+		case RatioSelection::last:
+			return "last";
+		case RatioSelection::random:
+			return "random";
+	}
+	return "unknown";
+}
+
+std::string format_windivert_options(const ProfileOptions& profile)
+{
+	std::string result;
+	const auto append = [&](const char* label, const std::string& value) {
+		if (!result.empty())
+			result += ", ";
+		result += label;
+		result += "=";
+		result += value;
+	};
+	if (profile.windivert_options.sniff)
+		append("sniff", profile.windivert_options.sniff.value() ? "true" : "false");
+	if (profile.windivert_options.forward)
+		append("forward", profile.windivert_options.forward.value() ? "true" : "false");
+	if (profile.windivert_options.outbound)
+		append("outbound", profile.windivert_options.outbound.value() ? "true" : "false");
+	if (profile.windivert_options.client_address_enforcement)
+	{
+		static const char* client_enforcement[] = {"none", "source", "destination", "both"};
+		append("client_addr", client_enforcement[static_cast<int>(profile.windivert_options.client_address_enforcement.value())]);
+	}
+	if (profile.windivert_options.server_direction)
+	{
+		static const char* server_direction[] = {"source", "destination", "both"};
+		append("server_dir", server_direction[static_cast<int>(profile.windivert_options.server_direction.value())]);
+	}
+	return result.empty() ? "default" : result;
+}
+
 void enable_virtual_terminal()
 {
 	HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -130,8 +203,9 @@ int main(int argc, char* argv[])
 		return 0;
 
 	LOG_INFO("Loaded profiles (%zu):", options.profiles.size());
-	for (const ProfileOptions& profile : options.profiles)
+	for (size_t index = 0; index < options.profiles.size(); ++index)
 	{
+		const ProfileOptions& profile = options.profiles[index];
 		const bool		  indefinite_delay = profile.delay_ms <= 0 && (profile.delay_mode == PacketDelayMode::from_timestamp ||
 																	   profile.delay_mode == PacketDelayMode::send_all_after_delay ||
 																	   profile.delay_mode == PacketDelayMode::drop_and_send);
@@ -150,14 +224,25 @@ int main(int argc, char* argv[])
 										: profile.delay_mode == PacketDelayMode::drop
 											? "immediately"
 											: logging::format_duration(static_cast<uint64_t>(profile.delay_ms));
-		LOG_INFO("\"%s\" -> %s %s (press: %s, key_mode: %s, mode: %s) @ \"%s\"",
-				 profile.name.c_str(),
-				 delay_description.c_str(),
-				 delay_value.c_str(),
+		const std::string filter = profile.filter.value_or(options.global_filter);
+		LOG_INFO("  [%zu/%zu] %s", index + 1, options.profiles.size(), profile.name.c_str());
+		LOG_INFO("    action: %s %s", delay_description.c_str(), delay_value.c_str());
+		LOG_INFO("    trigger: %s | key_mode: %s | mode: %s",
 				 format_keys(profile).c_str(),
 				 format_key_mode(profile.key_mode),
-				 format_mode(profile.mode),
-				 profile.filter.value_or(options.global_filter).c_str());
+				 format_mode(profile.mode));
+		LOG_INFO("    disables: %s | wait: %ums + %u%% | respect_wait: %s",
+				 format_disable_targets(profile).c_str(),
+				 profile.disable_wait_ms,
+				 profile.disable_wait_percent,
+				 profile.respect_disable_wait ? "true" : "false");
+		LOG_INFO("    retransmission: %s | ratio: %s%s | ratio_selection: %s",
+				 format_retransmission_mode(profile.retransmission_mode),
+				 profile.ratio_configured ? std::to_string(profile.ratio).c_str() : "not set",
+				 profile.ratio_configured && profile.ratio_percent ? "%" : (profile.ratio_configured ? " packets" : ""),
+				 format_ratio_selection(profile.ratio_selection));
+		LOG_INFO("    windivert: %s", format_windivert_options(profile).c_str());
+		LOG_INFO("    filter: %s", filter.c_str());
 	}
 
 	::SetConsoleCtrlHandler(nullptr, TRUE);
