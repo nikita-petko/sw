@@ -172,6 +172,17 @@
           ],
           "description": "Name of a profile, '*', or array of profile names to keep disabled while this profile is active."
         },
+        "disable_wait_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Time in milliseconds to remain active after this profile is disabled."
+        },
+        "respect_disable_wait": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this profile waits for profiles it disables to finish their disable_wait_ms before activating."
+        },
         "delay_mode": {
           "type": "string",
           "enum": [

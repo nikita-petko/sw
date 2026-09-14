@@ -610,6 +610,32 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				return false;
 			}
 		}
+		else if (key == "disable_wait_ms")
+		{
+			try
+			{
+				size_t consumed = 0;
+				const unsigned long value_ms = std::stoul(unquote(value), &consumed);
+				if (consumed != unquote(value).size() || value_ms > (std::numeric_limits<uint32_t>::max)())
+					throw std::invalid_argument("invalid disable wait");
+				profile->disable_wait_ms = static_cast<uint32_t>(value_ms);
+			}
+			catch (...)
+			{
+				LOG_ERROR("Invalid disable_wait_ms in %s at line %d", path, line_number);
+				return false;
+			}
+		}
+		else if (key == "respect_disable_wait")
+		{
+			const auto respect = parse_bool(unquote(value));
+			if (!respect)
+			{
+				LOG_ERROR("Invalid respect_disable_wait in %s at line %d", path, line_number);
+				return false;
+			}
+			profile->respect_disable_wait = *respect;
+		}
 		else if (key == "ratio")
 		{
 			std::string ratio_value = trim(unquote(value));

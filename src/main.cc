@@ -210,6 +210,8 @@ int main(int argc, char* argv[])
 		}
 	});
 	std::vector<bool> activation_key_held(options.profiles.size(), false);
+	std::vector<uint64_t> disable_at(options.profiles.size(), 0);
+	std::vector<bool> pending_activation(options.profiles.size(), false);
 
 	while (true)
 	{
@@ -281,6 +283,21 @@ int main(int argc, char* argv[])
 							 options.profiles[source].disables.end(),
 							 options.profiles[target].name) != options.profiles[source].disables.end();
 		};
+		auto schedule_teardown = [&](size_t target, bool immediate) {
+			if (!engine.is_running(static_cast<int>(target + 1)))
+				return;
+			if (immediate || options.profiles[target].disable_wait_ms == 0)
+			{
+				disable_at[target] = 0;
+				engine.teardown(static_cast<int>(target + 1));
+				return;
+			}
+			if (disable_at[target] == 0)
+			{
+				disable_at[target] = GetTickCount64() + options.profiles[target].disable_wait_ms;
+				LOG_DEBUG("Profile %zu will deactivate in %u ms", target + 1, options.profiles[target].disable_wait_ms);
+			}
+		};
 		auto disable_targets = [&](size_t source) {
 			for (const std::string& disabled_name : options.profiles[source].disables)
 			{
@@ -289,16 +306,41 @@ int main(int argc, char* argv[])
 					if (target == source || (disabled_name != "*" && options.profiles[target].name != disabled_name))
 						continue;
 					disabled_profiles[target] = true;
-					if (engine.is_running(static_cast<int>(target + 1)))
-						engine.teardown(static_cast<int>(target + 1));
+					schedule_teardown(target, !options.profiles[source].respect_disable_wait);
 					if (disabled_name != "*")
 						break;
 				}
 			}
 		};
+		auto has_active_disable_target = [&](size_t source) {
+			for (size_t target = 0; target < options.profiles.size(); ++target)
+				if (target != source && profile_disables(source, target) && engine.is_running(static_cast<int>(target + 1)))
+					return true;
+			return false;
+		};
+		auto setup_profile = [&](size_t index) {
+			disable_targets(index);
+			if (options.profiles[index].respect_disable_wait && has_active_disable_target(index))
+			{
+				pending_activation[index] = true;
+				return;
+			}
+			pending_activation[index] = false;
+			engine.setup(static_cast<int>(index + 1));
+		};
+		const uint64_t now = GetTickCount64();
+		for (size_t index = 0; index < options.profiles.size(); ++index)
+			if (disable_at[index] != 0 && now >= disable_at[index])
+				schedule_teardown(index, true);
 		for (size_t index = 0; index < options.profiles.size(); ++index)
 			if (engine.is_running(static_cast<int>(index + 1)))
 				disable_targets(index);
+		for (size_t index = 0; index < options.profiles.size(); ++index)
+			if (pending_activation[index] && !has_active_disable_target(index))
+				setup_profile(index);
+		for (size_t index = 0; index < options.profiles.size(); ++index)
+			if (options.profiles[index].mode == ProfileActivationMode::hold && !active_profiles[index])
+				pending_activation[index] = false;
 		std::vector<bool> switch_profiles(options.profiles.size(), false);
 		for (size_t index = 0; index < options.profiles.size(); ++index)
 		{
@@ -324,7 +366,7 @@ int main(int argc, char* argv[])
 				for (size_t target = 0; target < options.profiles.size(); ++target)
 					if (switch_profiles[target] && profile_disables(source, target))
 					{
-						engine.teardown(static_cast<int>(source + 1));
+						schedule_teardown(source, !options.profiles[target].respect_disable_wait);
 						break;
 					}
 			}
@@ -333,7 +375,7 @@ int main(int argc, char* argv[])
 				if (!switch_profiles[index])
 					continue;
 				LOG_DEBUG("Switching to profile %d", static_cast<int>(index + 1));
-				engine.setup(static_cast<int>(index + 1));
+				setup_profile(index);
 				activation_key_held[index] = active_profiles[index];
 				LOG_DEBUG("Profile %d activated after disabling mutually exclusive profiles", static_cast<int>(index + 1));
 			}
@@ -351,13 +393,13 @@ int main(int argc, char* argv[])
 				if (active_profiles[index] && !engine.is_running(profile))
 				{
 					LOG_DEBUG("Setting up profile %d", profile);
-					engine.setup(profile);
+					setup_profile(index);
 					LOG_DEBUG("Profile %d activated (hold mode)", profile);
 				}
 				if (!active_profiles[index] && engine.is_running(profile))
 				{
 					LOG_DEBUG("Disabling profile %d", profile);
-					engine.teardown(profile);
+					schedule_teardown(index, false);
 					LOG_DEBUG("Profile %d deactivated (hold mode)", profile);
 				}
 			}
@@ -369,20 +411,20 @@ int main(int argc, char* argv[])
 					LOG_DEBUG("Toggling profile %d", profile);
 					if (engine.toggle(profile))
 					{
-						engine.teardown(profile);
+						schedule_teardown(index, false);
 						LOG_DEBUG("Profile %d released and deactivated (drop_until_toggle mode)", profile);
 					}
 				}
 				else if (shared_profiles_running[index] && engine.is_running(profile))
 				{
 					LOG_DEBUG("Disabling profile %d", profile);
-					engine.teardown(profile);
+					schedule_teardown(index, false);
 					LOG_DEBUG("Profile %d deactivated (toggle mode)", profile);
 				}
 				else
 				{
 					LOG_DEBUG("Setting up profile %d", profile);
-					engine.setup(profile);
+					setup_profile(index);
 					LOG_DEBUG("Profile %d activated (toggle mode)", profile);
 				}
 			}

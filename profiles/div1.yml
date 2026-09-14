@@ -42,6 +42,23 @@ profiles:
       forward: true
       client_address_enforcement: both
 
+  - name: "Test"
+    keys:
+      - d
+    key_mode: oneof
+    mode: toggle
+    disables: 
+      - "*"
+    filter: "tcp.Psh and tcp.PayloadLength > 500 and tcp.SrcPort == 55000"
+    retransmission_mode: none
+    delay_mode: ratio
+    ratio: 10%
+    delay_ms: 18000
+    windivert_options:
+      forward: true
+      server_direction: source
+      client_address_enforcement: destination
+
 
   - name: "Long (Recv)"
     keys:
