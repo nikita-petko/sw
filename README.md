@@ -204,6 +204,7 @@ servers:
 | `retransmission_mode` | No | `none` allows retransmissions; `only_seq` drops duplicate sequence numbers; `only_ack` drops duplicate acknowledgment numbers; `both` requires a unique `(SeqNum, AckNum)` pair. Defaults to `none`. |
 | `delay_ms` | No | Delay in milliseconds. Defaults to `0`. |
 | `ratio` | For `ratio` mode | Positive packet count, or a positive percentage such as `50%`. Percentage ratios also require `delay_ms > 0` and may not exceed `100%`. |
+| `ratio_selection` | No | `first`, `last`, or `random`; controls which packets a percentage-based `ratio` releases immediately: the first x, the last x, or a random x of the batch. Defaults to `first`. |
 | `filter` | No | Profile-specific WinDivert filter. Overrides `global_filter`. |
 | `windivert_options` | No | WinDivert capture options described below. |
 
@@ -223,7 +224,12 @@ while the other is active switches directly to the requested profile.
   captured in that batch are released together after `delay_ms`.
 - `ratio`: Releases packets in groups. With `ratio: 3`, three packets are sent
   per delay interval. With `ratio: 50%`, half of the queued packets are sent at
-  each interval, with at least one packet sent when packets are available.
+  each interval, with at least one packet sent when packets are available. For
+  percentage-based ratios, `ratio_selection` controls which packets in the
+  batch are released immediately: `first` releases the earliest-received
+  packets, `last` releases the most recently received packets, and `random`
+  releases a random selection. The remaining packets are held until the next
+  interval.
 - `drop`: Drops every filtered packet while the profile is active.
 - `drop_and_send`: Drops the configured `ratio` of each batch, then sends the
   remaining packets after `delay_ms`. Both `ratio` and a positive `delay_ms` are

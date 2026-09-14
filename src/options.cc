@@ -157,6 +157,17 @@ std::optional<RetransmissionMode> parse_retransmission_mode(const std::string& v
 	return std::nullopt;
 }
 
+std::optional<RatioSelection> parse_ratio_selection(const std::string& value)
+{
+	if (value == "first")
+		return RatioSelection::first;
+	if (value == "last")
+		return RatioSelection::last;
+	if (value == "random")
+		return RatioSelection::random;
+	return std::nullopt;
+}
+
 bool add_keys(const std::string& value, ProfileOptions& profile, const char* path, int line_number)
 {
 	std::string list = trim(value);
@@ -672,6 +683,16 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				LOG_ERROR("Invalid ratio in %s at line %d", path, line_number);
 				return false;
 			}
+		}
+		else if (key == "ratio_selection")
+		{
+			const auto selection = parse_ratio_selection(unquote(value));
+			if (!selection)
+			{
+				LOG_ERROR("Invalid ratio_selection in %s at line %d: expected first, last, or random", path, line_number);
+				return false;
+			}
+			profile->ratio_selection = *selection;
 		}
 		else if (key == "filter")
 			profile->filter = unquote(value);

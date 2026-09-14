@@ -68,6 +68,13 @@ enum class RetransmissionMode
 	both,
 };
 
+enum class RatioSelection
+{
+	first,
+	last,
+	random,
+};
+
 struct ProfileOptions
 {
 	std::string name;
@@ -84,6 +91,7 @@ struct ProfileOptions
 	int32_t ratio = 1;
 	bool ratio_percent = false;
 	bool ratio_configured = false;
+	RatioSelection ratio_selection = RatioSelection::first;
 	std::optional<std::string> filter;
 	WinDivertOptions windivert_options;
 };

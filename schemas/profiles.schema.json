@@ -233,6 +233,16 @@
           ],
           "description": "Packet ratio expressed as a count (e.g., 3) or percentage (e.g., '50%'). Required for 'ratio' and 'drop_and_send' delay modes."
         },
+        "ratio_selection": {
+          "type": "string",
+          "enum": [
+            "first",
+            "last",
+            "random"
+          ],
+          "default": "first",
+          "description": "Which packets within the batch are released immediately when using a percentage-based ratio: the first x, the last x, or a random x. Only applies to percentage-based ratio values."
+        },
         "filter": {
           "type": "string",
           "description": "Profile-specific WinDivert filter expression. Overrides top-level global_filter."

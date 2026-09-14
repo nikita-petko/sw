@@ -62,7 +62,7 @@ profiles:
 
   - name: "Long (Recv)"
     keys:
-      - ctrl
+      - z
       - space
     key_mode: oneof
     mode: toggle
@@ -78,7 +78,7 @@ profiles:
       server_direction: source
       client_address_enforcement: destination
       
-  - name: "Long (Send)"
+  - name: "Long (Send - with delay)"
     keys:
       - alt
       - space
@@ -87,6 +87,28 @@ profiles:
     retransmission_mode: none
     disables: 
       - "RPM"
+      - "Long (Send)"
+    filter: "tcp.Psh and tcp.PayloadLength > 0 and tcp.DstPort == 55000"
+    delay_mode: ratio
+    disable_wait_percent: 15
+    ratio: 10%
+    delay_ms: 18000
+    windivert_options:
+      forward: true
+      server_direction: destination
+      client_address_enforcement: source
+
+  - name: "Long (Send)"
+    keys:
+      - ctrl
+      - space
+    key_mode: oneof
+    mode: toggle
+    retransmission_mode: none
+    disables: 
+      - "RPM"
+      - "Long (Send - with delay)"
+    respect_disable_wait: false
     filter: "tcp.Psh and tcp.PayloadLength > 0 and tcp.DstPort == 55000"
     delay_mode: ratio
     ratio: 10%

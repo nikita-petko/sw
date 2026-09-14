@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <random>
 
 namespace {
 class RatioMode final : public PacketMode
@@ -52,10 +53,37 @@ public:
 		}
 		const size_t send_count = (std::max<size_t>)(1, (queued_packets.size() * static_cast<size_t>(options_.ratio) + 99) / 100);
 		ratio_release_at_		= now + static_cast<uint64_t>(options_.delay_ms);
+
+		std::vector<bool> send_now(queued_packets.size(), false);
+		switch (options_.ratio_selection)
+		{
+			case RatioSelection::last:
+				for (size_t index = queued_packets.size() - (std::min)(send_count, queued_packets.size()); index < queued_packets.size();
+					 ++index)
+					send_now[index] = true;
+				break;
+			case RatioSelection::random:
+			{
+				std::vector<size_t> indices(queued_packets.size());
+				for (size_t index = 0; index < indices.size(); ++index)
+					indices[index] = index;
+				std::mt19937_64 rng(now ^ reinterpret_cast<uintptr_t>(this));
+				std::shuffle(indices.begin(), indices.end(), rng);
+				for (size_t index = 0; index < send_count && index < indices.size(); ++index)
+					send_now[indices[index]] = true;
+				break;
+			}
+			case RatioSelection::first:
+			default:
+				for (size_t index = 0; index < send_count && index < queued_packets.size(); ++index)
+					send_now[index] = true;
+				break;
+		}
+
 		for (size_t index = 0; index < queued_packets.size(); ++index)
 		{
 			PacketNode* node = queued_packets[index];
-			if (index < send_count)
+			if (send_now[index])
 				ready_packets.push_back(node);
 			else
 			{
