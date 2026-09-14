@@ -237,7 +237,78 @@ authoritative game server is not part of this repository:
    client-reported one, so that teleporting and RPM manipulation are closed
    by the same architectural change rather than three separate patches.
 
-## 9. Ethical and legal scope
+## 9. Empirical findings: conditions for consistently reproducing sniper damage
+
+Hands-on testing while tuning the profiles in this repository (see
+[`profiles/div1.yml`](../profiles/div1.yml)) found that the plain outbound
+weapon-swap variant described in Section 2 is **not a fixed, deterministic
+trigger** — whether the delayed low-damage shots register as the swapped-to
+high-damage weapon is sensitive to several variables that are not obvious from
+the exploit's basic description:
+
+1. **Post-swap hold time must scale with how long fire was withheld, not be a
+   fixed constant.** How long the sniper rifle must be held (i.e. how long the
+   player must wait after swapping before releasing the delayed packets or
+   swapping again) after the swap-to depends on the *duration of the prior
+   lagging/withholding period*, not a single fixed value. A single withheld
+   shot fired during a short delay window only needs a short post-swap hold;
+   a longer burst (e.g. roughly ten shots) fired during a longer withholding
+   period requires a proportionally longer post-swap hold before the server
+   will resolve the pending shots against the newly-equipped weapon. This is
+   consistent with the ordering-based root cause in Section 3: the server
+   needs the swap event to be established (and, seemingly, to remain the
+   "current" state for some minimum interval) before it will attribute a
+   backlog of pending fire events to it, and a bigger backlog appears to need
+   a longer window to be fully absorbed/attributed rather than partially
+   attributed.
+2. **Movement distance during the withholding period is also a factor.** How
+   far the player moves (e.g. running away) between firing the withheld shots
+   and releasing them influences whether the exploit lands, likely because
+   large position deltas during the withheld window interact with the same
+   position-based lag compensation/rewind system discussed in Section 4 —
+   i.e. the server's hit-validation rewind has to reconcile both a stale
+   position and a stale weapon simultaneously, and large movement makes that
+   reconciliation more likely to reject the hit outright (independent of
+   weapon attribution) rather than more likely to misattribute damage.
+3. **The exploit can silently fail with no server-side hit at all.** In some
+   attempts, the withheld shots do not appear to register as a hit on the
+   target's screen under any weapon attribution — i.e. the failure mode is not
+   always "correct weapon, correct damage" as a fallback, it can be "no shot
+   registers visibly to observers," which suggests the server sometimes
+   discards the ambiguous/stale burst entirely (e.g. because the accompanying
+   rewind/position check fails, or because retransmission/sequence handling
+   drops the packets as stale) rather than resolving it against either
+   weapon.
+4. **Even with correct timing, the technique is not 100% reliable.** Tuning
+   the post-swap hold and withholding duration per Findings 1–2 improves
+   consistency but does not make the exploit deterministic; some attempts
+   still resolve as ordinary shotgun damage instead of sniper damage despite
+   using the same timing that succeeded on a prior attempt, reinforcing that
+   the server's attribution behavior is a race condition rather than a
+   guaranteed outcome. In practice this is tolerable for the exploit's
+   purpose: most players die to roughly one to two sniper-rifle hits, and
+   since a shotgun blast is multiple pellets (commonly modeled as eight
+   separate projectiles) each independently capable of inheriting the
+   sniper's per-hit damage if the misattribution succeeds, a single withheld
+   shotgun blast that lands as sniper damage typically delivers far more than
+   enough hits/damage to kill even when only some pellets are misattributed,
+   which is why the exploit remains effective in practice despite not being
+   fully reliable on any single attempt.
+
+These findings indicate that a workable exploit profile cannot use a single
+fixed `delay_ms` and an instantaneous release; it needs the hold time *after*
+the weapon swap to be tunable independently of the capture delay, and ideally
+tunable per attempt based on how much was queued and how long the withholding
+period lasted. This observation is what motivated the recent profile changes
+in this repository (see [`profiles/div1.yml`](../profiles/div1.yml)):
+separating the "withhold fire events" profile (`RPM`, `from_timestamp`) from
+the long-hold profiles (`Long (Recv)` / `Long (Send)`, `ratio`-based with a
+large `delay_ms` and partial percentage release), so that the post-swap hold
+duration and the release fraction can be tuned and triggered independently of
+the initial capture delay, rather than being coupled to a single fixed delay
+value as a naive implementation would require.
+
+## 10. Ethical and legal scope
 
 This document analyzes a historical, publicly discussed exploit for
 educational/defensive purposes (informing detection and mitigation design). It
@@ -248,7 +319,7 @@ violate a game's Terms of Service or applicable computer-fraud laws. Any use of
 `lagsw` against production game infrastructure without authorization is out of
 scope and not endorsed by this document.
 
-## 10. Summary
+## 11. Summary
 
 The Division 1 weapon-swap lag switch is a textbook example of an **event-
 ordering exploit**: it requires no packet forgery, only the ability to control
