@@ -626,6 +626,22 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				return false;
 			}
 		}
+		else if (key == "disable_wait_percent")
+		{
+			try
+			{
+				size_t consumed = 0;
+				const unsigned long percent = std::stoul(unquote(value), &consumed);
+				if (consumed != unquote(value).size() || percent > 100)
+					throw std::invalid_argument("invalid disable wait percentage");
+				profile->disable_wait_percent = static_cast<uint8_t>(percent);
+			}
+			catch (...)
+			{
+				LOG_ERROR("Invalid disable_wait_percent in %s at line %d", path, line_number);
+				return false;
+			}
+		}
 		else if (key == "respect_disable_wait")
 		{
 			const auto respect = parse_bool(unquote(value));

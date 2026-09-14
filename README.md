@@ -137,6 +137,7 @@ profiles:
     key: space
     mode: toggle
     disables: "Other profile"
+    disable_wait_percent: 50
     respect_disable_wait: true
     delay_mode: from_timestamp
     retransmission_mode: both
@@ -197,7 +198,8 @@ servers:
 | `mode` | No | `toggle` or `hold`; defaults to `toggle`. |
 | `disables` | No | A profile name, `*`, or a list of either, to keep disabled while this profile is active. `*` disables every other profile. Named targets must be configured profiles and cannot include this profile. |
 | `disable_wait_ms` | No | Time in milliseconds this profile remains active after it is disabled. Defaults to `0`. |
-| `respect_disable_wait` | No | When this profile disables another profile with `disable_wait_ms`, wait for that profile to stop before activating. Defaults to `true`; set to `false` to activate immediately. |
+| `disable_wait_percent` | No | Additional wait equal to this percentage of the profile's current enabled time, from `0` to `100`. This is added to `disable_wait_ms`. Defaults to `0`. |
+| `respect_disable_wait` | No | When this profile disables another profile with a configured disable wait, wait for that profile to stop before activating. Defaults to `true`; set to `false` to activate immediately. |
 | `delay_mode` | No | `from_timestamp`, `send_all_after_delay`, `ratio`, `drop`, `drop_and_send`, or `drop_until_toggle`; defaults to `from_timestamp`. |
 | `retransmission_mode` | No | `none` allows retransmissions; `only_seq` drops duplicate sequence numbers; `only_ack` drops duplicate acknowledgment numbers; `both` requires a unique `(SeqNum, AckNum)` pair. Defaults to `none`. |
 | `delay_ms` | No | Delay in milliseconds. Defaults to `0`. |

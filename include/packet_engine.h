@@ -74,6 +74,7 @@ struct ProfileOptions
 	std::vector<int> keys;
 	std::vector<std::string> disables;
 	uint32_t disable_wait_ms = 0;
+	uint8_t disable_wait_percent = 0;
 	bool respect_disable_wait = true;
 	ProfileKeyMode key_mode = ProfileKeyMode::combination;
 	ProfileActivationMode mode = ProfileActivationMode::toggle;
@@ -134,6 +135,7 @@ public:
 	bool is_authoritative_server() const;
 	bool is_region_enforcement_enabled() const;
 	uint64_t running_time_ms() const;
+	uint64_t profile_running_time_ms(int profile) const;
 	size_t pending_packets() const;
 	uint64_t next_batch_in_ms() const;
 	void cycle_server(int direction);

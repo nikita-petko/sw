@@ -178,6 +178,13 @@
           "default": 0,
           "description": "Time in milliseconds to remain active after this profile is disabled."
         },
+        "disable_wait_percent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 0,
+          "description": "Additional disable wait as a percentage of this profile's current enabled time."
+        },
         "respect_disable_wait": {
           "type": "boolean",
           "default": true,

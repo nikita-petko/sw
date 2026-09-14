@@ -286,7 +286,12 @@ int main(int argc, char* argv[])
 		auto schedule_teardown = [&](size_t target, bool immediate) {
 			if (!engine.is_running(static_cast<int>(target + 1)))
 				return;
-			if (immediate || options.profiles[target].disable_wait_ms == 0)
+			const ProfileOptions& target_options = options.profiles[target];
+			const uint64_t enabled_for_ms = engine.profile_running_time_ms(static_cast<int>(target + 1));
+			const uint64_t percentage_wait_ms =
+				(enabled_for_ms / 100) * target_options.disable_wait_percent + (enabled_for_ms % 100) * target_options.disable_wait_percent / 100;
+			const uint64_t wait_ms = target_options.disable_wait_ms + percentage_wait_ms;
+			if (immediate || wait_ms == 0)
 			{
 				disable_at[target] = 0;
 				engine.teardown(static_cast<int>(target + 1));
@@ -294,8 +299,8 @@ int main(int argc, char* argv[])
 			}
 			if (disable_at[target] == 0)
 			{
-				disable_at[target] = GetTickCount64() + options.profiles[target].disable_wait_ms;
-				LOG_DEBUG("Profile %zu will deactivate in %u ms", target + 1, options.profiles[target].disable_wait_ms);
+				disable_at[target] = GetTickCount64() + wait_ms;
+				LOG_DEBUG("Profile %zu will deactivate in %llu ms", target + 1, wait_ms);
 			}
 		};
 		auto disable_targets = [&](size_t source) {

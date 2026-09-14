@@ -763,6 +763,15 @@ uint64_t PacketEngine::running_time_ms() const
 	return has_active_profile ? now - earliest_enabled : 0;
 }
 
+uint64_t PacketEngine::profile_running_time_ms(int profile) const
+{
+	if (profile < 1 || static_cast<size_t>(profile) > options_.profiles.size())
+		return 0;
+	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
+	const size_t index = static_cast<size_t>(profile - 1);
+	return state_->active_profiles[index] ? GetTickCount64() - state_->profile_stats[index].enabled_since : 0;
+}
+
 size_t PacketEngine::pending_packets() const
 {
 	size_t						pending = 0;
