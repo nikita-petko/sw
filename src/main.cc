@@ -300,7 +300,15 @@ int main(int argc, char* argv[])
 			if (disable_at[target] == 0)
 			{
 				disable_at[target] = GetTickCount64() + wait_ms;
-				LOG_DEBUG("Profile %zu will deactivate in %llu ms", target + 1, wait_ms);
+				if (percentage_wait_ms != 0)
+					LOG_INFO("Profile %zu will deactivate in %s (%s extra from %u%% of %s)",
+							 target + 1,
+							 logging::format_duration(wait_ms).c_str(),
+							 logging::format_duration(percentage_wait_ms).c_str(),
+							 target_options.disable_wait_percent,
+							 logging::format_duration(enabled_for_ms).c_str());
+				else
+					LOG_INFO("Profile %zu will deactivate in %s", target + 1, logging::format_duration(wait_ms).c_str());
 			}
 		};
 		auto disable_targets = [&](size_t source) {
@@ -422,9 +430,19 @@ int main(int argc, char* argv[])
 				}
 				else if (shared_profiles_running[index] && engine.is_running(profile))
 				{
-					LOG_DEBUG("Disabling profile %d", profile);
-					schedule_teardown(index, false);
-					LOG_DEBUG("Profile %d deactivated (toggle mode)", profile);
+					if (disable_at[index] != 0)
+					{
+						LOG_DEBUG("Restarting profile %d during disable wait", profile);
+						schedule_teardown(index, true);
+						setup_profile(index);
+						LOG_DEBUG("Profile %d restarted (toggle mode)", profile);
+					}
+					else
+					{
+						LOG_DEBUG("Disabling profile %d", profile);
+						schedule_teardown(index, false);
+						LOG_DEBUG("Profile %d deactivated (toggle mode)", profile);
+					}
 				}
 				else
 				{
