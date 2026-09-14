@@ -58,6 +58,7 @@ profiles:
   - name: "Long (Recv)"
     keys:
       - z
+      - space
     key_mode: oneof
     mode: toggle
     disables: 
@@ -95,7 +96,6 @@ profiles:
   - name: "Long (Send)"
     keys:
       - ctrl
-      - space
     key_mode: oneof
     mode: toggle
     retransmission_mode: none
