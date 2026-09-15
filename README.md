@@ -199,10 +199,11 @@ servers:
 | `disable_wait_ms` | No | Time in milliseconds this profile remains active after it is disabled. Defaults to `0`. |
 | `disable_wait_percent` | No | Additional wait equal to this percentage of the profile's current enabled time, from `0` to `100`. This is added to `disable_wait_ms`. Defaults to `0`. |
 | `respect_disable_wait` | No | When this profile disables another profile with a configured disable wait, wait for that profile to stop before activating. Defaults to `true`; set to `false` to activate immediately. |
-| `delay_mode` | No | `from_timestamp`, `send_all_after_delay`, `ratio`, `drop`, `drop_and_send`, or `drop_until_toggle`; defaults to `from_timestamp`. |
+| `delay_mode` | No | `from_timestamp`, `send_all_after_delay`, `ratio`, `drop`, `drop_and_send`, `hold_and_send`, or `drop_until_toggle`; defaults to `from_timestamp`. |
 | `retransmission_mode` | No | `none` allows retransmissions; `only_seq` drops duplicate sequence numbers; `only_ack` drops duplicate acknowledgment numbers; `both` requires a unique `(SeqNum, AckNum)` pair. Defaults to `none`. |
+| `subsequent_packet_hold_mode` | No | For `hold_and_send`, `none` holds only the configured initial packet count; `seq_only`, `ack_only`, or `seq_ack` also holds subsequent TCP packets matching an initially held packet. Defaults to `none`. |
 | `delay_ms` | No | Delay in milliseconds. Defaults to `0`. |
-| `ratio` | For `ratio` mode | Positive packet count, or a positive percentage such as `50%`. Percentage ratios also require `delay_ms > 0` and may not exceed `100%`. |
+| `ratio` | For `ratio`, `drop_and_send`, or `hold_and_send` mode | Positive packet count, or a positive percentage such as `50%`. Percentage ratios also require `delay_ms > 0` and may not exceed `100%`; `hold_and_send` requires a packet count. |
 | `ratio_selection` | No | `first`, `last`, or `random`; controls which packets a percentage-based `ratio` releases immediately: the first x, the last x, or a random x of the batch. Defaults to `first`. |
 | `filter` | No | Profile-specific WinDivert filter. Overrides `global_filter`. |
 | `windivert_options` | No | WinDivert capture options described below. |
@@ -233,6 +234,11 @@ while the other is active switches directly to the requested profile.
 - `drop_and_send`: Drops the configured `ratio` of each batch, then sends the
   remaining packets after `delay_ms`. Both `ratio` and a positive `delay_ms` are
   required.
+- `hold_and_send`: Holds the first `ratio` packets while allowing every later
+  packet through immediately. Held packets are sent when the profile is
+  deactivated. With `subsequent_packet_hold_mode`, later packets matching an
+  initially held TCP packet by sequence, acknowledgment, or both are held as
+  well. This mode requires a positive packet-count `ratio`.
 - `drop_until_toggle`: Drops packets after activation. The next toggle starts
   holding packets, and the following toggle sends the held packets and
   deactivates the profile. This mode requires `mode: toggle`.

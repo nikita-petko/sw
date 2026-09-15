@@ -139,6 +139,8 @@ std::optional<PacketDelayMode> parse_delay_mode(const std::string& value)
 		return PacketDelayMode::drop;
 	if (value == "drop_and_send")
 		return PacketDelayMode::drop_and_send;
+	if (value == "hold_and_send")
+		return PacketDelayMode::hold_and_send;
 	if (value == "drop_until_toggle")
 		return PacketDelayMode::drop_until_toggle;
 	return std::nullopt;
@@ -154,6 +156,19 @@ std::optional<RetransmissionMode> parse_retransmission_mode(const std::string& v
 		return RetransmissionMode::only_ack;
 	if (value == "both")
 		return RetransmissionMode::both;
+	return std::nullopt;
+}
+
+std::optional<SubsequentPacketHoldMode> parse_subsequent_packet_hold_mode(const std::string& value)
+{
+	if (value == "none")
+		return SubsequentPacketHoldMode::none;
+	if (value == "seq_only")
+		return SubsequentPacketHoldMode::seq_only;
+	if (value == "ack_only")
+		return SubsequentPacketHoldMode::ack_only;
+	if (value == "seq_ack")
+		return SubsequentPacketHoldMode::seq_ack;
 	return std::nullopt;
 }
 
@@ -591,7 +606,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			if (!mode)
 			{
 				LOG_ERROR(
-					"Invalid delay_mode in %s at line %d: expected from_timestamp, send_all_after_delay, ratio, drop, drop_and_send, or "
+					"Invalid delay_mode in %s at line %d: expected from_timestamp, send_all_after_delay, ratio, drop, drop_and_send, hold_and_send, or "
 					"drop_until_toggle",
 					path,
 					line_number);
@@ -608,6 +623,18 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				return false;
 			}
 			profile->retransmission_mode = *mode;
+		}
+		else if (key == "subsequent_packet_hold_mode")
+		{
+			const auto mode = parse_subsequent_packet_hold_mode(unquote(value));
+			if (!mode)
+			{
+				LOG_ERROR("Invalid subsequent_packet_hold_mode in %s at line %d: expected none, seq_only, ack_only, or seq_ack",
+						  path,
+						  line_number);
+				return false;
+			}
+			profile->subsequent_packet_hold_mode = *mode;
 		}
 		else if (key == "delay_ms")
 		{
@@ -713,6 +740,12 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		if (item.delay_mode == PacketDelayMode::drop_and_send && !item.ratio_configured)
 		{
 			LOG_ERROR("Profile '%s' requires ratio to be configured", item.name.c_str());
+			return false;
+		}
+		if (item.delay_mode == PacketDelayMode::hold_and_send &&
+			(!item.ratio_configured || item.ratio <= 0 || item.ratio_percent))
+		{
+			LOG_ERROR("Profile '%s' requires a positive packet count ratio for hold_and_send", item.name.c_str());
 			return false;
 		}
 		if (item.delay_mode == PacketDelayMode::drop_until_toggle && item.mode != ProfileActivationMode::toggle)

@@ -198,6 +198,7 @@
             "ratio",
             "drop",
             "drop_and_send",
+            "hold_and_send",
             "drop_until_toggle"
           ],
           "default": "from_timestamp",
@@ -213,6 +214,17 @@
           ],
           "default": "none",
           "description": "TCP retransmission handling behavior."
+        },
+        "subsequent_packet_hold_mode": {
+          "type": "string",
+          "enum": [
+            "none",
+            "seq_only",
+            "ack_only",
+            "seq_ack"
+          ],
+          "default": "none",
+          "description": "For hold_and_send, also hold subsequent TCP packets matching held packets by sequence, acknowledgment, or both."
         },
         "delay_ms": {
           "type": "integer",
@@ -231,7 +243,7 @@
               "pattern": "^[1-9][0-9]*%$"
             }
           ],
-          "description": "Packet ratio expressed as a count (e.g., 3) or percentage (e.g., '50%'). Required for 'ratio' and 'drop_and_send' delay modes."
+          "description": "Packet ratio expressed as a count (e.g., 3) or percentage (e.g., '50%'). Required for 'ratio', 'drop_and_send', and 'hold_and_send' delay modes. 'hold_and_send' requires a count."
         },
         "ratio_selection": {
           "type": "string",
@@ -339,6 +351,7 @@
                 "enum": [
                   "ratio",
                   "drop_and_send"
+                  ,"hold_and_send"
                 ]
               }
             },

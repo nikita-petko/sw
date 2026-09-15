@@ -137,6 +137,22 @@ const char* format_retransmission_mode(RetransmissionMode mode)
 	return "unknown";
 }
 
+const char* format_subsequent_packet_hold_mode(SubsequentPacketHoldMode mode)
+{
+	switch (mode)
+	{
+		case SubsequentPacketHoldMode::none:
+			return "none";
+		case SubsequentPacketHoldMode::seq_only:
+			return "seq_only";
+		case SubsequentPacketHoldMode::ack_only:
+			return "ack_only";
+		case SubsequentPacketHoldMode::seq_ack:
+			return "seq_ack";
+	}
+	return "unknown";
+}
+
 const char* format_ratio_selection(RatioSelection selection)
 {
 	switch (selection)
@@ -217,6 +233,7 @@ int main(int argc, char* argv[])
 			: profile.delay_mode == PacketDelayMode::ratio
 				? "Send " + std::to_string(profile.ratio) + (profile.ratio_percent ? "% per" : " packets per")
 			: profile.delay_mode == PacketDelayMode::drop_and_send	   ? "Drop, then send after"
+			: profile.delay_mode == PacketDelayMode::hold_and_send	   ? "Hold, then send"
 			: profile.delay_mode == PacketDelayMode::drop_until_toggle ? "Drop, hold, then send after"
 			: profile.delay_mode == PacketDelayMode::drop			   ? "Drop packets"
 																	   : "Delay each by";
@@ -236,8 +253,9 @@ int main(int argc, char* argv[])
 				 profile.disable_wait_ms,
 				 profile.disable_wait_percent,
 				 profile.respect_disable_wait ? "true" : "false");
-		LOG_INFO("    retransmission: %s | ratio: %s%s | ratio_selection: %s",
+		LOG_INFO("    retransmission: %s | subsequent_packet_hold: %s | ratio: %s%s | ratio_selection: %s",
 				 format_retransmission_mode(profile.retransmission_mode),
+				 format_subsequent_packet_hold_mode(profile.subsequent_packet_hold_mode),
 				 profile.ratio_configured ? std::to_string(profile.ratio).c_str() : "not set",
 				 profile.ratio_configured && profile.ratio_percent ? "%" : (profile.ratio_configured ? " packets" : ""),
 				 format_ratio_selection(profile.ratio_selection));

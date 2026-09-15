@@ -57,6 +57,7 @@ enum class PacketDelayMode
 	ratio,
 	drop,
 	drop_and_send,
+	hold_and_send,
 	drop_until_toggle,
 };
 
@@ -66,6 +67,14 @@ enum class RetransmissionMode
 	only_seq,
 	only_ack,
 	both,
+};
+
+enum class SubsequentPacketHoldMode
+{
+	none,
+	seq_only,
+	ack_only,
+	seq_ack,
 };
 
 enum class RatioSelection
@@ -87,6 +96,7 @@ struct ProfileOptions
 	ProfileActivationMode mode = ProfileActivationMode::toggle;
 	PacketDelayMode delay_mode = PacketDelayMode::from_timestamp;
 	RetransmissionMode retransmission_mode = RetransmissionMode::none;
+	SubsequentPacketHoldMode subsequent_packet_hold_mode = SubsequentPacketHoldMode::none;
 	int32_t delay_ms = 0;
 	int32_t ratio = 1;
 	bool ratio_percent = false;

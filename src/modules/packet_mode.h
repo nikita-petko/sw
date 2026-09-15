@@ -42,6 +42,7 @@ PacketNode* make_packet_node(const BYTE*			  packet,
 							 uint64_t				  receive_order);
 void		destroy_packet_node(PacketNode* node);
 void		collect_due_packets(PacketQueue& packets, uint64_t now, std::vector<PacketNode*>& ready_packets);
+bool		get_tcp_numbers(const BYTE* packet, UINT length, uint32_t& sequence, uint32_t& acknowledgment);
 
 class PacketMode
 {

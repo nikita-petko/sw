@@ -31,7 +31,7 @@ profiles:
     mode: toggle
     disables: "*"
     delay_mode: from_timestamp
-    filter: "(tcp.SrcPort == 55000 or tcp.DstPort == 55000)"
+    filter: "tcp.SrcPort == 55000 or tcp.DstPort == 55000"
     delay_ms: 500
     windivert_options:
       forward: true
@@ -44,11 +44,11 @@ profiles:
     mode: toggle
     disables: 
       - "*"
-    filter: "tcp.Psh and tcp.PayloadLength > 500 and tcp.SrcPort == 55000"
+    filter: "tcp.Psh and tcp.SrcPort == 55000"
     retransmission_mode: none
-    delay_mode: ratio
-    ratio: 10%
-    delay_ms: 18000
+    subsequent_packet_hold_mode: seq_ack
+    delay_mode: hold_and_send
+    ratio: 2
     windivert_options:
       forward: true
       server_direction: source
@@ -63,7 +63,7 @@ profiles:
     mode: toggle
     disables: 
       - "RPM"
-    filter: "tcp.Psh and tcp.PayloadLength > 0 and tcp.SrcPort == 55000"
+    filter: "tcp.Psh and tcp.SrcPort == 55000"
     retransmission_mode: none
     delay_mode: ratio
     ratio: 10%
@@ -83,7 +83,7 @@ profiles:
     disables: 
       - "RPM"
       - "Long (Send)"
-    filter: "tcp.Psh and tcp.PayloadLength > 0 and tcp.DstPort == 55000"
+    filter: "tcp.Psh and tcp.DstPort == 55000"
     delay_mode: ratio
     disable_wait_percent: 15
     ratio: 10%
@@ -103,7 +103,7 @@ profiles:
       - "RPM"
       - "Long (Send - with delay)"
     respect_disable_wait: false
-    filter: "tcp.Psh and tcp.PayloadLength > 0 and tcp.DstPort == 55000"
+    filter: "tcp.Psh and tcp.DstPort == 55000"
     delay_mode: ratio
     ratio: 10%
     delay_ms: 18000

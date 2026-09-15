@@ -8,29 +8,6 @@
 #include "log.h"
 
 namespace {
-bool get_tcp_numbers(const BYTE* packet, UINT length, uint32_t& sequence, uint32_t& acknowledgment)
-{
-	WINDIVERT_TCPHDR* tcp_header = nullptr;
-	if (!WinDivertHelperParsePacket(packet,
-									length,
-									nullptr,
-									nullptr,
-									nullptr,
-									nullptr,
-									nullptr,
-									&tcp_header,
-									nullptr,
-									nullptr,
-									nullptr,
-									nullptr,
-									nullptr) ||
-		!tcp_header)
-		return false;
-	sequence	   = WinDivertHelperNtohl(tcp_header->SeqNum);
-	acknowledgment = WinDivertHelperNtohl(tcp_header->AckNum);
-	return true;
-}
-
 const char* retransmission_mode_name(RetransmissionMode mode)
 {
 	switch (mode)
@@ -47,6 +24,29 @@ const char* retransmission_mode_name(RetransmissionMode mode)
 	return "unknown";
 }
 }  // namespace
+
+bool get_tcp_numbers(const BYTE* packet, UINT length, uint32_t& sequence, uint32_t& acknowledgment)
+{
+	WINDIVERT_TCPHDR* tcp_header = nullptr;
+	if (!WinDivertHelperParsePacket(packet,
+									length,
+									nullptr,
+									nullptr,
+									nullptr,
+									nullptr,
+									nullptr,
+									&tcp_header,
+									nullptr,
+									nullptr,
+									nullptr,
+									nullptr,
+									nullptr) ||
+				!tcp_header)
+		return false;
+	sequence	   = WinDivertHelperNtohl(tcp_header->SeqNum);
+	acknowledgment = WinDivertHelperNtohl(tcp_header->AckNum);
+	return true;
+}
 
 PacketMode::PacketMode(ProfileOptions options, const char* mode_name) : options_(std::move(options)), mode_name_(mode_name)
 {
