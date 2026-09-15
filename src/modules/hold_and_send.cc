@@ -13,6 +13,7 @@ public:
 
 	void reset() override
 	{
+		PacketMode::reset();
 		held_packets_ = 0;
 		held_packet_numbers_.clear();
 	}

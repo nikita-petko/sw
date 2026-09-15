@@ -72,7 +72,7 @@ profiles:
       forward: true
       server_direction: source
       client_address_enforcement: destination
-      
+
   - name: "Long (Send - with delay)"
     keys:
       - alt
@@ -99,6 +99,7 @@ profiles:
     key_mode: oneof
     mode: toggle
     retransmission_mode: none
+    ack_restoration: false
     disables: 
       - "RPM"
       - "Long (Send - with delay)"

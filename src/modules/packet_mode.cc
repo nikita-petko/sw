@@ -58,6 +58,43 @@ PacketMode::~PacketMode()
 	LOG_DEBUG("packet mode deinit: %s (%s)", mode_name_, options_.name.c_str());
 }
 
+void PacketMode::prepare_packet_for_send(BYTE* packet, UINT length, const WINDIVERT_ADDRESS* address)
+{
+	if (!options_.ack_restoration)
+		return;
+	const size_t direction = address != nullptr && address->Outbound ? 1 : 0;
+
+	PWINDIVERT_TCPHDR tcp_header = nullptr;
+	if (!WinDivertHelperParsePacket(packet,
+									length,
+									nullptr,
+									nullptr,
+									nullptr,
+									nullptr,
+									nullptr,
+									&tcp_header,
+									nullptr,
+									nullptr,
+									nullptr,
+									nullptr,
+									nullptr) ||
+		!tcp_header || !tcp_header->Ack)
+		return;
+
+	uint32_t acknowledgment = WinDivertHelperNtohl(tcp_header->AckNum);
+	if (tcp_header->Psh && has_last_sent_ack_[direction] && acknowledgment < last_sent_ack_[direction])
+	{
+		acknowledgment = last_sent_ack_[direction];
+		tcp_header->AckNum = WinDivertHelperHtonl(acknowledgment);
+		WinDivertHelperCalcChecksums(packet, length, nullptr, 0);
+	}
+	if (!has_last_sent_ack_[direction] || acknowledgment > last_sent_ack_[direction])
+	{
+		last_sent_ack_[direction] = acknowledgment;
+		has_last_sent_ack_[direction] = true;
+	}
+}
+
 void PacketMode::capture(const BYTE*			  packet,
 						 UINT					  length,
 						 const WINDIVERT_ADDRESS& address,
@@ -98,6 +135,28 @@ void PacketMode::capture(const BYTE*			  packet,
 					return;
 				}
 			}
+		}
+	}
+	if (options_.ack_restoration)
+	{
+		PWINDIVERT_TCPHDR tcp_header = nullptr;
+		if (WinDivertHelperParsePacket(packet,
+									length,
+								nullptr,
+								nullptr,
+								nullptr,
+								nullptr,
+								nullptr,
+								&tcp_header,
+								nullptr,
+								nullptr,
+								nullptr,
+								nullptr,
+								nullptr) &&
+				 tcp_header && tcp_header->Ack && !tcp_header->Psh)
+		{
+			packets.push(make_packet_node(packet, length, address, profile, now, receive_order));
+			return;
 		}
 	}
 	capture_packet(packet, length, address, profile, now, receive_order, packets);

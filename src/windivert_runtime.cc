@@ -26,6 +26,8 @@ decltype(&WinDivertSetParam)			WinDivertSetParam_fn			= nullptr;
 decltype(&WinDivertHelperCompileFilter) WinDivertHelperCompileFilter_fn = nullptr;
 decltype(&WinDivertHelperParsePacket)	WinDivertHelperParsePacket_fn	= nullptr;
 decltype(&WinDivertHelperNtohl)			WinDivertHelperNtohl_fn			= nullptr;
+	decltype(&WinDivertHelperHtonl)			WinDivertHelperHtonl_fn			= nullptr;
+	decltype(&WinDivertHelperCalcChecksums)	WinDivertHelperCalcChecksums_fn	= nullptr;
 
 bool extract_resource(int resource_id, const std::filesystem::path& path)
 {
@@ -93,6 +95,8 @@ bool load_functions()
 	LOAD_WINDIVERT_FUNCTION(WinDivertHelperCompileFilter);
 	LOAD_WINDIVERT_FUNCTION(WinDivertHelperParsePacket);
 	LOAD_WINDIVERT_FUNCTION(WinDivertHelperNtohl);
+	LOAD_WINDIVERT_FUNCTION(WinDivertHelperHtonl);
+	LOAD_WINDIVERT_FUNCTION(WinDivertHelperCalcChecksums);
 #undef LOAD_WINDIVERT_FUNCTION
 	return true;
 }
@@ -220,4 +224,14 @@ extern "C" BOOL WinDivertHelperParsePacket(const VOID*			 packet,
 extern "C" UINT32 WinDivertHelperNtohl(UINT32 value)
 {
 	return WinDivertHelperNtohl_fn(value);
+}
+
+extern "C" UINT32 WinDivertHelperHtonl(UINT32 value)
+{
+	return WinDivertHelperHtonl_fn(value);
+}
+
+extern "C" BOOL WinDivertHelperCalcChecksums(VOID* packet, UINT packet_len, WINDIVERT_ADDRESS* address, UINT64 flags)
+{
+	return WinDivertHelperCalcChecksums_fn(packet, packet_len, address, flags);
 }

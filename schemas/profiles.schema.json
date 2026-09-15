@@ -226,6 +226,11 @@
           "default": "none",
           "description": "For hold_and_send, also hold subsequent TCP packets matching held packets by sequence, acknowledgment, or both."
         },
+        "ack_restoration": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow ACK-only TCP packets through immediately and raise released PSH packet ACK numbers to the highest ACK already sent."
+        },
         "delay_ms": {
           "type": "integer",
           "minimum": 0,

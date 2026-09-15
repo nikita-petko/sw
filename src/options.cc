@@ -636,6 +636,16 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			}
 			profile->subsequent_packet_hold_mode = *mode;
 		}
+		else if (key == "ack_restoration")
+		{
+			const auto enabled = parse_bool(unquote(value));
+			if (!enabled)
+			{
+				LOG_ERROR("Invalid ack_restoration in %s at line %d", path, line_number);
+				return false;
+			}
+			profile->ack_restoration = *enabled;
+		}
 		else if (key == "delay_ms")
 		{
 			try

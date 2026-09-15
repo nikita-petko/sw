@@ -95,6 +95,25 @@ std::string format_state_divider(size_t width, const std::string& label = {})
 	return "|" + std::string(left_width, '-') + text + std::string(inner_width - left_width - text.size(), '-') + "|";
 }
 
+std::string format_tcp_flags(const WINDIVERT_TCPHDR& tcp_header)
+{
+	std::string result;
+	const auto append = [&](const char* flag, bool enabled) {
+		if (!enabled)
+			return;
+		if (!result.empty())
+			result += ',';
+		result += flag;
+	};
+	append("FIN", tcp_header.Fin);
+	append("SYN", tcp_header.Syn);
+	append("RST", tcp_header.Rst);
+	append("PSH", tcp_header.Psh);
+	append("ACK", tcp_header.Ack);
+	append("URG", tcp_header.Urg);
+	return result.empty() ? "-" : result;
+}
+
 // bright white, contrasts with the green LOG_INFO text around it
 constexpr const char* kStatColor = "\033[97m";
 // switches back to the green LOG_INFO color after a highlighted stat
@@ -1155,9 +1174,10 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 									   nullptr) &&
 			tcp_header != nullptr)
 		{
-			LOG_DEBUG("%s recv: TCP packet: Length = %u, Sequence = %u, Ack = %u, Src = %s, Dst = %s",
+			LOG_DEBUG("%s recv: TCP packet: Length = %u, Flags = %s, Sequence = %u, Ack = %u, Src = %s, Dst = %s",
 					  profile_label.c_str(),
 					  received_length,
+					  format_tcp_flags(*tcp_header).c_str(),
 					  WinDivertHelperNtohl(tcp_header->SeqNum),
 					  WinDivertHelperNtohl(tcp_header->AckNum),
 					  addresses.source.c_str(),
@@ -1208,6 +1228,7 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 			for (PacketNode* node : ready_packets)
 			{
 				UINT sent = 0;
+				session->mode->prepare_packet_for_send(node->packet, node->length, node->address);
 				if (!WinDivertSend(session->handle, node->packet, node->length, &sent, node->address))
 				{
 					const DWORD error = GetLastError();
@@ -1217,9 +1238,25 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 				{
 					state_->profile_stats[session->profile - 1].delayed_packets_sent.fetch_add(1);
 					const PacketAddresses addresses = packet_addresses(node->packet, node->length);
-					LOG_DEBUG("%s send: delayed packet: Length = %u, Src = %s, Dst = %s, SendLen = %u",
+					PWINDIVERT_TCPHDR tcp_header = nullptr;
+					const bool has_tcp_header = WinDivertHelperParsePacket(node->packet,
+																	 node->length,
+																	 nullptr,
+																	 nullptr,
+																	 nullptr,
+																	 nullptr,
+																	 nullptr,
+																	 &tcp_header,
+																	 nullptr,
+																	 nullptr,
+																	 nullptr,
+																	 nullptr,
+																	 nullptr) &&
+																	 tcp_header != nullptr;
+					LOG_DEBUG("%s send: delayed packet: Length = %u, Flags = %s, Src = %s, Dst = %s, SendLen = %u",
 							  profile_label.c_str(),
 							  node->length,
+							  has_tcp_header ? format_tcp_flags(*tcp_header).c_str() : "-",
 							  addresses.source.c_str(),
 							  addresses.destination.c_str(),
 							  sent);
@@ -1240,6 +1277,7 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 		for (PacketNode* node : pending_packets)
 		{
 			UINT sent = 0;
+			session->mode->prepare_packet_for_send(node->packet, node->length, node->address);
 			if (!WinDivertSend(session->handle, node->packet, node->length, &sent, node->address))
 			{
 				const DWORD error = GetLastError();
@@ -1249,9 +1287,25 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 			{
 				state_->profile_stats[session->profile - 1].teardown_packets_sent.fetch_add(1);
 				const PacketAddresses addresses = packet_addresses(node->packet, node->length);
-				LOG_DEBUG("%s flush: sent packet: Length = %u, Src = %s, Dst = %s, SendLen = %u",
+				PWINDIVERT_TCPHDR tcp_header = nullptr;
+				const bool has_tcp_header = WinDivertHelperParsePacket(node->packet,
+															 node->length,
+															 nullptr,
+															 nullptr,
+															 nullptr,
+															 nullptr,
+															 nullptr,
+															 &tcp_header,
+															 nullptr,
+															 nullptr,
+															 nullptr,
+															 nullptr,
+															 nullptr) &&
+															 tcp_header != nullptr;
+				LOG_DEBUG("%s flush: sent packet: Length = %u, Flags = %s, Src = %s, Dst = %s, SendLen = %u",
 						  profile_label.c_str(),
 						  node->length,
+						  has_tcp_header ? format_tcp_flags(*tcp_header).c_str() : "-",
 						  addresses.source.c_str(),
 						  addresses.destination.c_str(),
 						  sent);
@@ -1277,7 +1331,13 @@ void PacketEngine::setup(int profile)
 	const bool			  sniff			  = profile_options.windivert_options.sniff.value_or(false);
 	const bool			  outbound		  = profile_options.windivert_options.outbound.value_or(false);
 	const bool			  forward		  = profile_options.windivert_options.forward.value_or(false);
-	const std::string	  filter		  = server_filter(profile_options);
+	ProfileOptions capture_profile = profile_options;
+	if (profile_options.ack_restoration)
+	{
+		const std::string& packet_filter = profile_options.filter.value_or(options_.global_filter);
+		capture_profile.filter = "(" + packet_filter + ") or (tcp.Ack and not tcp.Psh)";
+	}
+	const std::string	  filter		  = server_filter(capture_profile);
 	UINT				  flags			  = sniff ? WINDIVERT_FLAG_SNIFF : 0;
 	const std::string	  capture_filter  = outbound ? "outbound and (" + filter + ")" : filter;
 	const WINDIVERT_LAYER layer			  = forward ? WINDIVERT_LAYER_NETWORK_FORWARD : WINDIVERT_LAYER_NETWORK;

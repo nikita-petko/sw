@@ -8,7 +8,11 @@ class DropUntilToggleMode final : public PacketMode
 public:
 	explicit DropUntilToggleMode(ProfileOptions options) : PacketMode(std::move(options), "drop_until_toggle") {}
 
-	void reset() override { phase_ = Phase::dropping; }
+	void reset() override
+	{
+		PacketMode::reset();
+		phase_ = Phase::dropping;
+	}
 
 	void capture_packet(const BYTE*				 packet,
 						UINT					 length,

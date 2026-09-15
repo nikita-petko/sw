@@ -97,6 +97,7 @@ struct ProfileOptions
 	PacketDelayMode delay_mode = PacketDelayMode::from_timestamp;
 	RetransmissionMode retransmission_mode = RetransmissionMode::none;
 	SubsequentPacketHoldMode subsequent_packet_hold_mode = SubsequentPacketHoldMode::none;
+	bool ack_restoration = false;
 	int32_t delay_ms = 0;
 	int32_t ratio = 1;
 	bool ratio_percent = false;
