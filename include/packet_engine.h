@@ -113,9 +113,17 @@ struct RegionEnforcementOptions
 	uint16_t probe_port = 0;
 };
 
+struct PcapFilesOptions
+{
+	bool enabled = false;
+	std::string output_dir = "pcap_files";
+	std::vector<std::string> enabled_for;
+};
+
 struct FeaturesOptions
 {
 	RegionEnforcementOptions region_enforcement;
+	PcapFilesOptions pcap_files;
 };
 
 struct PacketEngineOptions

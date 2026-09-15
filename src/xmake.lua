@@ -15,3 +15,6 @@ target("lagsw")
 
     -- Link winhttp for optional server region lookups
     add_links("winhttp")
+
+    -- Link ole32 for per-capture PCAP GUID generation
+    add_links("ole32")

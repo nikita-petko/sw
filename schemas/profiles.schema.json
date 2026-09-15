@@ -70,6 +70,40 @@
             "probe_port"
           ],
           "additionalProperties": false
+        },
+        "pcap_files": {
+          "type": "object",
+          "description": "Debug PCAP capture settings. A PCAP file is written for each enabled profile activation.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false,
+              "description": "Whether debug PCAP file production is enabled."
+            },
+            "output_dir": {
+              "type": "string",
+              "minLength": 1,
+              "default": "pcap_files",
+              "description": "Directory for PCAP files, relative to the current working directory unless absolute."
+            },
+            "enabled_for": {
+              "oneOf": [
+                {
+                  "const": "*"
+                },
+                {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              ],
+              "description": "A wildcard or profile-name list identifying activations that produce PCAP files. Required when enabled."
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

@@ -162,6 +162,7 @@ servers:
 | --- | --- | --- |
 | `global_filter` | No | WinDivert filter used by profiles that do not define `filter`. Defaults to `tcp.DstPort == 55000 or tcp.SrcPort == 55000`. |
 | `servers` | No | Either a string array of server addresses, or an object enabling server discovery (see below). |
+| `features` | No | Optional feature configuration, including debug PCAP capture. |
 | `profiles` | Yes | A non-empty list of profile definitions. |
 
 `servers` as a list is a set of known server addresses. An entry may use
@@ -185,6 +186,28 @@ servers:
 | --- | --- | --- |
 | `discovery_port` | Yes | Port (1-65535) to observe TCP and UDP traffic on; the remote address receiving the most packets in each discovery window is selected. |
 | `interval` | No | Discovery window length in milliseconds. Defaults to `5000`. |
+
+### Features
+
+PCAP output is a debugging feature and is disabled by default. When enabled,
+each activation of a selected profile writes every packet received by that
+profile's capture thread to a separate PCAP file. The file name and the
+deactivation log share a GUID. PCAP files contain raw IP packets (`DLT_RAW`)
+and can be opened by Wireshark.
+
+```yaml
+features:
+  pcap_files:
+    enabled: true
+    output_dir: pcap_files
+    enabled_for: "*"
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `enabled` | No | Enables PCAP output. Defaults to `false`. A warning is logged at startup when enabled. |
+| `output_dir` | No | Destination directory. Defaults to `pcap_files` beneath the current working directory. |
+| `enabled_for` | Yes when enabled | `"*"` for every profile, or a non-empty list of configured profile names. |
 
 ### Profile fields
 

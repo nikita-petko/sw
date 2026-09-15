@@ -217,6 +217,8 @@ int main(int argc, char* argv[])
 	PacketEngineOptions options;
 	if (!parse_options(argc, argv, options))
 		return 0;
+	if (options.features.pcap_files.enabled)
+		LOG_WARN("PCAP file capture is enabled for debugging. Do not use it during normal operation.");
 
 	LOG_INFO("Loaded profiles (%zu):", options.profiles.size());
 	for (size_t index = 0; index < options.profiles.size(); ++index)

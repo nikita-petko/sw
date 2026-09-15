@@ -10,6 +10,7 @@
 
 #include "packet_engine.h"
 #include <windows.h>
+#include <objbase.h>
 
 #include <mmsystem.h>
 #include <winhttp.h>
@@ -20,10 +21,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <mutex>
 #include <string>
+#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -51,6 +54,43 @@ std::string format_win32_error(DWORD error)
 	while (!result.empty() && (result.back() == '\r' || result.back() == '\n'))
 		result.pop_back();
 	return result;
+}
+
+bool pcap_files_enabled_for(const PcapFilesOptions& pcap_files, const ProfileOptions& profile)
+{
+	return pcap_files.enabled && std::any_of(pcap_files.enabled_for.begin(), pcap_files.enabled_for.end(), [&](const std::string& enabled_profile) {
+		return enabled_profile == "*" || enabled_profile == profile.name;
+	});
+}
+
+std::string format_guid(const GUID& guid)
+{
+	char text[37] = {};
+	std::snprintf(text,
+				  sizeof(text),
+				  "%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+				  static_cast<unsigned long>(guid.Data1),
+				  guid.Data2,
+				  guid.Data3,
+				  guid.Data4[0],
+				  guid.Data4[1],
+				  guid.Data4[2],
+				  guid.Data4[3],
+				  guid.Data4[4],
+				  guid.Data4[5],
+				  guid.Data4[6],
+				  guid.Data4[7]);
+	return text;
+}
+
+void write_pcap_u32(std::ofstream& file, uint32_t value)
+{
+	file.write(reinterpret_cast<const char*>(&value), sizeof(value));
+}
+
+void write_pcap_u16(std::ofstream& file, uint16_t value)
+{
+	file.write(reinterpret_cast<const char*>(&value), sizeof(value));
 }
 
 const char* key_name(int key)
@@ -614,6 +654,9 @@ struct PacketEngine::Session
 	uint64_t				next_receive_order = 0;
 	PacketQueue				delayed_packets;
 	PacketMode*				mode;
+	std::ofstream			pcap_file;
+	std::string				pcap_guid;
+	std::string				pcap_path;
 	std::thread				receive_thread;
 	std::thread				send_thread;
 };
@@ -1142,6 +1185,22 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 			continue;
 		}
 		state_->profile_stats[profile - 1].packets_caught.fetch_add(1);
+		if (session->pcap_file)
+		{
+			const auto now = std::chrono::system_clock::now().time_since_epoch();
+			const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(now);
+			const auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(now - seconds);
+			write_pcap_u32(session->pcap_file, static_cast<uint32_t>(seconds.count()));
+			write_pcap_u32(session->pcap_file, static_cast<uint32_t>(microseconds.count()));
+			write_pcap_u32(session->pcap_file, received_length);
+			write_pcap_u32(session->pcap_file, received_length);
+			session->pcap_file.write(reinterpret_cast<const char*>(packet_data), received_length);
+			if (!session->pcap_file)
+			{
+				LOG_ERROR("%s PCAP capture: failed to write %s", profile_label.c_str(), session->pcap_path.c_str());
+				session->pcap_file.close();
+			}
+		}
 		const bool sniff = profile_options.windivert_options.sniff.value_or(false);
 		if (!sniff)
 		{
@@ -1354,6 +1413,46 @@ void PacketEngine::setup(int profile)
 		return;
 	}
 	std::shared_ptr<Session> session(new Session(profile, handle, packet_modes_[profile - 1].get()));
+	if (pcap_files_enabled_for(options_.features.pcap_files, profile_options))
+	{
+		GUID guid = {};
+		if (FAILED(CoCreateGuid(&guid)))
+			LOG_ERROR("profile #%d - %s PCAP capture: failed to generate a GUID", profile, profile_options.name.c_str());
+		else
+		{
+			session->pcap_guid = format_guid(guid);
+			std::error_code error;
+			std::filesystem::create_directories(options_.features.pcap_files.output_dir, error);
+			if (error)
+				LOG_ERROR("profile #%d - %s PCAP capture: failed to create directory %s: %s",
+						  profile,
+						  profile_options.name.c_str(),
+						  options_.features.pcap_files.output_dir.c_str(),
+						  error.message().c_str());
+			else
+			{
+				session->pcap_path = (std::filesystem::path(options_.features.pcap_files.output_dir) / (session->pcap_guid + ".pcap")).string();
+				session->pcap_file.open(session->pcap_path, std::ios::binary | std::ios::trunc);
+				if (!session->pcap_file)
+					LOG_ERROR("profile #%d - %s PCAP capture: failed to open %s", profile, profile_options.name.c_str(), session->pcap_path.c_str());
+				else
+				{
+					write_pcap_u32(session->pcap_file, 0xa1b2c3d4);
+					write_pcap_u16(session->pcap_file, 2);
+					write_pcap_u16(session->pcap_file, 4);
+					write_pcap_u32(session->pcap_file, 0);
+					write_pcap_u32(session->pcap_file, 0);
+					write_pcap_u32(session->pcap_file, 0xFFFF);
+					write_pcap_u32(session->pcap_file, 101);
+					if (!session->pcap_file)
+					{
+						LOG_ERROR("profile #%d - %s PCAP capture: failed to write header to %s", profile, profile_options.name.c_str(), session->pcap_path.c_str());
+						session->pcap_file.close();
+					}
+				}
+			}
+		}
+	}
 	state_->profile_stats[profile - 1].enabled_since = GetTickCount64();
 	WinDivertSetParam(handle, WINDIVERT_PARAM_QUEUE_LENGTH, 4096);
 	WinDivertSetParam(handle, WINDIVERT_PARAM_QUEUE_TIME, 1024);
@@ -1425,12 +1524,21 @@ void PacketEngine::teardown(int profile)
 		state_->cleanup_threads.emplace_back([this, session, enabled_time, profile] {
 			session->receive_thread.join();
 			session->send_thread.join();
+			const bool pcap_captured = session->pcap_file.is_open();
+			if (pcap_captured)
+				session->pcap_file.close();
 			WinDivertClose(session->handle);
 			timeEndPeriod(1);
 			LOG_INFO("profile #%d - %s teardown: disabled after %s",
 					 profile,
 					 options_.profiles[profile - 1].name.c_str(),
 					 logging::format_duration(enabled_time).c_str());
+			if (pcap_captured)
+				LOG_INFO("profile #%d - %s PCAP capture: %s (GUID: %s)",
+						 profile,
+						 options_.profiles[profile - 1].name.c_str(),
+						 session->pcap_path.c_str(),
+						 session->pcap_guid.c_str());
 		});
 	}
 }

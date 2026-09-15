@@ -241,6 +241,32 @@ bool add_disabled_profiles(const std::string& value, ProfileOptions& profile, co
 	return true;
 }
 
+bool add_pcap_enabled_for(const std::string& value, PcapFilesOptions& pcap_files, const char* path, int line_number)
+{
+	std::string list = trim(value);
+	if (list.size() >= 2 && list.front() == '[' && list.back() == ']')
+		list = list.substr(1, list.size() - 2);
+	else if (list.empty())
+		return true;
+	else
+		list += ',';
+	for (size_t start = 0; start < list.size();)
+	{
+		const size_t end = list.find(',', start);
+		const std::string item = unquote(trim(list.substr(start, end == std::string::npos ? std::string::npos : end - start)));
+		if (item.empty())
+		{
+			LOG_ERROR("Invalid pcap_files enabled_for value in %s at line %d", path, line_number);
+			return false;
+		}
+		pcap_files.enabled_for.push_back(item);
+		if (end == std::string::npos)
+			break;
+		start = end + 1;
+	}
+	return true;
+}
+
 bool add_server(const std::string& value, PacketEngineOptions& options, const std::string& group, const char* path, int line_number)
 {
 	const std::string item = unquote(trim(value));
@@ -320,6 +346,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 	options.discovery_window_ms = 5000;
 	options.features.region_enforcement.enabled = false;
 	options.features.region_enforcement.probe_port = 0;
+	options.features.pcap_files = {};
 	std::string	line;
 	ProfileOptions* profile = nullptr;
 	std::string	section;
@@ -328,6 +355,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 	int				subsection_indent  = -1;
 	int				servers_base_indent = -1;
 	int				features_base_indent = -1;
+	int			 pcap_files_base_indent = -1;
 	int				line_number		  = 0;
 	while (std::getline(file, line))
 	{
@@ -351,6 +379,12 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				return false;
 			continue;
 		}
+		if (subsection == "pcap_files_enabled_for" && content.front() == '-' && content.find(':') == std::string::npos)
+		{
+			if (indent <= subsection_indent || !add_pcap_enabled_for(content.substr(1), options.features.pcap_files, path, line_number))
+				return false;
+			continue;
+		}
 		if ((subsection == "addresses" || subsection == "server_group") && content.front() == '-')
 		{
 			if (indent <= subsection_indent ||
@@ -366,12 +400,24 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		}
 		std::string key	  = trim(content.substr(0, colon));
 		std::string value = trim(content.substr(colon + 1));
+		if (subsection == "pcap_files_enabled_for" && indent <= subsection_indent)
+		{
+			subsection = "pcap_files";
+			subsection_indent = pcap_files_base_indent;
+		}
 		if (features_base_indent != -1 && section == "features" && indent > features_base_indent)
 		{
 			if (key == "region_enforcement" && value.empty())
 			{
 				subsection = "region_enforcement";
 				subsection_indent = indent;
+				continue;
+			}
+			if (key == "pcap_files" && value.empty())
+			{
+				subsection = "pcap_files";
+				subsection_indent = indent;
+				pcap_files_base_indent = indent;
 				continue;
 			}
 			if (subsection == "region_enforcement" && indent > subsection_indent)
@@ -404,6 +450,39 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 						LOG_ERROR("Invalid probe_port in %s at line %d", path, line_number);
 						return false;
 					}
+				}
+			}
+			if (subsection == "pcap_files" && indent > subsection_indent)
+			{
+				if (key == "enabled")
+				{
+					const auto parsed = parse_bool(unquote(value));
+					if (!parsed)
+					{
+						LOG_ERROR("Invalid boolean in %s at line %d", path, line_number);
+						return false;
+					}
+					options.features.pcap_files.enabled = *parsed;
+					continue;
+				}
+				if (key == "output_dir")
+				{
+					const std::string output_dir = unquote(value);
+					if (output_dir.empty())
+					{
+						LOG_ERROR("Invalid pcap_files output_dir in %s at line %d", path, line_number);
+						return false;
+					}
+					options.features.pcap_files.output_dir = output_dir;
+					continue;
+				}
+				if (key == "enabled_for")
+				{
+					subsection = "pcap_files_enabled_for";
+					subsection_indent = indent;
+					if (!add_pcap_enabled_for(value, options.features.pcap_files, path, line_number))
+						return false;
+					continue;
 				}
 			}
 			LOG_ERROR("Invalid features configuration key '%s' in %s at line %d", key.c_str(), path, line_number);
@@ -476,6 +555,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			subsection_indent  = -1;
 			servers_base_indent = -1;
 			features_base_indent = indent;
+			pcap_files_base_indent = -1;
 			continue;
 		}
 		if (key == "profiles" && value.empty())
@@ -485,6 +565,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			subsection_indent  = -1;
 			servers_base_indent = -1;
 			features_base_indent = -1;
+			pcap_files_base_indent = -1;
 			continue;
 		}
 		if (key == "servers" && value.empty())
@@ -494,6 +575,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			subsection_indent = indent;
 			servers_base_indent = indent;
 			features_base_indent = -1;
+			pcap_files_base_indent = -1;
 			continue;
 		}
 		if (key == "windivert_options" && value.empty() && profile)
@@ -791,6 +873,27 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 	{
 		LOG_ERROR("Feature region_enforcement is enabled but probe_port is missing or invalid in %s", path);
 		return false;
+	}
+	if (options.features.pcap_files.enabled && options.features.pcap_files.enabled_for.empty())
+	{
+		LOG_ERROR("Feature pcap_files is enabled but enabled_for is missing or empty in %s", path);
+		return false;
+	}
+	if (options.features.pcap_files.enabled)
+	{
+		for (const std::string& enabled_profile : options.features.pcap_files.enabled_for)
+		{
+			if (enabled_profile == "*")
+				continue;
+			const auto configured_profile = std::find_if(options.profiles.begin(), options.profiles.end(), [&](const ProfileOptions& candidate) {
+				return candidate.name == enabled_profile;
+			});
+			if (configured_profile == options.profiles.end())
+			{
+				LOG_ERROR("Feature pcap_files enables unknown profile '%s'", enabled_profile.c_str());
+				return false;
+			}
+		}
 	}
 
 	return true;
