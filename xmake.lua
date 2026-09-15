@@ -43,3 +43,4 @@ set_symbols("debug")
 
 includes("src/")
 includes("pocs/tcp_tls_proxy")
+includes("pocs/tls_segment_removal")

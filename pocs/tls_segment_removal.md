@@ -279,6 +279,7 @@ flowchart LR
 ### Phase 0: record parser and filter grammar
 
 - Implement the standalone TLS record-boundary walker (type/version/length parsing, unparsed-tail detection) and the filter grammar (parse + validate + evaluate) as pure, unit-testable functions with no WinDivert dependency, alongside the existing modules in `src/modules/`.
+- Traffic generator: [tls_segment_removal/traffic_gen.cc](tls_segment_removal/traffic_gen.cc) (`segment_traffic_gen` target) runs a TLS 1.2 client/server pair that continuously exchanges bursts of one or more coalesced records with randomized `close`/`random`/`far` size and record-count patterns, giving the parser/filter and later phases a live, varied packet stream to run against instead of only static fixtures.
 
 ### Phase 1: single-packet splice (no cross-packet renumbering)
 
