@@ -14,7 +14,7 @@ flowchart LR
     M -->|no| PASS[Pass through unmodified]
     M -->|yes| SEL[Apply selection strategy\nall / first / last / random / n]
     SEL --> SPLICE[Splice out selected record bytes]
-    SPLICE --> RENUM[Renumber SeqNum / AckNum\nper-direction cumulative delta]
+    SPLICE --> RENUM[Correct SeqNum / AckNum\nusing profile-scoped N]
     RENUM --> REFRAME[Recompute IP length, PSH flag,\nIP/TCP checksums]
     REFRAME --> SEND[Reinject via WinDivertSend]
     PASS --> SEND
@@ -140,46 +140,105 @@ Because coalescing is common at the start of a TLS session (handshake messages) 
 
 This is the part of the design that most needs to be correct, because it mutates a live, ordered, acknowledged byte stream. Two candidate strategies exist; only one is recommended for this PoC.
 
-### 8.1 Strategy A (recommended): true splice with per-connection sequence renumbering
+### 8.1 Strategy A (recommended): true splice with profile-scoped SEQ/ACK correction
 
-Removing a record's bytes shortens the TCP payload by exactly the record's total on-wire size. TCP sequence numbers count *bytes actually placed on the wire in this stream*, so once the engine ever sends a shorter payload than the original endpoint intended, every subsequent byte sent in that direction has effectively moved backward by the removed byte count relative to what the sender's stack believes it sent, and every ACK the *other* side later sends for bytes at-or-after the removed range references sequence space that no longer matches what this side is emitting.
+Removing a record's bytes shortens the TCP payload by exactly the record's total on-wire size. This is a single physical TCP connection passing through WinDivert in place — not a proxy splitting it into two independent hops — so the correction only needs to keep each real endpoint's own internally consistent expectations satisfied, not maintain a synthetic second sequence space.
 
-Concretely, the engine must track, per connection and per direction, a running `delta` (bytes removed so far in that direction):
+Take a profile whose filter removes bytes only from client→server packets (server→client removal is the mirror image with client/server swapped — see §8.1.1 for why a profile should only ever target one direction). Before any removal, client and server are synchronized: `Client: SEQ=1, ACK=1` / `Server: SEQ=1, ACK=1`.
 
-1. On the packet where a removal happens: shrink the payload, then rewrite the packet's own `SeqNum` by subtracting the *delta as it stood before this packet's removal* (i.e., the cumulative shift already committed for earlier packets), then increase `delta` by the newly removed byte count for all packets *after* this one.
-2. On every later outbound packet in the same direction: subtract the current `delta` from `SeqNum` before sending.
-3. On every inbound packet in the *reverse* direction: subtract the current `delta` from `AckNum` before sending, because the peer's ACK number acknowledges bytes numbered according to the original, un-shrunk stream, and this side's stack (and the real peer on the other physical connection, if this sits in front of a live server) must be kept consistent with the shrunk numbering it now emits.
-4. SACK blocks (`TCP_OPT_SACK`) and timestamp echo fields are not currently rewritten by the existing packet engine and must either be stripped from affected packets or (preferred, smaller blast radius) the affected profile's filter should exclude connections using SACK, since a stale SACK block referencing pre-shrink sequence numbers is a correctness bug, not merely a cosmetic one.
-5. `delta` must persist for the life of the connection once any removal has occurred on it, mirroring the per-direction state already kept in `PacketMode::last_sent_ack_`/`has_last_sent_ack_` (see [packet_mode.h](../src/modules/packet_mode.h)) — a new pair of `uint32_t` (or `uint64_t` to detect wraparound distinctly from the 32-bit sequence space) running totals per direction, reset in `PacketMode::reset()`.
-6. Retransmissions of an *already-shrunk* original segment must be shrunk identically and deterministically (same filter, same selection outcome) so that a retransmission is byte-for-byte equal to the first transmission's shrunk form; this is why `selection: random` (§9) is unsafe under retransmission unless the random choice is derived deterministically from a stable retransmission key (e.g. original sequence number), not from a fresh RNG draw per capture.
+The client sends 16 bytes: `C→S PSH,ACK SEQ=1 ACK=1 LEN=16`. The client's own internal state now expects an ACK of 17 back, and will use `SEQ=17` for its own next packet — regardless of what happens to this packet in flight.
 
-This strategy keeps the stream byte-consistent from the receiver's point of view (it never sees a gap; it just sees a shorter stream than the sender's application layer believes it wrote), at the cost of needing full mid-connection sequence-space bookkeeping — effectively a lightweight, one-directional analogue of NAT sequence-number rewriting.
+If the engine removes 2 bytes (`N=2`), it forwards `C→S PSH,ACK SEQ=1 ACK=1 LEN=14` — `SeqNum` on the trimmed packet itself is left untouched; only the payload/`LEN` shrinks. The server, having only received 14 bytes starting at `SEQ=1`, correctly ACKs `S→C ACK SEQ=1 ACK=15`. Left alone this desynchronizes both sides: the client is waiting for `ACK=17`, and the client's next packet will arrive at the server carrying `SEQ=17`, two bytes ahead of the `15` the server expects next.
+
+The fix is two single-field, single-direction rewrites driven by the same tracked counter `N` (bytes removed so far on the tracked direction):
+
+1. **Reverse-direction ACKs**: every `S→C` packet's `AckNum` is increased by `N` before it reaches the client, so the client sees the ACK number it expects for the bytes *it* believes it sent (`15 + 2 = 17`).
+2. **Forward-direction SEQs**: every subsequent `C→S` packet's `SeqNum` is decreased by `N` before it reaches the server, so the server sees the SEQ number it expects for the bytes it actually has (`17 - 2 = 15`).
 
 ```mermaid
 sequenceDiagram
     participant Client
-    participant Engine as WinDivert engine
+    participant Engine as WinDivert (in-path, single connection)
     participant Server
 
-    Note over Engine: delta_out = 0, delta_in = 0
-    Client->>Engine: Seq=1000 len=100 (records A,B,C)
-    Engine->>Engine: Remove record B (30 bytes)\nSeq' = 1000 - delta_out(0) = 1000\ndelta_out += 30
-    Engine->>Server: Seq=1000 len=70 (records A,C)
-    Server-->>Engine: Ack=1100 (acks original 100 bytes)
-    Engine->>Engine: Ack' = 1100 - delta_out(30) = 1070
-    Engine-->>Client: Ack=1070
+    Note over Engine: profile activates, N = 0
 
-    Client->>Engine: Seq=1100 len=50 (record D)
-    Engine->>Engine: No removal this packet\nSeq' = 1100 - delta_out(30) = 1070
-    Engine->>Server: Seq=1070 len=50
-    Server-->>Engine: Ack=1150
-    Engine->>Engine: Ack' = 1150 - delta_out(30) = 1120
-    Engine-->>Client: Ack=1120
+    Client->>Engine: C to S SEQ=1 ACK=1 LEN=16 (PSH,ACK)
+    Engine->>Engine: remove 2 bytes, LEN 16 to 14, SeqNum unchanged, N += 2 (N=2)
+    Engine->>Server: C to S SEQ=1 ACK=1 LEN=14
+
+    Server->>Engine: S to C ACK SEQ=1 ACK=15
+    Engine->>Engine: AckNum' = 15 + N(2) = 17
+    Engine->>Client: S to C ACK SEQ=1 ACK=17
+
+    Note over Client: client's own state now expects to send SEQ=17 next
+    Client->>Engine: C to S SEQ=17 ACK=1 LEN=2 (PSH,ACK)
+    Engine->>Engine: SeqNum' = 17 - N(2) = 15
+    Engine->>Server: C to S SEQ=15 ACK=1 LEN=2
 ```
 
-The diagram shows only the client-to-server direction accumulating a `delta`; the mirrored bookkeeping (`delta_in`) applies symmetrically if records are also removed server-to-client, in which case client-facing `AckNum`s for that direction are shifted instead.
+Neither real endpoint ever observes a value it doesn't expect: the client's ACKs always match what it believes it sent, and the server's SEQs always match what it has actually received. The discrepancy only ever exists inside the engine's own `N` counter.
 
-### 8.2 Strategy B (rejected for this PoC): pad instead of shrink
+Further considerations building on this:
+
+1. `N` only ever accumulates upward — every additional removal on the tracked direction adds to it — and is never decreased except by the reset described in point 3.
+2. SACK blocks (`TCP_OPT_SACK`) and TCP timestamp echoes referencing pre-shrink sequence numbers are not rewritten by this design; either strip them from affected packets or scope the profile's filter to exclude peers that negotiate SACK, since a stale SACK block is a correctness bug, not a cosmetic one.
+3. **`N`'s lifetime is scoped to the profile's activation, not the connection.** `N` starts at 0 when the profile activates (toggle on, or key held for `mode: hold`) and is discarded back to 0 the instant the profile deactivates, mirroring the existing per-direction state already reset in `PacketMode::reset()` (see [packet_mode.h](../src/modules/packet_mode.h) `last_sent_ack_`/`has_last_sent_ack_`). While active, every packet in both directions on the tracked connection continues to be corrected using the current `N`; once deactivated, correction stops immediately and unconditionally — there is no drain or gradual rollback.
+4. Deactivating mid-connection leaves the two real endpoints permanently off by the final value of `N` — the physical bytes already removed cannot be un-removed after the fact. Once correction stops, the client's next real `SeqNum` and the server's next expected sequence number differ by `N`, indistinguishable from either endpoint's perspective from `N` bytes having been silently lost on the wire. Recovery is left entirely to the two endpoints' own TCP stacks (duplicate ACKs, retransmission timeout, most likely ending in the connection being reset and re-established) rather than anything this engine does. This is acceptable for short, deliberately-triggered activations — "a little amount of lag" while the endpoints resync or reconnect — and is precisely why this is not proposed as a permanent, connection-lifetime mechanism in the baseline design.
+5. A variant that keeps correcting forever regardless of profile activation state — so the two endpoints never have to resync — is possible in principle, but it requires `N` to live in a new, connection-scoped state store that outlives any single profile's activation window, which is a materially bigger architectural change than the profile-scoped tracker above. This is deferred as an open question (§14) rather than part of the baseline design.
+6. Retransmissions of an *already-shrunk* original segment must be shrunk identically and deterministically (same filter, same selection outcome), so a retransmission is byte-for-byte equal to the first transmission's shrunk form; this is why `selection: random` (§9) is unsafe under retransmission unless the random choice is derived deterministically from stable per-packet material (e.g. original `SeqNum`), not a fresh RNG draw per capture.
+
+### 8.1.1 One filtered direction per profile
+
+The correction above only ever touches two fields — the trimmed direction's `SeqNum` and the opposite direction's `AckNum` — because it assumes removal happens in exactly one direction of one connection at a time under one tracked `N`. This is why **a profile's WinDivert filter should match packets in only one direction of a connection** (e.g. `outbound and tcp.DstPort == 55000`, not both directions of the same tuple). Removing bytes from both directions under a single shared `N` would conflate two independent removal decisions — and their independent retransmission and deactivation behavior — into one counter, which no longer cleanly maps to either direction's real byte offset.
+
+If both directions need bytes removed, run two independently activated profiles — one per direction — each with its own `size_filter`/`selection` and its own independently tracked `N`. Both profiles can share the same activation key (`ProfileOptions::keys`/`key_mode`, see [packet_engine.h](../include/packet_engine.h)) so a single keypress starts or stops both together, but their tracked state remains two separate sessions with two separate lifetimes. This has no bearing on the connection-lifetime variant in point 5 above, which would need its own design regardless of how many directions it covers.
+
+### 8.1.2 Coordinating two or more simultaneous activations
+
+Splitting removal across two profiles (§8.1.1) reintroduces a problem the single-profile model avoids: with both profiles active on the same connection, **every** packet in **both** directions needs corrections from **both** profiles, not just one:
+
+- A `client→server` packet needs `SeqNum -= N_A` (profile A, the direction it removes from) **and** `AckNum += N_B` (profile B's reverse-direction correction, since profile B removed bytes going the other way).
+- A `server→client` packet needs `AckNum += N_A` **and** `SeqNum -= N_B`, symmetrically.
+
+Today's engine gives each active profile its own `Session` — its own WinDivert handle and its own `read_packets`/`write_packets` threads calling `WinDivertSend` independently (see [packet_engine.cc](../src/packet_engine.cc)). If profile A's and profile B's threads each apply only their own `N` and send independently, whichever one actually owns/captures a given packet can only apply its own half of the required correction; the other profile's `N` for that same packet is never applied, because the packet has already left through the first profile's handle. There is no natural point where both corrections are guaranteed to land on the same packet before it reaches the wire.
+
+```mermaid
+sequenceDiagram
+    participant OS as OS network stack
+    participant A as Profile A session (tracks N_A only)
+    participant B as Profile B session (tracks N_B only)
+    participant Wire as Wire (to peer)
+
+    OS->>A: C to S packet SEQ=100 ACK=50
+    Note over A: only knows N_A, applies SeqNum -= N_A
+    A->>Wire: SEQ=100-N_A ACK=50
+    Note over Wire: AckNum was never corrected for profile B's N_B, server-side tracking for the S to C direction silently drifts
+    Note over B: never sees this packet, B's own S to C packets are sent the same uncoordinated way, missing A's N_A
+```
+
+Without a shared authority, each profile is only ever internally consistent with itself, and the connection still desynchronizes as soon as a second profile starts touching the same packets.
+
+The fix is to stop letting each profile send independently, and instead route every outbound packet on a connection with two-or-more active profiles through one shared arbiter: a single per-connection "outbound authority" that all participating profiles report their current `N` into, and that is the *only* thing allowed to call `WinDivertSend` for that connection. The authority applies every currently-active profile's applicable correction (SeqNum decrements for profiles tracking this packet's direction, AckNum increments for profiles tracking the reverse direction) in one pass, then sends the packet exactly once.
+
+```mermaid
+sequenceDiagram
+    participant OS as OS network stack
+    participant A as Profile A (updates N_A)
+    participant B as Profile B (updates N_B)
+    participant Auth as Outbound authority (per connection, single writer)
+    participant Wire as Wire (to peer)
+
+    OS->>Auth: C to S packet SEQ=100 ACK=50
+    A-->>Auth: current N_A (removed on C to S)
+    B-->>Auth: current N_B (removed on S to C)
+    Note over Auth: SeqNum -= N_A (this direction's tracker), AckNum += N_B (reverse direction's tracker)
+    Auth->>Wire: SEQ=100-N_A ACK=50+N_B
+```
+
+This makes profiles producers of `N` updates and removal decisions only; a single authority per connection (not per profile) becomes the sole place that reads every relevant profile's `N` and performs the actual `SeqNum`/`AckNum` correction and send, which is the only way to guarantee both halves of the correction always land on the same packet. This is a real architectural change from today's one-`Session`-per-profile model (§8.1.2 is therefore scoped as a follow-on to Phase 2, not part of the initial single-profile implementation in §13) and only matters once two or more profiles with overlapping SEQ/ACK corrections are active on the same connection at the same time; a single active profile (§8.1, §8.1.1) needs no arbitration since it is already the sole writer for its connection.
+
+
 
 An alternative is to keep every packet's length and sequence numbers unchanged and instead overwrite the removed record's bytes with a same-length filler, so no renumbering is ever needed. This is rejected because there is no generally safe filler:
 
@@ -240,7 +299,7 @@ flowchart LR
 
 - Segment removal is a payload-shaping step that should run before a profile's existing `delay_mode` (from_timestamp/ratio/hold_and_send/etc.) queues the packet, so delayed or ratio-selected packets are already in their final, re-framed form when they are queued and later released.
 - `retransmission_mode` and `ack_restoration` operate on `SeqNum`/`AckNum` as already observed on the wire; once §8.1's renumbering is applied, these existing features naturally see the renumbered values and keep working unmodified, provided renumbering happens first in the per-packet pipeline.
-- `subsequent_packet_hold_mode` matches held/subsequent packets by sequence/acknowledgment; because §8.1 keeps the stream'S numbering internally consistent (just shifted), this matching continues to work against the renumbered values.
+- `subsequent_packet_hold_mode` matches held/subsequent packets by sequence/acknowledgment; because §8.1 keeps the stream's numbering internally consistent (just shifted), this matching continues to work against the renumbered values.
 - A profile combining segment removal with `windivert_options.forward` (WinDivert `NETWORK_FORWARD` layer, used for a router/gateway-style deployment) is the primary intended deployment shape, since forwarded traffic is not the local host's own TCP stack and this mode never needs to coordinate with a local socket's own sequence-number bookkeeping.
 
 ## 11. Security and correctness requirements
@@ -251,7 +310,7 @@ flowchart LR
 - Never leave `PSH` set on a packet with an empty payload (§8.3).
 - Never recompute checksums against a partially-mutated packet buffer — all field rewrites for a given packet happen before the single `WinDivertHelperCalcChecksums` call (§8.4).
 - Never treat an unparsed tail (§7) as a record; never remove bytes whose true record boundary this packet cannot establish.
-- Log, at debug level, every removal decision: connection tuple, direction, matched record offsets/sizes, selection outcome, and the resulting per-direction cumulative `delta`, mirroring the existing `LOG_DEBUG` style already used for retransmission/duplicate decisions in [packet_mode.cc](../src/modules/packet_mode.cc).
+- Log, at debug level, every removal decision: connection tuple, direction, matched record offsets/sizes, selection outcome, and the resulting profile-scoped `N`, mirroring the existing `LOG_DEBUG` style already used for retransmission/duplicate decisions in [packet_mode.cc](../src/modules/packet_mode.cc).
 - Do not log TLS record *contents* by default (consistent with the payload-redaction stance already established in [tcp_tls_proxy.md](tcp_tls_proxy.md#12-security-and-privacy-requirements)); logging sizes and offsets is sufficient for debugging and does not risk exposing plaintext or ciphertext.
 
 ## 12. Test plan
@@ -266,8 +325,9 @@ flowchart LR
 
 ### Sequence-consistency
 
-- After several removals across multiple packets in one direction, cumulative `delta` correctly equals the sum of removed bytes, and a final packet's `SeqNum` plus its payload length still lands exactly where the next untouched packet's `SeqNum` (also shifted) expects.
-- A reverse-direction `AckNum` observed after a forward-direction removal is shifted by the same `delta` and remains numerically consistent with the shifted forward stream.
+- After several removals across multiple packets in one direction, `N` correctly equals the sum of removed bytes, and a final packet's `SeqNum` plus its payload length still lands exactly where the next untouched packet's (SEQ-corrected) `SeqNum` expects.
+- A reverse-direction `AckNum` observed after a forward-direction removal is increased by the same `N` and remains numerically consistent with the corrected forward stream.
+- Deactivating the profile mid-connection stops correction immediately: subsequent packets are forwarded unmodified, and the two endpoints' SEQ/ACK expectations are left off by the final value of `N` (§8.1, point 4) rather than silently continuing to drift or snap back.
 - `retransmission_mode` correctly recognizes a retransmitted-and-reshrunk packet as a duplicate of the first shrunk transmission, not as a new distinct packet.
 
 ### Negative / configuration
@@ -285,10 +345,10 @@ flowchart LR
 
 - Wire the parser/filter into a new `PacketMode` (or an option on an existing one) that removes matching records and re-frames the packet (§8.3, §8.4), but only against a synthetic test harness with a single packet at a time, to validate framing/checksum correctness in isolation before introducing stateful renumbering.
 
-### Phase 2: per-connection sequence/ack renumbering
+### Phase 2: profile-scoped SEQ/ACK correction
 
-- Add the per-direction cumulative `delta` state (§8.1) alongside the existing `last_sent_ack_`/`has_last_sent_ack_` state in `PacketMode`, and rewrite `SeqNum` (own direction) and `AckNum` (reverse direction) for every packet on an affected connection once removal has started.
-- Validate against a live loopback TCP echo test with a scripted, coalesced-and-split TLS-record-shaped payload generator.
+- Add the profile-scoped `N` counter (§8.1) alongside the existing `last_sent_ack_`/`has_last_sent_ack_` state in `PacketMode`, resetting it in `PacketMode::reset()` so it is discarded on deactivation rather than persisting for the connection's lifetime; rewrite `SeqNum` (tracked direction) and `AckNum` (reverse direction) for every packet on the connection while the profile is active.
+- Validate against a live loopback TCP echo test with a scripted, coalesced-and-split TLS-record-shaped payload generator, including a case that deactivates the profile mid-connection and confirms correction stops immediately (§8.1, point 4).
 
 ### Phase 3: selection strategies and deterministic retransmission behavior
 
@@ -303,6 +363,8 @@ flowchart LR
 ## 14. Open questions
 
 - Should a connection-wide removal budget (e.g. "remove at most N matching records for the life of the connection," beyond the per-packet `n` in §9) be added, and if so, does it share state with `disable_wait_ms`-style profile lifecycle tracking already in `ProfileOptions`?
-- Should SACK options be actively stripped/rewritten on affected connections (§8.1 point 4) rather than requiring the operator to avoid SACK-using peers via filter scoping?
+- Should SACK options be actively stripped/rewritten on affected connections (§8.1 point 2) rather than requiring the operator to avoid SACK-using peers via filter scoping?
 - Is a record content-type filter (handshake/alert/application-data/change-cipher-spec) needed before this is useful in practice, given that early-session traffic is dominated by handshake records this mode is not meant to target (§5)?
 - Does this mode need its own PoC executable/harness under `pocs/`, similar to [tcp_tls_proxy/](tcp_tls_proxy/), for isolated testing before integrating into `PacketEngine`/`PacketMode` proper?
+- Is the connection-lifetime correction variant (§8.1, point 5) — where SEQ/ACK correction keeps running after the owning profile deactivates, so the two endpoints never need to resync — worth the new connection-scoped (rather than profile-scoped) state store it would require, given that the profile-scoped tracker is deliberately simpler and treats deactivation-time desync as an accepted cost for short activations?
+- How should the outbound authority (§8.1.2) be scoped and discovered — one authority instance per connection tuple, created lazily the moment a second profile with an overlapping SEQ/ACK correction activates on that connection, and torn down when the last such profile deactivates? Does it need to exist even for a single active profile (today's sole-writer `Session` model), or only once two or more profiles overlap?
