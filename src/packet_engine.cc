@@ -9,8 +9,8 @@
 #endif
 
 #include "packet_engine.h"
-#include <windows.h>
 #include <objbase.h>
+#include <windows.h>
 
 #include <mmsystem.h>
 #include <winhttp.h>
@@ -39,8 +39,8 @@
 namespace {
 std::string format_win32_error(DWORD error)
 {
-	char* message = nullptr;
-	const DWORD length = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+	char*		message = nullptr;
+	const DWORD length	= FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
 										 nullptr,
 										 error,
 										 0,
@@ -58,9 +58,10 @@ std::string format_win32_error(DWORD error)
 
 bool pcap_files_enabled_for(const PcapFilesOptions& pcap_files, const ProfileOptions& profile)
 {
-	return pcap_files.enabled && std::any_of(pcap_files.enabled_for.begin(), pcap_files.enabled_for.end(), [&](const std::string& enabled_profile) {
-		return enabled_profile == "*" || enabled_profile == profile.name;
-	});
+	return pcap_files.enabled &&
+		   std::any_of(pcap_files.enabled_for.begin(), pcap_files.enabled_for.end(), [&](const std::string& enabled_profile) {
+			   return enabled_profile == "*" || enabled_profile == profile.name;
+		   });
 }
 
 std::string format_guid(const GUID& guid)
@@ -138,7 +139,7 @@ std::string format_state_divider(size_t width, const std::string& label = {})
 std::string format_tcp_flags(const WINDIVERT_TCPHDR& tcp_header)
 {
 	std::string result;
-	const auto append = [&](const char* flag, bool enabled) {
+	const auto	append = [&](const char* flag, bool enabled) {
 		if (!enabled)
 			return;
 		if (!result.empty())
@@ -231,7 +232,7 @@ struct PacketAddresses
 
 PacketAddresses packet_addresses(const BYTE* packet_data, UINT packet_length)
 {
-	PWINDIVERT_IPHDR ip_header = nullptr;
+	PWINDIVERT_IPHDR   ip_header   = nullptr;
 	PWINDIVERT_IPV6HDR ipv6_header = nullptr;
 	if (!WinDivertHelperParsePacket(packet_data,
 									packet_length,
@@ -295,7 +296,7 @@ std::optional<std::string> extract_json_string(const std::string& json, const st
 	if (start >= json.size() || json[start] != '"')
 		return std::nullopt;
 	const auto value_start = start + 1;
-	const auto value_end = json.find('"', value_start);
+	const auto value_end   = json.find('"', value_start);
 	if (value_end == std::string::npos)
 		return std::nullopt;
 	return json.substr(value_start, value_end - value_start);
@@ -311,7 +312,8 @@ std::optional<double> extract_json_number(const std::string& json, const std::st
 	while (start < json.size() && (json[start] == ' ' || json[start] == '\t'))
 		++start;
 	size_t end = start;
-	while (end < json.size() && (std::isdigit(static_cast<unsigned char>(json[end])) || json[end] == '-' || json[end] == '+' || json[end] == '.'))
+	while (end < json.size() &&
+		   (std::isdigit(static_cast<unsigned char>(json[end])) || json[end] == '-' || json[end] == '+' || json[end] == '.'))
 		++end;
 	if (end == start)
 		return std::nullopt;
@@ -338,8 +340,8 @@ std::string last_ip_segment(const std::string& address)
 
 // coarse west/central/east split per region group, since ipapi.co has no notion of "US-West" vs "US-East" etc.
 std::string country_region_code(const std::optional<std::string>& country_code,
-								 const std::optional<std::string>& continent_code,
-								 const std::optional<double>&		longitude)
+								const std::optional<std::string>& continent_code,
+								const std::optional<double>&	  longitude)
 {
 	struct LongitudeBand
 	{
@@ -356,21 +358,21 @@ std::string country_region_code(const std::optional<std::string>& country_code,
 		{"SA", {-70.0, -50.0}},
 		{"AF", {10.0, 30.0}},
 	};
-	const std::string	 group	   = country_code && *country_code == "US" ? "US" : continent_code.value_or(country_code.value_or("XX"));
-	const auto			 band_it   = longitude_bands.find(group);
-	const LongitudeBand	 band	   = band_it == longitude_bands.end() ? LongitudeBand{-30.0, 30.0} : band_it->second;
-	const double		 lon	   = longitude.value_or(0.0);
-	const char			 suffix	   = lon < band.west_max ? 'W' : lon > band.east_min ? 'E' : 'C';
+	const std::string	group	= country_code && *country_code == "US" ? "US" : continent_code.value_or(country_code.value_or("XX"));
+	const auto			band_it = longitude_bands.find(group);
+	const LongitudeBand band	= band_it == longitude_bands.end() ? LongitudeBand{-30.0, 30.0} : band_it->second;
+	const double		lon		= longitude.value_or(0.0);
+	const char			suffix	= lon < band.west_max ? 'W' : lon > band.east_min ? 'E' : 'C';
 	return group + suffix;
 }
 
 // e.g. "IA-USC-19" for region_code IA, country_region USC, and address ending in .19
 std::string build_server_name(const std::string& address, const std::string& response)
 {
-	const auto region_code	   = extract_json_string(response, "region_code");
-	const auto country_code   = extract_json_string(response, "country_code");
+	const auto region_code	  = extract_json_string(response, "region_code");
+	const auto country_code	  = extract_json_string(response, "country_code");
 	const auto continent_code = extract_json_string(response, "continent_code");
-	const auto longitude	   = extract_json_number(response, "longitude");
+	const auto longitude	  = extract_json_number(response, "longitude");
 	return region_code.value_or("XX") + "-" + country_region_code(country_code, continent_code, longitude) + "-" + last_ip_segment(address);
 }
 
@@ -391,11 +393,11 @@ struct RegionCacheEntry
 {
 	std::string label;
 	std::string server_name;
-	uint64_t expires_at = 0;
+	uint64_t	expires_at = 0;
 };
 
 constexpr uint64_t region_cache_lifetime_seconds = 30 * 24 * 60 * 60;
-const char* client_region_cache_key = "@client";
+const char*		   client_region_cache_key		 = "@client";
 
 std::string region_cache_path()
 {
@@ -423,8 +425,8 @@ std::string csv_field(const std::string& value)
 std::optional<std::vector<std::string>> parse_csv_line(const std::string& line)
 {
 	std::vector<std::string> fields;
-	std::string field;
-	bool quoted = false;
+	std::string				 field;
+	bool					 quoted = false;
 	for (size_t index = 0; index < line.size(); ++index)
 	{
 		const char character = line[index];
@@ -459,7 +461,7 @@ void load_region_cache(std::unordered_map<std::string, RegionCacheEntry>& cache)
 	if (path.empty())
 		return;
 	std::ifstream file(path);
-	bool legacy_tsv = false;
+	bool		  legacy_tsv = false;
 	if (!file)
 	{
 		const std::string legacy_path = path.substr(0, path.size() - 4) + ".tsv";
@@ -467,13 +469,13 @@ void load_region_cache(std::unordered_map<std::string, RegionCacheEntry>& cache)
 		legacy_tsv = true;
 	}
 	const uint64_t now = static_cast<uint64_t>(std::time(nullptr));
-	std::string line;
+	std::string	   line;
 	while (std::getline(file, line))
 	{
 		std::optional<std::vector<std::string>> fields;
 		if (legacy_tsv)
 		{
-			fields = std::vector<std::string>();
+			fields		 = std::vector<std::string>();
 			size_t start = 0;
 			while (true)
 			{
@@ -509,11 +511,12 @@ void save_region_cache(const std::unordered_map<std::string, RegionCacheEntry>& 
 	const std::string directory = path.substr(0, path.find_last_of("\\/"));
 	CreateDirectoryA(directory.c_str(), nullptr);
 	const std::string temporary_path = path + ".tmp";
-	std::ofstream file(temporary_path, std::ios::trunc);
+	std::ofstream	  file(temporary_path, std::ios::trunc);
 	if (!file)
 		return;
 	for (const auto& [address, entry] : cache)
-		file << csv_field(address) << ',' << csv_field(entry.label) << ',' << csv_field(entry.server_name) << ',' << entry.expires_at << '\n';
+		file << csv_field(address) << ',' << csv_field(entry.label) << ',' << csv_field(entry.server_name) << ',' << entry.expires_at
+			 << '\n';
 	file.close();
 	if (!MoveFileExA(temporary_path.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
 		DeleteFileA(temporary_path.c_str());
@@ -521,8 +524,8 @@ void save_region_cache(const std::unordered_map<std::string, RegionCacheEntry>& 
 
 struct HttpResponse
 {
-	DWORD status = 0;
-	DWORD retry_after_seconds = 0;
+	DWORD		status				= 0;
+	DWORD		retry_after_seconds = 0;
 	std::string body;
 };
 
@@ -530,7 +533,7 @@ struct HttpResponse
 HttpResponse https_get(const std::wstring& host, const std::wstring& path)
 {
 	HttpResponse result;
-	HINTERNET	session = WinHttpOpen(L"lagsw/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+	HINTERNET	 session = WinHttpOpen(L"lagsw/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
 	if (!session)
 	{
 		LOG_DEBUG("https_get: WinHttpOpen failed %lu", GetLastError());
@@ -541,18 +544,18 @@ HttpResponse https_get(const std::wstring& host, const std::wstring& path)
 	{
 		LOG_DEBUG("https_get: connected to host");
 		if (HINTERNET request = WinHttpOpenRequest(connect,
-													L"GET",
-													path.c_str(),
-													nullptr,
-													WINHTTP_NO_REFERER,
-													WINHTTP_DEFAULT_ACCEPT_TYPES,
-													WINHTTP_FLAG_SECURE))
+												   L"GET",
+												   path.c_str(),
+												   nullptr,
+												   WINHTTP_NO_REFERER,
+												   WINHTTP_DEFAULT_ACCEPT_TYPES,
+												   WINHTTP_FLAG_SECURE))
 		{
 			LOG_DEBUG("https_get: request opened, sending");
 			if (WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
 				WinHttpReceiveResponse(request, nullptr))
 			{
-				DWORD status		= 0;
+				DWORD status	  = 0;
 				DWORD status_size = sizeof(status);
 				if (WinHttpQueryHeaders(request,
 										WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
@@ -629,9 +632,8 @@ HttpResponse https_get_until_not_rate_limited(const std::wstring& host, const st
 			return response;
 		const DWORD delay_seconds = response.retry_after_seconds == 0 ? 1 : response.retry_after_seconds;
 		LOG_DEBUG("https_get: rate limited, retrying in %lu second(s)", delay_seconds);
-		const DWORD delay_ms = delay_seconds > (std::numeric_limits<DWORD>::max)() / 1000
-			? (std::numeric_limits<DWORD>::max)()
-			: delay_seconds * 1000;
+		const DWORD delay_ms =
+			delay_seconds > (std::numeric_limits<DWORD>::max)() / 1000 ? (std::numeric_limits<DWORD>::max)() : delay_seconds * 1000;
 		Sleep(delay_ms);
 	}
 }
@@ -678,47 +680,47 @@ struct PacketEngine::State
 
 	explicit State(size_t profile_count) : profile_stats(profile_count) {}
 
-	std::mutex								  lifecycle_mutex;
-	std::condition_variable					  lifecycle_changed;
-	std::vector<bool>						  active_profiles;
-	std::vector<ProfileStats>				  profile_stats;
-	std::vector<std::shared_ptr<Session>>	  active_sessions;
-	std::vector<std::thread>				  cleanup_threads;
-	HANDLE									  discovery_handle = INVALID_HANDLE_VALUE;
-	std::thread								  discovery_thread;
-	std::mutex								  discovery_mutex;
-	std::string								  discovered_server;
-	std::unordered_map<std::string, uint64_t> discovery_counts;
-	bool									  authoritative_server		  = false;
-	bool									  select_authoritative_server = false;
-	std::mutex								  region_mutex;
-	std::unordered_map<std::string, std::string> server_regions;
+	std::mutex										  lifecycle_mutex;
+	std::condition_variable							  lifecycle_changed;
+	std::vector<bool>								  active_profiles;
+	std::vector<ProfileStats>						  profile_stats;
+	std::vector<std::shared_ptr<Session>>			  active_sessions;
+	std::vector<std::thread>						  cleanup_threads;
+	HANDLE											  discovery_handle = INVALID_HANDLE_VALUE;
+	std::thread										  discovery_thread;
+	std::mutex										  discovery_mutex;
+	std::string										  discovered_server;
+	std::unordered_map<std::string, uint64_t>		  discovery_counts;
+	bool											  authoritative_server		  = false;
+	bool											  select_authoritative_server = false;
+	std::mutex										  region_mutex;
+	std::unordered_map<std::string, std::string>	  server_regions;
 	std::unordered_map<std::string, RegionCacheEntry> region_cache;
-	std::unordered_set<std::string>			  region_lookups_started;
-	std::vector<std::thread>				  region_threads;
-	std::string								  client_region;
+	std::unordered_set<std::string>					  region_lookups_started;
+	std::vector<std::thread>						  region_threads;
+	std::string										  client_region;
 
-	HANDLE									  probe_handle = INVALID_HANDLE_VALUE;
-	std::thread								  probe_thread;
-	HANDLE									  region_enforcement_handle = INVALID_HANDLE_VALUE;
-	std::thread								  region_enforcement_recv_thread;
-	std::thread								  region_enforcement_send_thread;
-	std::mutex								  region_enforcement_mutex;
-	std::condition_variable					  region_enforcement_changed;
-	std::atomic<bool>						  region_enforcement_stopping = false;
-	mutable std::mutex						  probe_mutex;
-	bool									  probe_received = false;
-	uint64_t								  probe_window_end = 0;
-	uint64_t								  next_check_time = 0;
-	std::unordered_set<std::string>			  probed_addresses_in_window;
+	HANDLE							probe_handle = INVALID_HANDLE_VALUE;
+	std::thread						probe_thread;
+	HANDLE							region_enforcement_handle = INVALID_HANDLE_VALUE;
+	std::thread						region_enforcement_recv_thread;
+	std::thread						region_enforcement_send_thread;
+	std::mutex						region_enforcement_mutex;
+	std::condition_variable			region_enforcement_changed;
+	std::atomic<bool>				region_enforcement_stopping = false;
+	mutable std::mutex				probe_mutex;
+	bool							probe_received	 = false;
+	uint64_t						probe_window_end = 0;
+	uint64_t						next_check_time	 = 0;
+	std::unordered_set<std::string> probed_addresses_in_window;
 
 	struct DelayedEnforcementPacket
 	{
-		std::vector<BYTE>  data;
+		std::vector<BYTE> data;
 		WINDIVERT_ADDRESS address;
 		uint64_t		  release_at = 0;
 	};
-	std::vector<DelayedEnforcementPacket>	  enforcement_queue;
+	std::vector<DelayedEnforcementPacket> enforcement_queue;
 };
 
 PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(options)), state_(new State(options_.profiles.size()))
@@ -830,7 +832,7 @@ uint64_t PacketEngine::profile_running_time_ms(int profile) const
 	if (profile < 1 || static_cast<size_t>(profile) > options_.profiles.size())
 		return 0;
 	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
-	const size_t index = static_cast<size_t>(profile - 1);
+	const size_t				index = static_cast<size_t>(profile - 1);
 	return state_->active_profiles[index] ? GetTickCount64() - state_->profile_stats[index].enabled_since : 0;
 }
 
@@ -872,15 +874,18 @@ uint64_t PacketEngine::next_batch_in_ms() const
 
 std::string PacketEngine::server_filter(const ProfileOptions& profile) const
 {
-	const std::string& filter		= profile.filter.value_or(options_.global_filter);
-	const size_t	   server_index = server_index_.load();
-	std::string combined_filter = filter;
-	const auto enforcement = profile.windivert_options.client_address_enforcement.value_or(WinDivertOptions::ClientAddressEnforcement::both);
+	const std::string& filter		   = profile.filter.value_or(options_.global_filter);
+	const size_t	   server_index	   = server_index_.load();
+	std::string		   combined_filter = filter;
+	const auto		   enforcement =
+		profile.windivert_options.client_address_enforcement.value_or(WinDivertOptions::ClientAddressEnforcement::both);
 	std::string client_filter;
-	if (enforcement == WinDivertOptions::ClientAddressEnforcement::source || enforcement == WinDivertOptions::ClientAddressEnforcement::both)
+	if (enforcement == WinDivertOptions::ClientAddressEnforcement::source ||
+		enforcement == WinDivertOptions::ClientAddressEnforcement::both)
 		if (options_.client_source_address)
 			client_filter = "ip.SrcAddr == " + *options_.client_source_address;
-	if (enforcement == WinDivertOptions::ClientAddressEnforcement::destination || enforcement == WinDivertOptions::ClientAddressEnforcement::both)
+	if (enforcement == WinDivertOptions::ClientAddressEnforcement::destination ||
+		enforcement == WinDivertOptions::ClientAddressEnforcement::both)
 		if (options_.client_destination_address)
 		{
 			if (!client_filter.empty())
@@ -907,7 +912,7 @@ std::string PacketEngine::server_filter(const ProfileOptions& profile) const
 			break;
 	}
 	const std::string& server_group = options_.servers[server_index - 1].group;
-	std::string address_filter;
+	std::string		   address_filter;
 	for (const ServerOptions& server : options_.servers)
 	{
 		if (server_group.empty() ? server.address == server_address : server.group == server_group)
@@ -927,7 +932,7 @@ std::string PacketEngine::current_server() const
 	if (server_index != 0)
 	{
 		const ServerOptions& server = options_.servers[server_index - 1];
-		const std::string label = server.name == server.address ? server.address : server.name + " [" + server.address + "]";
+		const std::string	 label	= server.name == server.address ? server.address : server.name + " [" + server.address + "]";
 		return server.group.empty() ? label : server.group + ": " + label;
 	}
 	return "none";
@@ -979,7 +984,7 @@ std::string PacketEngine::current_server_region() const
 		address = options_.servers[server_index - 1].address;
 	}
 	std::lock_guard<std::mutex> region_lock(state_->region_mutex);
-	const auto					 region = state_->server_regions.find(address);
+	const auto					region = state_->server_regions.find(address);
 	return region == state_->server_regions.end() ? "" : region->second;
 }
 
@@ -1139,9 +1144,10 @@ void PacketEngine::print_state() const
 			return region == server_regions.end() ? "" : " (" + region->second + ")";
 		};
 		LOG_INFO("%s", format_state_divider(state_width, "server discovery").c_str());
-		log_state_line(state_width,
-					   "authoritative:   " + highlight(discovered_server.empty() ? "none" : discovered_server + region_suffix(discovered_server)) +
-						   (authoritative_server ? " (selected)" : " (observed)"));
+		log_state_line(
+			state_width,
+			"authoritative:   " + highlight(discovered_server.empty() ? "none" : discovered_server + region_suffix(discovered_server)) +
+				(authoritative_server ? " (selected)" : " (observed)"));
 		log_state_line(state_width, "ranked servers:  " + highlight(std::to_string(discovery_counts.size())));
 		for (size_t index = 0; index < discovery_counts.size(); ++index)
 		{
@@ -1187,8 +1193,8 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 		state_->profile_stats[profile - 1].packets_caught.fetch_add(1);
 		if (session->pcap_file)
 		{
-			const auto now = std::chrono::system_clock::now().time_since_epoch();
-			const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(now);
+			const auto now			= std::chrono::system_clock::now().time_since_epoch();
+			const auto seconds		= std::chrono::duration_cast<std::chrono::seconds>(now);
 			const auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(now - seconds);
 			write_pcap_u32(session->pcap_file, static_cast<uint32_t>(seconds.count()));
 			write_pcap_u32(session->pcap_file, static_cast<uint32_t>(microseconds.count()));
@@ -1216,8 +1222,8 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 								   session->delayed_packets);
 			session->packet_changed.notify_one();
 		}
-		PWINDIVERT_TCPHDR tcp_header = nullptr;
-		const PacketAddresses addresses = packet_addresses(packet_data, received_length);
+		PWINDIVERT_TCPHDR	  tcp_header = nullptr;
+		const PacketAddresses addresses	 = packet_addresses(packet_data, received_length);
 		if (WinDivertHelperParsePacket(packet_data,
 									   received_length,
 									   nullptr,
@@ -1257,7 +1263,7 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 
 {
 	const ProfileOptions& profile_options = options_.profiles[session->profile - 1];
-	const std::string profile_label = "profile #" + std::to_string(session->profile) + " - " + profile_options.name;
+	const std::string	  profile_label	  = "profile #" + std::to_string(session->profile) + " - " + profile_options.name;
 	while (!session->stopping)
 	{
 		while (!session->stopping)
@@ -1296,22 +1302,28 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 				else if (sent != 0)
 				{
 					state_->profile_stats[session->profile - 1].delayed_packets_sent.fetch_add(1);
-					const PacketAddresses addresses = packet_addresses(node->packet, node->length);
-					PWINDIVERT_TCPHDR tcp_header = nullptr;
-					const bool has_tcp_header = WinDivertHelperParsePacket(node->packet,
-																	 node->length,
-																	 nullptr,
-																	 nullptr,
-																	 nullptr,
-																	 nullptr,
-																	 nullptr,
-																	 &tcp_header,
-																	 nullptr,
-																	 nullptr,
-																	 nullptr,
-																	 nullptr,
-																	 nullptr) &&
-																	 tcp_header != nullptr;
+					const PacketAddresses addresses		 = packet_addresses(node->packet, node->length);
+					PWINDIVERT_TCPHDR	  tcp_header	 = nullptr;
+					const bool			  has_tcp_header = WinDivertHelperParsePacket(node->packet,
+																					  node->length,
+																					  nullptr,
+																					  nullptr,
+																					  nullptr,
+																					  nullptr,
+																					  nullptr,
+																					  &tcp_header,
+																					  nullptr,
+																					  nullptr,
+																					  nullptr,
+																					  nullptr,
+																					  nullptr) &&
+														   tcp_header != nullptr;
+
+#ifdef NDEBUG
+					// Suppress warning for unused variable 'has_tcp_header' in release builds
+					(void)has_tcp_header;
+#endif
+
 					LOG_DEBUG("%s send: delayed packet: Length = %u, Flags = %s, Src = %s, Dst = %s, SendLen = %u",
 							  profile_label.c_str(),
 							  node->length,
@@ -1345,22 +1357,28 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 			else if (sent != 0)
 			{
 				state_->profile_stats[session->profile - 1].teardown_packets_sent.fetch_add(1);
-				const PacketAddresses addresses = packet_addresses(node->packet, node->length);
-				PWINDIVERT_TCPHDR tcp_header = nullptr;
-				const bool has_tcp_header = WinDivertHelperParsePacket(node->packet,
-															 node->length,
-															 nullptr,
-															 nullptr,
-															 nullptr,
-															 nullptr,
-															 nullptr,
-															 &tcp_header,
-															 nullptr,
-															 nullptr,
-															 nullptr,
-															 nullptr,
-															 nullptr) &&
-															 tcp_header != nullptr;
+				const PacketAddresses addresses		 = packet_addresses(node->packet, node->length);
+				PWINDIVERT_TCPHDR	  tcp_header	 = nullptr;
+				const bool			  has_tcp_header = WinDivertHelperParsePacket(node->packet,
+																				  node->length,
+																				  nullptr,
+																				  nullptr,
+																				  nullptr,
+																				  nullptr,
+																				  nullptr,
+																				  &tcp_header,
+																				  nullptr,
+																				  nullptr,
+																				  nullptr,
+																				  nullptr,
+																				  nullptr) &&
+													   tcp_header != nullptr;
+
+#ifdef NDEBUG
+				// Suppress warning for unused variable 'has_tcp_header' in release builds
+				(void)has_tcp_header;
+#endif
+
 				LOG_DEBUG("%s flush: sent packet: Length = %u, Flags = %s, Src = %s, Dst = %s, SendLen = %u",
 						  profile_label.c_str(),
 						  node->length,
@@ -1390,17 +1408,17 @@ void PacketEngine::setup(int profile)
 	const bool			  sniff			  = profile_options.windivert_options.sniff.value_or(false);
 	const bool			  outbound		  = profile_options.windivert_options.outbound.value_or(false);
 	const bool			  forward		  = profile_options.windivert_options.forward.value_or(false);
-	ProfileOptions capture_profile = profile_options;
+	ProfileOptions		  capture_profile = profile_options;
 	if (profile_options.ack_restoration)
 	{
 		const std::string& packet_filter = profile_options.filter.value_or(options_.global_filter);
-		capture_profile.filter = "(" + packet_filter + ") or (tcp.Ack and not tcp.Psh)";
+		capture_profile.filter			 = "(" + packet_filter + ") or (tcp.Ack and not tcp.Psh)";
 	}
-	const std::string	  filter		  = server_filter(capture_profile);
-	UINT				  flags			  = sniff ? WINDIVERT_FLAG_SNIFF : 0;
-	const std::string	  capture_filter  = outbound ? "outbound and (" + filter + ")" : filter;
-	const WINDIVERT_LAYER layer			  = forward ? WINDIVERT_LAYER_NETWORK_FORWARD : WINDIVERT_LAYER_NETWORK;
-	HANDLE				  handle		  = WinDivertOpen(capture_filter.c_str(), layer, 0, flags);
+	const std::string	  filter		 = server_filter(capture_profile);
+	UINT				  flags			 = sniff ? WINDIVERT_FLAG_SNIFF : 0;
+	const std::string	  capture_filter = outbound ? "outbound and (" + filter + ")" : filter;
+	const WINDIVERT_LAYER layer			 = forward ? WINDIVERT_LAYER_NETWORK_FORWARD : WINDIVERT_LAYER_NETWORK;
+	HANDLE				  handle		 = WinDivertOpen(capture_filter.c_str(), layer, 0, flags);
 	if (handle == INVALID_HANDLE_VALUE)
 	{
 		const DWORD error = GetLastError();
@@ -1431,10 +1449,14 @@ void PacketEngine::setup(int profile)
 						  error.message().c_str());
 			else
 			{
-				session->pcap_path = (std::filesystem::path(options_.features.pcap_files.output_dir) / (session->pcap_guid + ".pcap")).string();
+				session->pcap_path =
+					(std::filesystem::path(options_.features.pcap_files.output_dir) / (session->pcap_guid + ".pcap")).string();
 				session->pcap_file.open(session->pcap_path, std::ios::binary | std::ios::trunc);
 				if (!session->pcap_file)
-					LOG_ERROR("profile #%d - %s PCAP capture: failed to open %s", profile, profile_options.name.c_str(), session->pcap_path.c_str());
+					LOG_ERROR("profile #%d - %s PCAP capture: failed to open %s",
+							  profile,
+							  profile_options.name.c_str(),
+							  session->pcap_path.c_str());
 				else
 				{
 					write_pcap_u32(session->pcap_file, 0xa1b2c3d4);
@@ -1446,7 +1468,10 @@ void PacketEngine::setup(int profile)
 					write_pcap_u32(session->pcap_file, 101);
 					if (!session->pcap_file)
 					{
-						LOG_ERROR("profile #%d - %s PCAP capture: failed to write header to %s", profile, profile_options.name.c_str(), session->pcap_path.c_str());
+						LOG_ERROR("profile #%d - %s PCAP capture: failed to write header to %s",
+								  profile,
+								  profile_options.name.c_str(),
+								  session->pcap_path.c_str());
 						session->pcap_file.close();
 					}
 				}
@@ -1643,16 +1668,19 @@ void PacketEngine::start_workers()
 		{
 			WinDivertSetParam(state_->discovery_handle, WINDIVERT_PARAM_QUEUE_LENGTH, 4096);
 			WinDivertSetParam(state_->discovery_handle, WINDIVERT_PARAM_QUEUE_TIME, 1024);
-			LOG_INFO("Server discovery enabled on port %u with a %s window", port, logging::format_duration(options_.discovery_window_ms).c_str());
+			LOG_INFO("Server discovery enabled on port %u with a %s window",
+					 port,
+					 logging::format_duration(options_.discovery_window_ms).c_str());
 			state_->discovery_thread = std::thread(&PacketEngine::discover_packets, this);
 		}
 	}
 
 	if (options_.features.region_enforcement.enabled && options_.features.region_enforcement.probe_port != 0)
 	{
-		const uint16_t	  port	 = options_.features.region_enforcement.probe_port;
-		const std::string filter = "tcp.Syn and (tcp.DstPort == " + std::to_string(port) + " or tcp.SrcPort == " + std::to_string(port) + ")";
-		state_->probe_handle	 = WinDivertOpen(filter.c_str(), WINDIVERT_LAYER_NETWORK, 0, WINDIVERT_FLAG_SNIFF);
+		const uint16_t	  port = options_.features.region_enforcement.probe_port;
+		const std::string filter =
+			"tcp.Syn and (tcp.DstPort == " + std::to_string(port) + " or tcp.SrcPort == " + std::to_string(port) + ")";
+		state_->probe_handle = WinDivertOpen(filter.c_str(), WINDIVERT_LAYER_NETWORK, 0, WINDIVERT_FLAG_SNIFF);
 		if (state_->probe_handle == INVALID_HANDLE_VALUE)
 		{
 			const DWORD error = GetLastError();
@@ -1707,10 +1735,10 @@ void PacketEngine::resolve_region(const std::string& address, bool preserve_name
 	RegionCacheEntry cached;
 	{
 		std::lock_guard<std::mutex> lock(state_->region_mutex);
-		const auto cache_entry = state_->region_cache.find(address);
+		const auto					cache_entry = state_->region_cache.find(address);
 		if (cache_entry != state_->region_cache.end() && cache_entry->second.expires_at > static_cast<uint64_t>(std::time(nullptr)))
 		{
-			cached = cache_entry->second;
+			cached							= cache_entry->second;
 			state_->server_regions[address] = cached.label;
 		}
 	}
@@ -1739,7 +1767,7 @@ void PacketEngine::resolve_region(const std::string& address, bool preserve_name
 	LOG_DEBUG("Region lookup for '%s': queued", address.c_str());
 	state_->region_threads.emplace_back([this, address, preserve_name] {
 		LOG_DEBUG("Region lookup for '%s': requesting https://ipapi.co/%s/json/", address.c_str(), address.c_str());
-		const std::wstring path	   = L"/" + std::wstring(address.begin(), address.end()) + L"/json/";
+		const std::wstring path		= L"/" + std::wstring(address.begin(), address.end()) + L"/json/";
 		const HttpResponse response = https_get_until_not_rate_limited(L"ipapi.co", path);
 		if (response.status < 200 || response.status >= 300 || response.body.empty())
 		{
@@ -1759,7 +1787,7 @@ void PacketEngine::resolve_region(const std::string& address, bool preserve_name
 		{
 			std::lock_guard<std::mutex> lock(state_->region_mutex);
 			state_->server_regions[address] = *label;
-			state_->region_cache[address] = {*label, new_name, static_cast<uint64_t>(std::time(nullptr)) + region_cache_lifetime_seconds};
+			state_->region_cache[address]	= {*label, new_name, static_cast<uint64_t>(std::time(nullptr)) + region_cache_lifetime_seconds};
 			save_region_cache(state_->region_cache);
 		}
 		LOG_DEBUG("Region lookup for '%s': cached result", address.c_str());
@@ -1770,7 +1798,7 @@ void PacketEngine::resolve_region(const std::string& address, bool preserve_name
 			LOG_DEBUG("Region lookup for '%s': rewriting server name to '%s'", address.c_str(), new_name.c_str());
 			{
 				std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
-				const auto					 server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](ServerOptions& item) {
+				const auto server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](ServerOptions& item) {
 					return item.address == address;
 				});
 				if (server != options_.servers.end())
@@ -1787,7 +1815,7 @@ void PacketEngine::resolve_client_region()
 {
 	{
 		std::lock_guard<std::mutex> lock(state_->region_mutex);
-		const auto cache_entry = state_->region_cache.find(client_region_cache_key);
+		const auto					cache_entry = state_->region_cache.find(client_region_cache_key);
 		if (cache_entry != state_->region_cache.end() && cache_entry->second.expires_at > static_cast<uint64_t>(std::time(nullptr)))
 		{
 			state_->client_region = cache_entry->second.label;
@@ -1813,8 +1841,10 @@ void PacketEngine::resolve_client_region()
 		}
 		{
 			std::lock_guard<std::mutex> lock(state_->region_mutex);
-			state_->client_region = *label;
-			state_->region_cache[client_region_cache_key] = {*label, "", static_cast<uint64_t>(std::time(nullptr)) + region_cache_lifetime_seconds};
+			state_->client_region						  = *label;
+			state_->region_cache[client_region_cache_key] = {*label,
+															 "",
+															 static_cast<uint64_t>(std::time(nullptr)) + region_cache_lifetime_seconds};
 			save_region_cache(state_->region_cache);
 		}
 		LOG_DEBUG("Client region lookup: cached result");
@@ -2025,7 +2055,7 @@ void PacketEngine::probe_packets()
 					if (first_in_window)
 					{
 						const std::string enforced_region = current_enforced_region();
-						auto			  server		  = std::find_if(options_.servers.begin(), options_.servers.end(), [&](const ServerOptions& s) {
+						auto server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](const ServerOptions& s) {
 							return s.address == server_address;
 						});
 						if (server != options_.servers.end())
@@ -2035,7 +2065,9 @@ void PacketEngine::probe_packets()
 								server->name == server->address ? server->address : server->name + " [" + server->address + "]";
 							if (enforced_region != "none" && !enforced_region.empty() && server_region == enforced_region)
 							{
-								LOG_INFO("Server '%s' within enforced region '%s' was probed", server_label.c_str(), enforced_region.c_str());
+								LOG_INFO("Server '%s' within enforced region '%s' was probed",
+										 server_label.c_str(),
+										 enforced_region.c_str());
 							}
 							else
 							{
@@ -2175,7 +2207,8 @@ void PacketEngine::region_enforcement_send()
 	for (auto& pkt : pending_packets)
 	{
 		UINT sent = 0;
-		if (WinDivertSend(state_->region_enforcement_handle, pkt.data.data(), static_cast<UINT>(pkt.data.size()), &sent, &pkt.address) && sent != 0)
+		if (WinDivertSend(state_->region_enforcement_handle, pkt.data.data(), static_cast<UINT>(pkt.data.size()), &sent, &pkt.address) &&
+			sent != 0)
 		{
 			const PacketAddresses addresses = packet_addresses(pkt.data.data(), static_cast<UINT>(pkt.data.size()));
 			LOG_DEBUG("Region enforcement flush: sent packet: Length = %zu, Src = %s, Dst = %s, SendLen = %u",
