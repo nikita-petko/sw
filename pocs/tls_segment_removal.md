@@ -125,7 +125,7 @@ flowchart TD
     Mark --> Advance[Advance offset by 5 + length]
     Keep --> Advance
     Advance --> Check
-    Tail --> Done([Done: candidate list + tail]))
+    Tail --> Done([Done: candidate list + tail])
 ```
 
 This means:
