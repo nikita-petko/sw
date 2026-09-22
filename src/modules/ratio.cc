@@ -63,16 +63,16 @@ public:
 					send_now[index] = true;
 				break;
 			case RatioSelection::random:
-			{
-				std::vector<size_t> indices(queued_packets.size());
-				for (size_t index = 0; index < indices.size(); ++index)
-					indices[index] = index;
-				std::mt19937_64 rng(now ^ reinterpret_cast<uintptr_t>(this));
-				std::shuffle(indices.begin(), indices.end(), rng);
-				for (size_t index = 0; index < send_count && index < indices.size(); ++index)
-					send_now[indices[index]] = true;
-				break;
-			}
+				{
+					std::vector<size_t> indices(queued_packets.size());
+					for (size_t index = 0; index < indices.size(); ++index)
+						indices[index] = index;
+					std::mt19937_64 rng(now ^ reinterpret_cast<uintptr_t>(this));
+					std::shuffle(indices.begin(), indices.end(), rng);
+					for (size_t index = 0; index < send_count && index < indices.size(); ++index)
+						send_now[indices[index]] = true;
+					break;
+				}
 			case RatioSelection::first:
 			default:
 				for (size_t index = 0; index < send_count && index < queued_packets.size(); ++index)

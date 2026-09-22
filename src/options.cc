@@ -252,7 +252,7 @@ bool add_pcap_enabled_for(const std::string& value, PcapFilesOptions& pcap_files
 		list += ',';
 	for (size_t start = 0; start < list.size();)
 	{
-		const size_t end = list.find(',', start);
+		const size_t	  end  = list.find(',', start);
 		const std::string item = unquote(trim(list.substr(start, end == std::string::npos ? std::string::npos : end - start)));
 		if (item.empty())
 		{
@@ -297,9 +297,9 @@ bool set_discovery_port(const std::string& value, PacketEngineOptions& options, 
 {
 	try
 	{
-		const std::string	   item	  = unquote(trim(value));
-		size_t				   consumed = 0;
-		const unsigned long   port	  = std::stoul(item, &consumed);
+		const std::string	item	 = unquote(trim(value));
+		size_t				consumed = 0;
+		const unsigned long port	 = std::stoul(item, &consumed);
 		if (consumed != item.size() || port == 0 || port > (std::numeric_limits<uint16_t>::max)())
 			throw std::invalid_argument("invalid port");
 		options.discovery_port = static_cast<uint16_t>(port);
@@ -316,8 +316,8 @@ bool set_discovery_interval(const std::string& value, PacketEngineOptions& optio
 {
 	try
 	{
-		const std::string			  item	   = unquote(trim(value));
-		size_t						  consumed = 0;
+		const std::string		 item	  = unquote(trim(value));
+		size_t					 consumed = 0;
 		const unsigned long long interval = std::stoull(item, &consumed);
 		if (consumed != item.size() || interval == 0)
 			throw std::invalid_argument("invalid interval");
@@ -343,20 +343,20 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 	options.profiles.clear();
 	options.servers.clear();
 	options.discovery_port.reset();
-	options.discovery_window_ms = 5000;
-	options.features.region_enforcement.enabled = false;
+	options.discovery_window_ms					   = 5000;
+	options.features.region_enforcement.enabled	   = false;
 	options.features.region_enforcement.probe_port = 0;
-	options.features.pcap_files = {};
-	std::string	line;
+	options.features.pcap_files					   = {};
+	std::string		line;
 	ProfileOptions* profile = nullptr;
-	std::string	section;
-	std::string	subsection;
-	std::string	server_group;
-	int				subsection_indent  = -1;
-	int				servers_base_indent = -1;
-	int				features_base_indent = -1;
-	int			 pcap_files_base_indent = -1;
-	int				line_number		  = 0;
+	std::string		section;
+	std::string		subsection;
+	std::string		server_group;
+	int				subsection_indent	   = -1;
+	int				servers_base_indent	   = -1;
+	int				features_base_indent   = -1;
+	int				pcap_files_base_indent = -1;
+	int				line_number			   = 0;
 	while (std::getline(file, line))
 	{
 		++line_number;
@@ -402,21 +402,21 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		std::string value = trim(content.substr(colon + 1));
 		if (subsection == "pcap_files_enabled_for" && indent <= subsection_indent)
 		{
-			subsection = "pcap_files";
+			subsection		  = "pcap_files";
 			subsection_indent = pcap_files_base_indent;
 		}
 		if (features_base_indent != -1 && section == "features" && indent > features_base_indent)
 		{
 			if (key == "region_enforcement" && value.empty())
 			{
-				subsection = "region_enforcement";
+				subsection		  = "region_enforcement";
 				subsection_indent = indent;
 				continue;
 			}
 			if (key == "pcap_files" && value.empty())
 			{
-				subsection = "pcap_files";
-				subsection_indent = indent;
+				subsection			   = "pcap_files";
+				subsection_indent	   = indent;
 				pcap_files_base_indent = indent;
 				continue;
 			}
@@ -437,9 +437,9 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				{
 					try
 					{
-						const std::string item = unquote(trim(value));
-						size_t consumed = 0;
-						const unsigned long port = std::stoul(item, &consumed);
+						const std::string	item	 = unquote(trim(value));
+						size_t				consumed = 0;
+						const unsigned long port	 = std::stoul(item, &consumed);
 						if (consumed != item.size() || port == 0 || port > (std::numeric_limits<uint16_t>::max)())
 							throw std::invalid_argument("invalid port");
 						options.features.region_enforcement.probe_port = static_cast<uint16_t>(port);
@@ -478,7 +478,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				}
 				if (key == "enabled_for")
 				{
-					subsection = "pcap_files_enabled_for";
+					subsection		  = "pcap_files_enabled_for";
 					subsection_indent = indent;
 					if (!add_pcap_enabled_for(value, options.features.pcap_files, path, line_number))
 						return false;
@@ -520,8 +520,11 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				for (size_t start = 0; start < list.size();)
 				{
 					const size_t end = list.find(',', start);
-					if (!add_server(
-							list.substr(start, end == std::string::npos ? std::string::npos : end - start), options, "", path, line_number))
+					if (!add_server(list.substr(start, end == std::string::npos ? std::string::npos : end - start),
+									options,
+									"",
+									path,
+									line_number))
 						return false;
 					if (end == std::string::npos)
 						break;
@@ -531,8 +534,8 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			}
 			if (value.empty())
 			{
-				subsection = "server_group";
-				server_group = unquote(key);
+				subsection		  = "server_group";
+				server_group	  = unquote(key);
 				subsection_indent = indent;
 				continue;
 			}
@@ -552,9 +555,9 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		{
 			section = "features";
 			subsection.clear();
-			subsection_indent  = -1;
-			servers_base_indent = -1;
-			features_base_indent = indent;
+			subsection_indent	   = -1;
+			servers_base_indent	   = -1;
+			features_base_indent   = indent;
 			pcap_files_base_indent = -1;
 			continue;
 		}
@@ -562,19 +565,19 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		{
 			section = "profiles";
 			subsection.clear();
-			subsection_indent  = -1;
-			servers_base_indent = -1;
-			features_base_indent = -1;
+			subsection_indent	   = -1;
+			servers_base_indent	   = -1;
+			features_base_indent   = -1;
 			pcap_files_base_indent = -1;
 			continue;
 		}
 		if (key == "servers" && value.empty())
 		{
-			section = "servers";
-			subsection		  = "servers";
-			subsection_indent = indent;
-			servers_base_indent = indent;
-			features_base_indent = -1;
+			section				   = "servers";
+			subsection			   = "servers";
+			subsection_indent	   = indent;
+			servers_base_indent	   = indent;
+			features_base_indent   = -1;
 			pcap_files_base_indent = -1;
 			continue;
 		}
@@ -633,7 +636,9 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				const auto enforcement = parse_client_address_enforcement(unquote(value));
 				if (!enforcement)
 				{
-					LOG_ERROR("Invalid client_address_enforcement in %s at line %d: expected none, source, destination, or both", path, line_number);
+					LOG_ERROR("Invalid client_address_enforcement in %s at line %d: expected none, source, destination, or both",
+							  path,
+							  line_number);
 					return false;
 				}
 				profile->windivert_options.client_address_enforcement = *enforcement;
@@ -688,7 +693,8 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			if (!mode)
 			{
 				LOG_ERROR(
-					"Invalid delay_mode in %s at line %d: expected from_timestamp, send_all_after_delay, ratio, drop, drop_and_send, hold_and_send, or "
+					"Invalid delay_mode in %s at line %d: expected from_timestamp, send_all_after_delay, ratio, drop, drop_and_send, "
+					"hold_and_send, or "
 					"drop_until_toggle",
 					path,
 					line_number);
@@ -744,7 +750,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		{
 			try
 			{
-				size_t consumed = 0;
+				size_t				consumed = 0;
 				const unsigned long value_ms = std::stoul(unquote(value), &consumed);
 				if (consumed != unquote(value).size() || value_ms > (std::numeric_limits<uint32_t>::max)())
 					throw std::invalid_argument("invalid disable wait");
@@ -760,8 +766,8 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		{
 			try
 			{
-				size_t consumed = 0;
-				const unsigned long percent = std::stoul(unquote(value), &consumed);
+				size_t				consumed = 0;
+				const unsigned long percent	 = std::stoul(unquote(value), &consumed);
 				if (consumed != unquote(value).size() || percent > 100)
 					throw std::invalid_argument("invalid disable wait percentage");
 				profile->disable_wait_percent = static_cast<uint8_t>(percent);
@@ -834,8 +840,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			LOG_ERROR("Profile '%s' requires ratio to be configured", item.name.c_str());
 			return false;
 		}
-		if (item.delay_mode == PacketDelayMode::hold_and_send &&
-			(!item.ratio_configured || item.ratio <= 0 || item.ratio_percent))
+		if (item.delay_mode == PacketDelayMode::hold_and_send && (!item.ratio_configured || item.ratio <= 0 || item.ratio_percent))
 		{
 			LOG_ERROR("Profile '%s' requires a positive packet count ratio for hold_and_send", item.name.c_str());
 			return false;
@@ -885,9 +890,10 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		{
 			if (enabled_profile == "*")
 				continue;
-			const auto configured_profile = std::find_if(options.profiles.begin(), options.profiles.end(), [&](const ProfileOptions& candidate) {
-				return candidate.name == enabled_profile;
-			});
+			const auto configured_profile =
+				std::find_if(options.profiles.begin(), options.profiles.end(), [&](const ProfileOptions& candidate) {
+					return candidate.name == enabled_profile;
+				});
 			if (configured_profile == options.profiles.end())
 			{
 				LOG_ERROR("Feature pcap_files enables unknown profile '%s'", enabled_profile.c_str());
@@ -908,10 +914,10 @@ bool validate_filters(const char* path, const PacketEngineOptions& options)
 	}
 	if (options.features.region_enforcement.enabled && options.features.region_enforcement.probe_port != 0)
 	{
-		const std::string probe_filter = "tcp.Syn and (tcp.DstPort == " + std::to_string(options.features.region_enforcement.probe_port) +
-										 " or tcp.SrcPort == " + std::to_string(options.features.region_enforcement.probe_port) + ")";
-		const char* error		   = nullptr;
-		UINT		error_position = 0;
+		const std::string probe_filter	 = "tcp.Syn and (tcp.DstPort == " + std::to_string(options.features.region_enforcement.probe_port) +
+										   " or tcp.SrcPort == " + std::to_string(options.features.region_enforcement.probe_port) + ")";
+		const char*		  error			 = nullptr;
+		UINT			  error_position = 0;
 		if (!WinDivertHelperCompileFilter(probe_filter.c_str(), WINDIVERT_LAYER_NETWORK, nullptr, 0, &error, &error_position))
 		{
 			LOG_ERROR("Invalid filter for region probe detection on port %u: %s",
@@ -949,12 +955,15 @@ bool validate_filters(const char* path, const PacketEngineOptions& options)
 		for (size_t server_index = 0; server_index <= options.servers.size(); ++server_index)
 		{
 			std::string server_filter = filter;
-			const auto enforcement = profile.windivert_options.client_address_enforcement.value_or(WinDivertOptions::ClientAddressEnforcement::both);
+			const auto	enforcement =
+				profile.windivert_options.client_address_enforcement.value_or(WinDivertOptions::ClientAddressEnforcement::both);
 			std::string client_filter;
-			if (enforcement == WinDivertOptions::ClientAddressEnforcement::source || enforcement == WinDivertOptions::ClientAddressEnforcement::both)
+			if (enforcement == WinDivertOptions::ClientAddressEnforcement::source ||
+				enforcement == WinDivertOptions::ClientAddressEnforcement::both)
 				if (options.client_source_address)
 					client_filter = "ip.SrcAddr == " + *options.client_source_address;
-			if (enforcement == WinDivertOptions::ClientAddressEnforcement::destination || enforcement == WinDivertOptions::ClientAddressEnforcement::both)
+			if (enforcement == WinDivertOptions::ClientAddressEnforcement::destination ||
+				enforcement == WinDivertOptions::ClientAddressEnforcement::both)
 				if (options.client_destination_address)
 				{
 					if (!client_filter.empty())
@@ -1010,8 +1019,8 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 	options.client_source_address.reset();
 	options.client_destination_address.reset();
 	options.resolve_region = false;
-	options.features = {};
-	bool config_loaded		= false;
+	options.features	   = {};
+	bool config_loaded	   = false;
 
 	for (int index = 1; index < argc; ++index)
 	{
@@ -1069,7 +1078,7 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 				options.client_source_address = address;
 			else
 			{
-				options.client_source_address = address;
+				options.client_source_address	   = address;
 				options.client_destination_address = address;
 			}
 		}

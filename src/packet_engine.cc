@@ -648,19 +648,19 @@ struct PacketEngine::Session
 	{
 	}
 
-	int						profile;
-	HANDLE					handle;
-	std::atomic<bool>		stopping = false;
-	std::mutex				packet_mutex;
-	std::condition_variable packet_changed;
-	uint64_t				next_receive_order = 0;
-	PacketQueue				delayed_packets;
-	PacketMode*				mode;
-	std::ofstream			pcap_file;
-	std::string				pcap_guid;
-	std::string				pcap_path;
-	std::thread				receive_thread;
-	std::thread				send_thread;
+	int							   profile;
+	HANDLE						   handle;
+	std::atomic<bool>			   stopping = false;
+	std::mutex					   packet_mutex;
+	std::condition_variable		   packet_changed;
+	uint64_t					   next_receive_order = 0;
+	PacketQueue					   delayed_packets;
+	PacketMode*					   mode;
+	std::unique_ptr<std::ofstream> pcap_file;
+	std::string					   pcap_guid;
+	std::string					   pcap_path;
+	std::thread					   receive_thread;
+	std::thread					   send_thread;
 };
 
 struct PacketEngine::State
@@ -1193,18 +1193,19 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 		state_->profile_stats[profile - 1].packets_caught.fetch_add(1);
 		if (session->pcap_file)
 		{
-			const auto now			= std::chrono::system_clock::now().time_since_epoch();
-			const auto seconds		= std::chrono::duration_cast<std::chrono::seconds>(now);
-			const auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(now - seconds);
-			write_pcap_u32(session->pcap_file, static_cast<uint32_t>(seconds.count()));
-			write_pcap_u32(session->pcap_file, static_cast<uint32_t>(microseconds.count()));
-			write_pcap_u32(session->pcap_file, received_length);
-			write_pcap_u32(session->pcap_file, received_length);
-			session->pcap_file.write(reinterpret_cast<const char*>(packet_data), received_length);
-			if (!session->pcap_file)
+			std::ofstream& pcap_file	= *session->pcap_file;
+			const auto	   now			= std::chrono::system_clock::now().time_since_epoch();
+			const auto	   seconds		= std::chrono::duration_cast<std::chrono::seconds>(now);
+			const auto	   microseconds = std::chrono::duration_cast<std::chrono::microseconds>(now - seconds);
+			write_pcap_u32(pcap_file, static_cast<uint32_t>(seconds.count()));
+			write_pcap_u32(pcap_file, static_cast<uint32_t>(microseconds.count()));
+			write_pcap_u32(pcap_file, received_length);
+			write_pcap_u32(pcap_file, received_length);
+			pcap_file.write(reinterpret_cast<const char*>(packet_data), received_length);
+			if (!pcap_file)
 			{
 				LOG_ERROR("%s PCAP capture: failed to write %s", profile_label.c_str(), session->pcap_path.c_str());
-				session->pcap_file.close();
+				session->pcap_file.reset();
 			}
 		}
 		const bool sniff = profile_options.windivert_options.sniff.value_or(false);
@@ -1451,28 +1452,32 @@ void PacketEngine::setup(int profile)
 			{
 				session->pcap_path =
 					(std::filesystem::path(options_.features.pcap_files.output_dir) / (session->pcap_guid + ".pcap")).string();
-				session->pcap_file.open(session->pcap_path, std::ios::binary | std::ios::trunc);
-				if (!session->pcap_file)
+				session->pcap_file = std::make_unique<std::ofstream>(session->pcap_path, std::ios::binary | std::ios::trunc);
+				if (!*session->pcap_file)
+				{
 					LOG_ERROR("profile #%d - %s PCAP capture: failed to open %s",
 							  profile,
 							  profile_options.name.c_str(),
 							  session->pcap_path.c_str());
+					session->pcap_file.reset();
+				}
 				else
 				{
-					write_pcap_u32(session->pcap_file, 0xa1b2c3d4);
-					write_pcap_u16(session->pcap_file, 2);
-					write_pcap_u16(session->pcap_file, 4);
-					write_pcap_u32(session->pcap_file, 0);
-					write_pcap_u32(session->pcap_file, 0);
-					write_pcap_u32(session->pcap_file, 0xFFFF);
-					write_pcap_u32(session->pcap_file, 101);
-					if (!session->pcap_file)
+					std::ofstream& pcap_file = *session->pcap_file;
+					write_pcap_u32(pcap_file, 0xa1b2c3d4);
+					write_pcap_u16(pcap_file, 2);
+					write_pcap_u16(pcap_file, 4);
+					write_pcap_u32(pcap_file, 0);
+					write_pcap_u32(pcap_file, 0);
+					write_pcap_u32(pcap_file, 0xFFFF);
+					write_pcap_u32(pcap_file, 101);
+					if (!pcap_file)
 					{
 						LOG_ERROR("profile #%d - %s PCAP capture: failed to write header to %s",
 								  profile,
 								  profile_options.name.c_str(),
 								  session->pcap_path.c_str());
-						session->pcap_file.close();
+						session->pcap_file.reset();
 					}
 				}
 			}
@@ -1549,9 +1554,9 @@ void PacketEngine::teardown(int profile)
 		state_->cleanup_threads.emplace_back([this, session, enabled_time, profile] {
 			session->receive_thread.join();
 			session->send_thread.join();
-			const bool pcap_captured = session->pcap_file.is_open();
+			const bool pcap_captured = session->pcap_file != nullptr;
 			if (pcap_captured)
-				session->pcap_file.close();
+				session->pcap_file.reset();
 			WinDivertClose(session->handle);
 			timeEndPeriod(1);
 			LOG_INFO("profile #%d - %s teardown: disabled after %s",

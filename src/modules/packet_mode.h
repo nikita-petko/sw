@@ -60,12 +60,12 @@ public:
 	virtual void release(PacketQueue& packets, uint64_t now, std::vector<PacketNode*>& ready_packets) = 0;
 	virtual void reset()
 	{
-		last_sent_ack_[0] = 0;
-		last_sent_ack_[1] = 0;
+		last_sent_ack_[0]	  = 0;
+		last_sent_ack_[1]	  = 0;
 		has_last_sent_ack_[0] = false;
 		has_last_sent_ack_[1] = false;
 	}
-	void prepare_packet_for_send(BYTE* packet, UINT length, const WINDIVERT_ADDRESS* address);
+	void		 prepare_packet_for_send(BYTE* packet, UINT length, const WINDIVERT_ADDRESS* address);
 	virtual bool toggle(PacketQueue&) { return false; }
 	virtual void flush(PacketQueue& packets, std::vector<PacketNode*>& pending_packets) = 0;
 
@@ -80,7 +80,7 @@ public:
 protected:
 	ProfileOptions options_;
 	const char*	   mode_name_;
-	uint32_t	   last_sent_ack_[2] = {};
+	uint32_t	   last_sent_ack_[2]	 = {};
 	bool		   has_last_sent_ack_[2] = {};
 };
 

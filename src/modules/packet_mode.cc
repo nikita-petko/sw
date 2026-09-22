@@ -41,7 +41,7 @@ bool get_tcp_numbers(const BYTE* packet, UINT length, uint32_t& sequence, uint32
 									nullptr,
 									nullptr,
 									nullptr) ||
-				!tcp_header)
+		!tcp_header)
 		return false;
 	sequence	   = WinDivertHelperNtohl(tcp_header->SeqNum);
 	acknowledgment = WinDivertHelperNtohl(tcp_header->AckNum);
@@ -84,13 +84,13 @@ void PacketMode::prepare_packet_for_send(BYTE* packet, UINT length, const WINDIV
 	uint32_t acknowledgment = WinDivertHelperNtohl(tcp_header->AckNum);
 	if (tcp_header->Psh && has_last_sent_ack_[direction] && acknowledgment < last_sent_ack_[direction])
 	{
-		acknowledgment = last_sent_ack_[direction];
+		acknowledgment	   = last_sent_ack_[direction];
 		tcp_header->AckNum = WinDivertHelperHtonl(acknowledgment);
 		WinDivertHelperCalcChecksums(packet, length, nullptr, 0);
 	}
 	if (!has_last_sent_ack_[direction] || acknowledgment > last_sent_ack_[direction])
 	{
-		last_sent_ack_[direction] = acknowledgment;
+		last_sent_ack_[direction]	  = acknowledgment;
 		has_last_sent_ack_[direction] = true;
 	}
 }
@@ -141,19 +141,19 @@ void PacketMode::capture(const BYTE*			  packet,
 	{
 		PWINDIVERT_TCPHDR tcp_header = nullptr;
 		if (WinDivertHelperParsePacket(packet,
-									length,
-								nullptr,
-								nullptr,
-								nullptr,
-								nullptr,
-								nullptr,
-								&tcp_header,
-								nullptr,
-								nullptr,
-								nullptr,
-								nullptr,
-								nullptr) &&
-				 tcp_header && tcp_header->Ack && !tcp_header->Psh)
+									   length,
+									   nullptr,
+									   nullptr,
+									   nullptr,
+									   nullptr,
+									   nullptr,
+									   &tcp_header,
+									   nullptr,
+									   nullptr,
+									   nullptr,
+									   nullptr,
+									   nullptr) &&
+			tcp_header && tcp_header->Ack && !tcp_header->Psh)
 		{
 			packets.push(make_packet_node(packet, length, address, profile, now, receive_order));
 			return;

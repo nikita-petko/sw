@@ -26,8 +26,8 @@ decltype(&WinDivertSetParam)			WinDivertSetParam_fn			= nullptr;
 decltype(&WinDivertHelperCompileFilter) WinDivertHelperCompileFilter_fn = nullptr;
 decltype(&WinDivertHelperParsePacket)	WinDivertHelperParsePacket_fn	= nullptr;
 decltype(&WinDivertHelperNtohl)			WinDivertHelperNtohl_fn			= nullptr;
-	decltype(&WinDivertHelperHtonl)			WinDivertHelperHtonl_fn			= nullptr;
-	decltype(&WinDivertHelperCalcChecksums)	WinDivertHelperCalcChecksums_fn	= nullptr;
+decltype(&WinDivertHelperHtonl)			WinDivertHelperHtonl_fn			= nullptr;
+decltype(&WinDivertHelperCalcChecksums) WinDivertHelperCalcChecksums_fn = nullptr;
 
 bool extract_resource(int resource_id, const std::filesystem::path& path)
 {

@@ -25,6 +25,14 @@ servers:
     - "34.116.109.80:NSW-OCE-80"
     - "34.151.127.98:NSW-OCE-98"
 
+features:
+  pcap_files:
+    enabled: false
+    enabled_for:
+      - "Long (Send)"
+      - "Long (Recv)"
+      - "RPM"
+
 profiles:
   - name: "RPM"
     key: x

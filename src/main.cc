@@ -170,7 +170,7 @@ const char* format_ratio_selection(RatioSelection selection)
 std::string format_windivert_options(const ProfileOptions& profile)
 {
 	std::string result;
-	const auto append = [&](const char* label, const std::string& value) {
+	const auto	append = [&](const char* label, const std::string& value) {
 		if (!result.empty())
 			result += ", ";
 		result += label;
@@ -223,11 +223,11 @@ int main(int argc, char* argv[])
 	LOG_INFO("Loaded profiles (%zu):", options.profiles.size());
 	for (size_t index = 0; index < options.profiles.size(); ++index)
 	{
-		const ProfileOptions& profile = options.profiles[index];
-		const bool		  indefinite_delay = profile.delay_ms <= 0 && (profile.delay_mode == PacketDelayMode::from_timestamp ||
-																	   profile.delay_mode == PacketDelayMode::send_all_after_delay ||
-																	   profile.delay_mode == PacketDelayMode::drop_and_send);
-		const std::string delay_description =
+		const ProfileOptions& profile		   = options.profiles[index];
+		const bool			  indefinite_delay = profile.delay_ms <= 0 && (profile.delay_mode == PacketDelayMode::from_timestamp ||
+																		   profile.delay_mode == PacketDelayMode::send_all_after_delay ||
+																		   profile.delay_mode == PacketDelayMode::drop_and_send);
+		const std::string	  delay_description =
 			indefinite_delay && profile.delay_mode == PacketDelayMode::send_all_after_delay ? "Send all after"
 			: indefinite_delay && profile.delay_mode == PacketDelayMode::drop_and_send		? "Drop, then send after"
 			: indefinite_delay																? "Delay each by"
@@ -243,7 +243,7 @@ int main(int argc, char* argv[])
 										: profile.delay_mode == PacketDelayMode::drop
 											? "immediately"
 											: logging::format_duration(static_cast<uint64_t>(profile.delay_ms));
-		const std::string filter = profile.filter.value_or(options.global_filter);
+		const std::string filter	  = profile.filter.value_or(options.global_filter);
 		LOG_INFO("  [%zu/%zu] %s", index + 1, options.profiles.size(), profile.name.c_str());
 		LOG_INFO("    action: %s %s", delay_description.c_str(), delay_value.c_str());
 		LOG_INFO("    trigger: %s | key_mode: %s | mode: %s",
@@ -268,10 +268,12 @@ int main(int argc, char* argv[])
 	::SetConsoleCtrlHandler(nullptr, TRUE);
 
 	PacketEngine engine(options);
-	LOG_INFO("Hold a configured profile key to start/stop packet capture, pgup/pgdn to cycle servers, left/right to cycle enforced server, 'q' or backspace to quit.");
+	LOG_INFO(
+		"Hold a configured profile key to start/stop packet capture, pgup/pgdn to cycle servers, left/right to cycle enforced server, 'q' "
+		"or backspace to quit.");
 	engine.start_workers();
-	std::atomic<bool> status_shutdown = false;
-	std::thread		  status_thread([&] {
+	std::atomic<bool>	  status_shutdown = false;
+	std::thread			  status_thread([&] {
 		while (!status_shutdown.load())
 		{
 			std::string status = "(STOPPED)";
@@ -297,12 +299,12 @@ int main(int argc, char* argv[])
 				active_profiles += options.profiles[index].name;
 			}
 			const std::string server_region = engine.current_server_region();
-			const std::string client_region	 = engine.client_region();
+			const std::string client_region = engine.client_region();
 			std::string		  region;
 			if (!server_region.empty() || !client_region.empty())
 				region = (server_region.empty() ? "unknown" : server_region) + "/" + (client_region.empty() ? "unknown" : client_region);
-			std::string server_status =
-				engine.current_server() + (engine.is_authoritative_server() ? " (authoritative)" : "") + (region.empty() ? "" : " | " + region);
+			std::string server_status = engine.current_server() + (engine.is_authoritative_server() ? " (authoritative)" : "") +
+										(region.empty() ? "" : " | " + region);
 			if (engine.is_region_enforcement_enabled())
 			{
 				const std::string re_status = engine.region_enforcement_status();
@@ -314,9 +316,9 @@ int main(int argc, char* argv[])
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		}
 	});
-	std::vector<bool> activation_key_held(options.profiles.size(), false);
+	std::vector<bool>	  activation_key_held(options.profiles.size(), false);
 	std::vector<uint64_t> disable_at(options.profiles.size(), 0);
-	std::vector<bool> pending_activation(options.profiles.size(), false);
+	std::vector<bool>	  pending_activation(options.profiles.size(), false);
 
 	while (true)
 	{
@@ -391,11 +393,11 @@ int main(int argc, char* argv[])
 		auto schedule_teardown = [&](size_t target, bool immediate) {
 			if (!engine.is_running(static_cast<int>(target + 1)))
 				return;
-			const ProfileOptions& target_options = options.profiles[target];
-			const uint64_t enabled_for_ms = engine.profile_running_time_ms(static_cast<int>(target + 1));
-			const uint64_t percentage_wait_ms =
-				(enabled_for_ms / 100) * target_options.disable_wait_percent + (enabled_for_ms % 100) * target_options.disable_wait_percent / 100;
-			const uint64_t wait_ms = target_options.disable_wait_ms + percentage_wait_ms;
+			const ProfileOptions& target_options	 = options.profiles[target];
+			const uint64_t		  enabled_for_ms	 = engine.profile_running_time_ms(static_cast<int>(target + 1));
+			const uint64_t		  percentage_wait_ms = (enabled_for_ms / 100) * target_options.disable_wait_percent +
+													   (enabled_for_ms % 100) * target_options.disable_wait_percent / 100;
+			const uint64_t		  wait_ms			 = target_options.disable_wait_ms + percentage_wait_ms;
 			if (immediate || wait_ms == 0)
 			{
 				disable_at[target] = 0;
