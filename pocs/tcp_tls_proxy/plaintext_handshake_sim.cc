@@ -24,6 +24,48 @@ void print_hex_dump(const std::string_view label, const uint8_t* data, size_t le
     std::cout << std::dec << "\n";
 }
 
+// Common WSA error codes that FormatMessage's system text doesn't always name explicitly.
+const char* wsa_symbolic_name(int code) {
+    switch (code) {
+        case WSAECONNRESET: return "WSAECONNRESET";
+        case WSAECONNREFUSED: return "WSAECONNREFUSED";
+        case WSAECONNABORTED: return "WSAECONNABORTED";
+        case WSAETIMEDOUT: return "WSAETIMEDOUT";
+        case WSAENETUNREACH: return "WSAENETUNREACH";
+        case WSAEHOSTUNREACH: return "WSAEHOSTUNREACH";
+        case WSAEADDRINUSE: return "WSAEADDRINUSE";
+        case WSAEADDRNOTAVAIL: return "WSAEADDRNOTAVAIL";
+        case WSAENOTCONN: return "WSAENOTCONN";
+        case WSAEWOULDBLOCK: return "WSAEWOULDBLOCK";
+        case WSAEINVAL: return "WSAEINVAL";
+        case WSAEACCES: return "WSAEACCES";
+        case WSAEAFNOSUPPORT: return "WSAEAFNOSUPPORT";
+        case WSAENETDOWN: return "WSAENETDOWN";
+        case WSAESHUTDOWN: return "WSAESHUTDOWN";
+        default: return nullptr;
+    }
+}
+
+// Formats a Winsock error code as "<code> (<SYMBOLIC_NAME>: <system message>)".
+std::string wsa_error_string(int code) {
+    char* system_msg = nullptr;
+    DWORD len = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                                nullptr, static_cast<DWORD>(code), MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                                reinterpret_cast<LPSTR>(&system_msg), 0, nullptr);
+    std::string text = "unknown error";
+    if (len > 0 && system_msg != nullptr) {
+        text.assign(system_msg, len);
+        while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) text.pop_back();
+    }
+    if (system_msg != nullptr) LocalFree(system_msg);
+
+    const char* symbolic = wsa_symbolic_name(code);
+    std::string result = std::to_string(code) + " (";
+    if (symbolic != nullptr) result += std::string(symbolic) + ": ";
+    result += text + ")";
+    return result;
+}
+
 struct WinsockScope {
     WSADATA wsa_data{};
     bool initialized = false;
@@ -47,7 +89,7 @@ bool send_exact(SOCKET sock, const uint8_t* buffer, size_t length) {
         int bytes_sent = send(sock, reinterpret_cast<const char*>(buffer + total_sent),
                               static_cast<int>(length - total_sent), 0);
         if (bytes_sent <= 0) {
-            std::cerr << "[ERROR] send failed with socket error: " << WSAGetLastError() << "\n";
+            std::cerr << "[ERROR] send failed with socket error: " << wsa_error_string(WSAGetLastError()) << "\n";
             return false;
         }
         total_sent += static_cast<size_t>(bytes_sent);
@@ -61,7 +103,7 @@ bool recv_exact(SOCKET sock, uint8_t* buffer, size_t length) {
         int bytes_recvd = recv(sock, reinterpret_cast<char*>(buffer + total_recvd),
                               static_cast<int>(length - total_recvd), 0);
         if (bytes_recvd <= 0) {
-            std::cerr << "[ERROR] recv failed or connection closed with error: " << WSAGetLastError() << "\n";
+            std::cerr << "[ERROR] recv failed or connection closed with error: " << wsa_error_string(WSAGetLastError()) << "\n";
             return false;
         }
         total_recvd += static_cast<size_t>(bytes_recvd);
@@ -80,7 +122,7 @@ int run_client(const std::string& host, uint16_t port) {
 
     SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock == INVALID_SOCKET) {
-        std::cerr << "[ERROR] Failed to create socket: " << WSAGetLastError() << "\n";
+        std::cerr << "[ERROR] Failed to create socket: " << wsa_error_string(WSAGetLastError()) << "\n";
         return 1;
     }
 
@@ -97,7 +139,7 @@ int run_client(const std::string& host, uint16_t port) {
     }
 
     if (connect(sock, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr)) == SOCKET_ERROR) {
-        std::cerr << "[ERROR] Connection failed to " << host << ":" << port << " (" << WSAGetLastError() << ")\n";
+        std::cerr << "[ERROR] Connection failed to " << host << ":" << port << " (" << wsa_error_string(WSAGetLastError()) << ")\n";
         closesocket(sock);
         return 1;
     }
@@ -132,7 +174,7 @@ int run_client(const std::string& host, uint16_t port) {
     // Step 3: Send 8-byte TLS Upgrade Request Command (Packet 6)
     // Note: Packet 5 in pcap captures was a TCP-level retransmission/dup-ACK packet,
     // not a separate application message. Sending a second 6-byte null probe causes
-    // the server to reset the connection (WSAECONNRESET 10054).
+    // the server to reset the connection (WSAECONNRESET).
     const uint8_t upgrade_req[8] = {0x0E, 0x01, 0x00, 0x04, 0x02, 0x00, 0x00, 0x00};
     std::cout << "[CLIENT -> SERVER] Sending 8-byte TLS upgrade request command (Packet 6)...\n";
     print_hex_dump("Client TLS Upgrade Command", upgrade_req, sizeof(upgrade_req));
@@ -172,7 +214,7 @@ int run_server(const std::string& host, uint16_t port) {
 
     SOCKET listen_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (listen_sock == INVALID_SOCKET) {
-        std::cerr << "[ERROR] Failed to create listen socket: " << WSAGetLastError() << "\n";
+        std::cerr << "[ERROR] Failed to create listen socket: " << wsa_error_string(WSAGetLastError()) << "\n";
         return 1;
     }
 
@@ -189,13 +231,13 @@ int run_server(const std::string& host, uint16_t port) {
     }
 
     if (bind(listen_sock, reinterpret_cast<sockaddr*>(&bind_addr), sizeof(bind_addr)) == SOCKET_ERROR) {
-        std::cerr << "[ERROR] Bind failed on " << host << ":" << port << " (" << WSAGetLastError() << ")\n";
+        std::cerr << "[ERROR] Bind failed on " << host << ":" << port << " (" << wsa_error_string(WSAGetLastError()) << ")\n";
         closesocket(listen_sock);
         return 1;
     }
 
     if (listen(listen_sock, SOMAXCONN) == SOCKET_ERROR) {
-        std::cerr << "[ERROR] Listen failed (" << WSAGetLastError() << ")\n";
+        std::cerr << "[ERROR] Listen failed (" << wsa_error_string(WSAGetLastError()) << ")\n";
         closesocket(listen_sock);
         return 1;
     }
@@ -206,7 +248,7 @@ int run_server(const std::string& host, uint16_t port) {
     int client_addr_len = sizeof(client_addr);
     SOCKET client_sock = accept(listen_sock, reinterpret_cast<sockaddr*>(&client_addr), &client_addr_len);
     if (client_sock == INVALID_SOCKET) {
-        std::cerr << "[ERROR] Accept failed (" << WSAGetLastError() << ")\n";
+        std::cerr << "[ERROR] Accept failed (" << wsa_error_string(WSAGetLastError()) << ")\n";
         closesocket(listen_sock);
         return 1;
     }
