@@ -237,6 +237,7 @@ int main(int argc, char* argv[])
 			: profile.delay_mode == PacketDelayMode::drop_and_send	   ? "Drop, then send after"
 			: profile.delay_mode == PacketDelayMode::hold_and_send	   ? "Hold, then send"
 			: profile.delay_mode == PacketDelayMode::drop_until_toggle ? "Drop, hold, then send after"
+			: profile.delay_mode == PacketDelayMode::hold_until_deactivation ? "Hold, then send on deactivation"
 			: profile.delay_mode == PacketDelayMode::drop			   ? "Drop packets"
 																	   : "Delay each by";
 		const std::string delay_value = indefinite_delay ? "profile is deactivated"
@@ -319,6 +320,9 @@ int main(int argc, char* argv[])
 	std::vector<bool>	  activation_key_held(options.profiles.size(), false);
 	std::vector<uint64_t> disable_at(options.profiles.size(), 0);
 	std::vector<bool>	  pending_activation(options.profiles.size(), false);
+	std::vector<bool>	  send_key_held(options.profiles.size(), false);
+
+
 
 	while (true)
 	{
@@ -503,10 +507,17 @@ int main(int argc, char* argv[])
 		for (size_t index = 0; index < options.profiles.size(); ++index)
 		{
 			const int profile = static_cast<int>(index + 1);
+			const bool send_key_pressed = options.profiles[index].send_key && is_key_held(*options.profiles[index].send_key) && !send_key_held[index];
 			if (disabled_profiles[index])
 			{
 				activation_key_held[index] = active_profiles[index];
+				send_key_held[index] = options.profiles[index].send_key && is_key_held(*options.profiles[index].send_key);
 				continue;
+			}
+			if (send_key_pressed && engine.is_running(profile))
+			{
+				LOG_DEBUG("Flushing packets for profile %d on send_key", profile);
+				engine.flush_on_demand(profile);
 			}
 			if (options.profiles[index].mode == ProfileActivationMode::hold)
 			{
@@ -526,13 +537,17 @@ int main(int argc, char* argv[])
 			else if (!switch_profiles[index] && active_profiles[index] && shared_group_activated[index])
 			{
 				if (shared_profiles_running[index] && engine.is_running(profile) &&
-					options.profiles[index].delay_mode == PacketDelayMode::drop_until_toggle)
+					(options.profiles[index].delay_mode == PacketDelayMode::drop_until_toggle ||
+					 options.profiles[index].delay_mode == PacketDelayMode::hold_until_deactivation))
 				{
 					LOG_DEBUG("Toggling profile %d", profile);
 					if (engine.toggle(profile))
 					{
 						schedule_teardown(index, false);
-						LOG_DEBUG("Profile %d released and deactivated (drop_until_toggle mode)", profile);
+						LOG_DEBUG("Profile %d released and deactivated (%s mode)",
+								  profile,
+								  options.profiles[index].delay_mode == PacketDelayMode::drop_until_toggle ? "drop_until_toggle"
+																						 : "hold_until_deactivation");
 					}
 				}
 				else if (shared_profiles_running[index] && engine.is_running(profile))
@@ -561,6 +576,7 @@ int main(int argc, char* argv[])
 			if (engine.is_running(profile))
 				disable_targets(index);
 			activation_key_held[index] = active_profiles[index];
+			send_key_held[index] = options.profiles[index].send_key && is_key_held(*options.profiles[index].send_key);
 		}
 	}
 

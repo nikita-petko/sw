@@ -59,6 +59,7 @@ enum class PacketDelayMode
 	drop_and_send,
 	hold_and_send,
 	drop_until_toggle,
+	hold_until_deactivation,
 };
 
 enum class RetransmissionMode
@@ -88,6 +89,7 @@ struct ProfileOptions
 {
 	std::string name;
 	std::vector<int> keys;
+	std::optional<int> send_key;
 	std::vector<std::string> disables;
 	uint32_t disable_wait_ms = 0;
 	uint8_t disable_wait_percent = 0;
@@ -100,6 +102,7 @@ struct ProfileOptions
 	bool ack_restoration = false;
 	int32_t delay_ms = 0;
 	int32_t ratio = 1;
+	int32_t amount = 0;
 	bool ratio_percent = false;
 	bool ratio_configured = false;
 	RatioSelection ratio_selection = RatioSelection::first;
@@ -156,6 +159,7 @@ public:
 	void setup(int profile);
 	void teardown(int profile);
 	bool toggle(int profile);
+	void flush_on_demand(int profile);
 	void teardown();
 	bool is_running() const;
 	bool is_running(int profile) const;

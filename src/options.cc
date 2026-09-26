@@ -143,6 +143,8 @@ std::optional<PacketDelayMode> parse_delay_mode(const std::string& value)
 		return PacketDelayMode::hold_and_send;
 	if (value == "drop_until_toggle")
 		return PacketDelayMode::drop_until_toggle;
+	if (value == "hold_until_deactivation")
+		return PacketDelayMode::hold_until_deactivation;
 	return std::nullopt;
 }
 
@@ -611,6 +613,19 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				return false;
 			continue;
 		}
+		if (key == "send_key" && profile)
+		{
+			subsection.clear();
+			subsection_indent = -1;
+			ProfileOptions parsed;
+			if (!add_keys(value, parsed, path, line_number) || parsed.keys.size() != 1)
+			{
+				LOG_ERROR("send_key in %s at line %d must contain exactly one key", path, line_number);
+				return false;
+			}
+			profile->send_key = parsed.keys.front();
+			continue;
+		}
 		if (indent == 0 && key == "global_filter")
 		{
 			options.global_filter = unquote(value);
@@ -694,8 +709,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			{
 				LOG_ERROR(
 					"Invalid delay_mode in %s at line %d: expected from_timestamp, send_all_after_delay, ratio, drop, drop_and_send, "
-					"hold_and_send, or "
-					"drop_until_toggle",
+					"hold_and_send, drop_until_toggle, or hold_until_deactivation",
 					path,
 					line_number);
 				return false;
@@ -809,6 +823,23 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				return false;
 			}
 		}
+		else if (key == "amount")
+		{
+			try
+			{
+				size_t consumed = 0;
+				const std::string amount_value = unquote(value);
+				const long parsed = std::stol(amount_value, &consumed);
+				if (consumed != amount_value.size() || parsed < 0 || parsed > (std::numeric_limits<int32_t>::max)())
+					throw std::invalid_argument("invalid amount");
+				profile->amount = static_cast<int32_t>(parsed);
+			}
+			catch (...)
+			{
+				LOG_ERROR("Invalid amount in %s at line %d", path, line_number);
+				return false;
+			}
+		}
 		else if (key == "ratio_selection")
 		{
 			const auto selection = parse_ratio_selection(unquote(value));
@@ -850,6 +881,11 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			LOG_ERROR("Profile '%s' requires toggle mode for drop_until_toggle", item.name.c_str());
 			return false;
 		}
+		if (item.delay_mode == PacketDelayMode::hold_until_deactivation && item.mode != ProfileActivationMode::toggle)
+		{
+			LOG_ERROR("Profile '%s' requires toggle mode for hold_until_deactivation", item.name.c_str());
+			return false;
+		}
 		for (const std::string& disabled_name : item.disables)
 		{
 			if (disabled_name == "*")
@@ -865,6 +901,20 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			if (target == options.profiles.end())
 			{
 				LOG_ERROR("Profile '%s' disables unknown profile '%s'", item.name.c_str(), disabled_name.c_str());
+				return false;
+			}
+		}
+	}
+	for (size_t index = 0; index < options.profiles.size(); ++index)
+	{
+		if (!options.profiles[index].send_key)
+			continue;
+		for (size_t target = 0; target < options.profiles.size(); ++target)
+		{
+			const auto& target_keys = options.profiles[target].keys;
+			if (std::find(target_keys.begin(), target_keys.end(), *options.profiles[index].send_key) != target_keys.end())
+			{
+				LOG_ERROR("Profile '%s' send_key cannot be an activation key", options.profiles[index].name.c_str());
 				return false;
 			}
 		}

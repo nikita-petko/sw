@@ -174,6 +174,17 @@
           ],
           "description": "List or comma-separated representation of activation keys."
         },
+        "send_key": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "description": "Optional key that releases the configured amount of deferred packets without deactivating the profile. Cannot overlap any profile activation key."
+        },
         "key_mode": {
           "type": "string",
           "enum": [
@@ -233,7 +244,8 @@
             "drop",
             "drop_and_send",
             "hold_and_send",
-            "drop_until_toggle"
+            "drop_until_toggle",
+            "hold_until_deactivation"
           ],
           "default": "from_timestamp",
           "description": "Strategy for packet delaying, dropping, or reinjection."
@@ -283,6 +295,12 @@
             }
           ],
           "description": "Packet ratio expressed as a count (e.g., 3) or percentage (e.g., '50%'). Required for 'ratio', 'drop_and_send', and 'hold_and_send' delay modes. 'hold_and_send' requires a count."
+        },
+        "amount": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "For hold_until_deactivation, the number of deferred packets released on deactivation; 0 releases all deferred packets."
         },
         "ratio_selection": {
           "type": "string",

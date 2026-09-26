@@ -1523,6 +1523,19 @@ bool PacketEngine::toggle(int profile)
 	return release;
 }
 
+void PacketEngine::flush_on_demand(int profile)
+{
+	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
+	if (profile < 1 || static_cast<size_t>(profile) > options_.profiles.size())
+		return;
+	const std::shared_ptr<Session>& session = state_->active_sessions[profile - 1];
+	if (!session)
+		return;
+	std::lock_guard<std::mutex> packet_lock(session->packet_mutex);
+	session->mode->flush_on_demand(session->delayed_packets);
+	session->packet_changed.notify_all();
+}
+
 void PacketEngine::teardown(int profile)
 {
 	LOG_DEBUG("profile #%d teardown: requested", profile);

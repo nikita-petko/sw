@@ -308,6 +308,53 @@ duration and the release fraction can be tuned and triggered independently of
 the initial capture delay, rather than being coupled to a single fixed delay
 value as a naive implementation would require.
 
+### 9.1. Positional desync and reconciliation
+
+For clarity, this document uses **client-predicted position** for the position
+the local client renders for its player, and **server-replicated position** for
+the position remote observers render from server updates. These are observable
+views of state, not necessarily the authoritative physical position used by
+the game server. Avoid the terms "actual" and "apparent" without naming whose
+view is meant.
+
+**Positional desync** is a temporary divergence between those views, commonly
+after delayed movement updates. **Forced reconciliation** is an observed snap
+or correction when a newer authoritative update or a movement-state transition
+causes the local or remote view to converge. A correction is distinct from
+continuous desync: a client can appear to snap into alignment even though the
+underlying server state was not changed by the snap itself. The exact triggers
+and which view is corrected are implementation-dependent and have not been
+verified for this game.
+
+The reported observation that a large position divergence (approximately
+23-25 metres) coincides with damage failing to register is unverified. Treat it
+as a hypothesis, not a confirmed immunity threshold: missed damage can also
+result from hit validation, stale state, packet loss, or ordinary replication
+delay. A related possibility is that a target appears frozen at a stale
+position in one client's view while the server-side or remote-observer position
+has advanced; shots aimed at the stale rendered position may then fail hit
+validation. This is distinct from a confirmed damage-immunity threshold and
+does not establish that distance alone caused the miss. Establishing whether
+divergence predicts rejected hits requires controlled, authorized testing with
+synchronized client/server-side telemetry; record movement impairment
+duration, time to visual convergence, position error, and hit-validation
+outcome as separate measurements. Vary one factor at a time and do not infer
+server authority or a universal threshold from visual observation alone.
+
+The duration of the impairment and the duration of any resulting desync need
+not be the same. In theory, a position mismatch could persist well after the
+network impairment ends if the server does not reconcile it and the player
+remains outside the relevant correction range; an hours-long lag interval is
+an extreme hypothetical, not an observed or verified result. The reported
+23-25 metre value should not be treated as a persistence rule, and server-side
+correction, movement validation, or connection timeouts may end the mismatch
+earlier. Measure time-to-convergence independently from impairment duration.
+
+For defensive monitoring, correlate correction events with position error,
+movement-mode changes, packet-arrival gaps, and hit-validation failures. Apply
+server-side displacement bounds and resolve damage against server-owned
+position history rather than trusting either client's rendered position.
+
 ## 10. Ethical and legal scope
 
 This document analyzes a historical, publicly discussed exploit for

@@ -67,6 +67,7 @@ public:
 	}
 	void		 prepare_packet_for_send(BYTE* packet, UINT length, const WINDIVERT_ADDRESS* address);
 	virtual bool toggle(PacketQueue&) { return false; }
+	virtual void flush_on_demand(PacketQueue&) {}
 	virtual void flush(PacketQueue& packets, std::vector<PacketNode*>& pending_packets) = 0;
 
 	virtual void capture_packet(const BYTE*				 packet,

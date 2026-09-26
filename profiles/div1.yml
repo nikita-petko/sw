@@ -45,24 +45,6 @@ profiles:
       forward: true
       client_address_enforcement: both
 
-  - name: "Test"
-    keys:
-      - d
-    key_mode: oneof
-    mode: toggle
-    disables: 
-      - "*"
-    filter: "tcp.Psh and tcp.SrcPort == 55000"
-    retransmission_mode: none
-    subsequent_packet_hold_mode: seq_ack
-    delay_mode: hold_and_send
-    ratio: 2
-    windivert_options:
-      forward: true
-      server_direction: source
-      client_address_enforcement: destination
-
-
   - name: "Long (Recv)"
     keys:
       - z
@@ -76,6 +58,22 @@ profiles:
     delay_mode: ratio
     ratio: 10%
     delay_ms: 18000
+    windivert_options:
+      forward: true
+      server_direction: source
+      client_address_enforcement: destination
+      
+  - name: "Long (Recv1)"
+    keys:
+      - v
+    key_mode: oneof
+    mode: toggle
+    disables: 
+      - "RPM"
+    filter: "tcp.Psh and tcp.SrcPort == 55000"
+    retransmission_mode: none
+    delay_mode: from_timestamp
+    delay: 0
     windivert_options:
       forward: true
       server_direction: source
@@ -116,6 +114,26 @@ profiles:
     delay_mode: ratio
     ratio: 10%
     delay_ms: 18000
+    windivert_options:
+      forward: true
+      server_direction: destination
+      client_address_enforcement: source
+
+  - name: "Long (C Send)"
+    keys:
+      - c
+    key_mode: oneof
+    mode: toggle
+    retransmission_mode: none
+    ack_restoration: false
+    disables: 
+      - "RPM"
+      - "Long (Send - with delay)"
+    respect_disable_wait: false
+    filter: "tcp.Psh and tcp.DstPort == 55000"
+    delay_mode: ratio
+    ratio: 2
+    delay_ms: 8000
     windivert_options:
       forward: true
       server_direction: destination
