@@ -43,6 +43,8 @@ std::optional<ProfileActivationMode> parse_activation_mode(const std::string& va
 		return ProfileActivationMode::toggle;
 	if (value == "hold")
 		return ProfileActivationMode::hold;
+	if (value == "period")
+		return ProfileActivationMode::period;
 	return std::nullopt;
 }
 
@@ -757,7 +759,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			const auto mode = parse_activation_mode(unquote(value));
 			if (!mode)
 			{
-				LOG_ERROR("Invalid profile mode in %s at line %d: expected toggle or hold", path, line_number);
+				LOG_ERROR("Invalid profile mode in %s at line %d: expected toggle, hold, or period", path, line_number);
 				return false;
 			}
 			profile->mode = *mode;
@@ -833,6 +835,25 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			catch (...)
 			{
 				LOG_ERROR("Invalid disable_wait_ms in %s at line %d", path, line_number);
+				return false;
+			}
+		}
+		else if (key == "activation_period")
+		{
+			try
+			{
+				const std::string period_value = unquote(value);
+				if (period_value.empty() || period_value.front() == '-')
+					throw std::invalid_argument("invalid activation period");
+				size_t consumed = 0;
+				const unsigned long period_ms = std::stoul(period_value, &consumed);
+				if (consumed != period_value.size() || period_ms == 0 || period_ms > (std::numeric_limits<uint32_t>::max)())
+					throw std::invalid_argument("invalid activation period");
+				profile->activation_period_ms = static_cast<uint32_t>(period_ms);
+			}
+			catch (...)
+			{
+				LOG_ERROR("Invalid activation_period in %s at line %d: expected positive milliseconds", path, line_number);
 				return false;
 			}
 		}
@@ -918,6 +939,16 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		if (item.name.empty() || item.keys.empty())
 		{
 			LOG_ERROR("Each profile in %s requires a name and key(s)", path);
+			return false;
+		}
+		if (item.mode == ProfileActivationMode::period && item.activation_period_ms == 0)
+		{
+			LOG_ERROR("Profile '%s' requires a positive activation_period in period mode", item.name.c_str());
+			return false;
+		}
+		if (item.mode != ProfileActivationMode::period && item.activation_period_ms != 0)
+		{
+			LOG_ERROR("Profile '%s' can only set activation_period when mode is period", item.name.c_str());
 			return false;
 		}
 		if ((item.delay_mode == PacketDelayMode::ratio || item.delay_mode == PacketDelayMode::drop_and_send) &&

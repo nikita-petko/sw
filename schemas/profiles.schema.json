@@ -231,10 +231,17 @@
           "type": "string",
           "enum": [
             "toggle",
-            "hold"
+            "hold",
+            "period"
           ],
           "default": "toggle",
-          "description": "Activation mode ('toggle' switches state on key press; 'hold' remains active while held)."
+          "description": "Activation mode ('toggle' switches state on key press; 'hold' remains active while held; 'period' automatically deactivates after activation_period)."
+        },
+        "activation_period": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295,
+          "description": "Activation duration in milliseconds for period mode."
         },
         "disables": {
           "oneOf": [
@@ -413,6 +420,32 @@
         }
       },
       "allOf": [
+        {
+          "if": {
+          "properties": {
+            "mode": {
+            "const": "period"
+            }
+          },
+          "required": ["mode"]
+          },
+          "then": {
+          "required": ["activation_period"]
+          }
+        },
+        {
+          "if": {
+          "required": ["activation_period"]
+          },
+          "then": {
+          "required": ["mode"],
+          "properties": {
+            "mode": {
+            "const": "period"
+            }
+          }
+          }
+        },
         {
           "if": {
             "properties": {

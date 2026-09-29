@@ -44,6 +44,7 @@ enum class ProfileActivationMode
 {
 	toggle,
 	hold,
+	period,
 };
 enum class ProfileKeyMode
 {
@@ -96,6 +97,7 @@ struct ProfileOptions
 	bool respect_disable_wait = true;
 	ProfileKeyMode key_mode = ProfileKeyMode::combination;
 	ProfileActivationMode mode = ProfileActivationMode::toggle;
+	uint32_t activation_period_ms = 0;
 	PacketDelayMode delay_mode = PacketDelayMode::from_timestamp;
 	RetransmissionMode retransmission_mode = RetransmissionMode::none;
 	SubsequentPacketHoldMode subsequent_packet_hold_mode = SubsequentPacketHoldMode::none;

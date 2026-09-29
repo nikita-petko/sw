@@ -1557,7 +1557,9 @@ void PacketEngine::setup(int profile)
 	LOG_INFO("Lag switch enabled, profile = %s (%s, mode = %s). %s",
 			 profile_options.name.c_str(),
 			 format_keys(profile_options).c_str(),
-			 profile_options.mode == ProfileActivationMode::hold ? "hold" : "toggle",
+			 profile_options.mode == ProfileActivationMode::hold ? "hold"
+			 : profile_options.mode == ProfileActivationMode::period ? "period"
+																								 : "toggle",
 			 profile_options.mode == ProfileActivationMode::hold ? "Release key(s) to turn off" : "Press key(s) again to turn off");
 }
 

@@ -256,7 +256,8 @@ automatically reconfigured whenever a discovered address changes.
 | `keys` | One of `key` or `keys` | A list of keys that must all be held, for example `keys: [ctrl, shift]`. A block list is also supported. |
 | `send_key` | No | Optional key that releases the configured `amount` without deactivating the profile. It cannot overlap any profile activation key. |
 | `key_mode` | No | `oneof` activates when any configured key is held; `combination` activates when all configured keys are held. Defaults to `combination`. |
-| `mode` | No | `toggle` or `hold`; defaults to `toggle`. |
+| `mode` | No | `toggle`, `hold`, or `period`; defaults to `toggle`. `period` behaves like `toggle` but automatically deactivates after `activation_period`. |
+| `activation_period` | Required for `period` | Positive activation duration in milliseconds. At expiry the profile deactivates and flushes queued packets as it does on a manual toggle-off. |
 | `disables` | No | A profile name, `*`, or a list of either, to keep disabled while this profile is active. `*` disables every other profile. Named targets must be configured profiles and cannot include this profile. |
 | `disable_wait_ms` | No | Time in milliseconds this profile remains active after it is disabled. Defaults to `0`. |
 | `disable_wait_percent` | No | Additional wait equal to this percentage of the profile's current enabled time, from `0` to `100`. This is added to `disable_wait_ms`. Defaults to `0`. |

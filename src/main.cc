@@ -71,7 +71,7 @@ std::vector<bool> find_active_profiles(const PacketEngineOptions& options)
 
 const char* format_mode(ProfileActivationMode mode)
 {
-	return mode == ProfileActivationMode::hold ? "hold" : "toggle";
+	return mode == ProfileActivationMode::hold ? "hold" : mode == ProfileActivationMode::period ? "period" : "toggle";
 }
 
 const char* format_key_mode(ProfileKeyMode mode)
@@ -298,6 +298,14 @@ int main(int argc, char* argv[])
 				if (!active_profiles.empty())
 					active_profiles += ", ";
 				active_profiles += options.profiles[index].name;
+				if (options.profiles[index].mode == ProfileActivationMode::period)
+				{
+					const uint64_t elapsed_ms = engine.profile_running_time_ms(static_cast<int>(index + 1));
+					const uint64_t remaining_ms = elapsed_ms >= options.profiles[index].activation_period_ms
+												  ? 0
+												  : options.profiles[index].activation_period_ms - elapsed_ms;
+					active_profiles += " (" + logging::format_duration(remaining_ms) + " left)";
+				}
 			}
 			const std::string server_region = engine.current_server_region();
 			const std::string client_region = engine.client_region();
@@ -321,6 +329,7 @@ int main(int argc, char* argv[])
 	});
 	std::vector<bool>	  activation_key_held(options.profiles.size(), false);
 	std::vector<uint64_t> disable_at(options.profiles.size(), 0);
+	std::vector<uint64_t> period_deactivate_at(options.profiles.size(), 0);
 	std::vector<bool>	  pending_activation(options.profiles.size(), false);
 	std::vector<bool>	  send_key_held(options.profiles.size(), false);
 
@@ -397,6 +406,7 @@ int main(int argc, char* argv[])
 							 options.profiles[target].name) != options.profiles[source].disables.end();
 		};
 		auto schedule_teardown = [&](size_t target, bool immediate) {
+			period_deactivate_at[target] = 0;
 			if (!engine.is_running(static_cast<int>(target + 1)))
 				return;
 			const ProfileOptions& target_options	 = options.profiles[target];
@@ -453,8 +463,16 @@ int main(int argc, char* argv[])
 			}
 			pending_activation[index] = false;
 			engine.setup(static_cast<int>(index + 1));
+			if (engine.is_running(static_cast<int>(index + 1)) && options.profiles[index].mode == ProfileActivationMode::period)
+				period_deactivate_at[index] = GetTickCount64() + options.profiles[index].activation_period_ms;
 		};
 		const uint64_t now = GetTickCount64();
+		for (size_t index = 0; index < options.profiles.size(); ++index)
+			if (period_deactivate_at[index] != 0 && now >= period_deactivate_at[index])
+			{
+				LOG_INFO("Profile %zu reached its activation period", index + 1);
+				schedule_teardown(index, false);
+			}
 		for (size_t index = 0; index < options.profiles.size(); ++index)
 			if (disable_at[index] != 0 && now >= disable_at[index])
 				schedule_teardown(index, true);
