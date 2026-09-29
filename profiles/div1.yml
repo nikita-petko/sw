@@ -37,6 +37,7 @@ features:
 
   forwarded_address_discovery:
     enabled: false
+    port: 55000
     interval: 5000
     inbound: 5 # Ethernet interface index (Xbox)
     outbound: 67 # OpenVPN interface index
@@ -139,7 +140,7 @@ profiles:
       - c
     key_mode: oneof
     mode: period
-    activation_period: 3000
+    activation_period: 2500
     filter: "tcp.Psh and tcp.SrcPort == 55000"
     retransmission_mode: none
     delay_mode: from_timestamp

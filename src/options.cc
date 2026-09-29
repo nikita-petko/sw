@@ -483,6 +483,24 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 						return false;
 					}
 				}
+				if (key == "port")
+				{
+					try
+					{
+						const std::string	item	 = unquote(trim(value));
+						size_t				consumed = 0;
+						const unsigned long port	 = std::stoul(item, &consumed);
+						if (consumed != item.size() || port == 0 || port > (std::numeric_limits<uint16_t>::max)())
+							throw std::invalid_argument("invalid port");
+						options.features.forwarded_address_discovery.port = static_cast<uint16_t>(port);
+						continue;
+					}
+					catch (...)
+					{
+						LOG_ERROR("Invalid forwarded_address_discovery port in %s at line %d", path, line_number);
+						return false;
+					}
+				}
 			}
 			if (subsection == "region_enforcement" && indent > subsection_indent)
 			{
@@ -1032,6 +1050,11 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		LOG_ERROR("Feature forwarded_address_discovery requires inbound and outbound to be different interfaces in %s", path);
 		return false;
 	}
+	if (options.features.forwarded_address_discovery.enabled && options.features.forwarded_address_discovery.port == 0)
+	{
+		LOG_ERROR("Feature forwarded_address_discovery is enabled but port is missing or invalid in %s", path);
+		return false;
+	}
 	if (options.features.pcap_files.enabled && options.features.pcap_files.enabled_for.empty())
 	{
 		LOG_ERROR("Feature pcap_files is enabled but enabled_for is missing or empty in %s", path);
@@ -1091,6 +1114,22 @@ bool validate_filters(const char* path, const PacketEngineOptions& options)
 						  error ? error : "unknown error");
 				return false;
 			}
+		}
+	}
+	if (options.features.forwarded_address_discovery.enabled && options.features.forwarded_address_discovery.port != 0)
+	{
+		const uint16_t	   port		   = options.features.forwarded_address_discovery.port;
+		const std::string  port_filter = "tcp.DstPort == " + std::to_string(port) + " or tcp.SrcPort == " + std::to_string(port) +
+										 " or udp.DstPort == " + std::to_string(port) + " or udp.SrcPort == " + std::to_string(port);
+		const std::string filter = "outbound and (ifIdx == " + std::to_string(*options.features.forwarded_address_discovery.inbound_if_idx) +
+								   " or ifIdx == " + std::to_string(*options.features.forwarded_address_discovery.outbound_if_idx) +
+								   ") and (" + port_filter + ")";
+		const char* error		   = nullptr;
+		UINT		error_position = 0;
+		if (!WinDivertHelperCompileFilter(filter.c_str(), WINDIVERT_LAYER_NETWORK, nullptr, 0, &error, &error_position))
+		{
+			LOG_ERROR("Invalid filter for forwarded address discovery: %s", error ? error : "unknown error");
+			return false;
 		}
 	}
 	for (const ProfileOptions& profile : options.profiles)

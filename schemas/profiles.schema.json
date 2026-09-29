@@ -124,6 +124,12 @@
               "minimum": 0,
               "description": "Interface index of the shared/internet-facing interface (e.g. Wi-Fi, Ethernet, or VPN with Internet Connection Sharing enabled). Used to discover client_source_address."
             },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "description": "Port to observe traffic on, the same way servers.discovery_port scopes server discovery. Excludes unrelated interface traffic such as broadcasts."
+            },
             "interval": {
               "type": "integer",
               "minimum": 1,
@@ -134,7 +140,8 @@
           "required": [
             "enabled",
             "inbound",
-            "outbound"
+            "outbound",
+            "port"
           ],
           "additionalProperties": false
         }

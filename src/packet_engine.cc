@@ -1773,8 +1773,11 @@ void PacketEngine::start_workers()
 	{
 		const uint32_t	   inbound_if_idx  = *options_.features.forwarded_address_discovery.inbound_if_idx;
 		const uint32_t	   outbound_if_idx = *options_.features.forwarded_address_discovery.outbound_if_idx;
-		const std::string filter =
-			"outbound and (ifIdx == " + std::to_string(inbound_if_idx) + " or ifIdx == " + std::to_string(outbound_if_idx) + ")";
+		const uint16_t	   port			   = options_.features.forwarded_address_discovery.port;
+		const std::string  port_filter	   = "tcp.DstPort == " + std::to_string(port) + " or tcp.SrcPort == " + std::to_string(port) +
+										 " or udp.DstPort == " + std::to_string(port) + " or udp.SrcPort == " + std::to_string(port);
+		const std::string filter = "outbound and (ifIdx == " + std::to_string(inbound_if_idx) + " or ifIdx == " +
+								   std::to_string(outbound_if_idx) + ") and (" + port_filter + ")";
 		LOG_DEBUG("Forwarded address discovery setup: opening filter '%s'", filter.c_str());
 		// a dedicated priority avoids losing packets to other priority-0 handles (server discovery, profiles) with overlapping filters
 		state_->fad_handle = WinDivertOpen(filter.c_str(), WINDIVERT_LAYER_NETWORK, 1000, WINDIVERT_FLAG_SNIFF);

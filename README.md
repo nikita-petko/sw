@@ -221,10 +221,11 @@ interfaces to keep `client_source_address` and `client_destination_address`
 up to date automatically, overriding `--client-source-address` and
 `--client-destination-address` while addresses are being discovered.
 
-Like server discovery, each interface's addresses are tallied over a
-recurring window, and the most frequently observed address per interface is
-selected at the end of each window. This weeds out one-off addresses such as
-broadcasts that would otherwise be mistaken for the client's address.
+Like server discovery, each interface's traffic is scoped to a configured port
+and tallied over a recurring window, with the most frequently observed address
+per interface selected at the end of each window. Scoping to the actual
+game/server port (the same way server discovery does) keeps unrelated traffic
+such as broadcasts from being mistaken for the client's address.
 
 ```yaml
 features:
@@ -232,6 +233,7 @@ features:
     enabled: true
     inbound: 12
     outbound: 21
+    port: 55000
     interval: 5000
 ```
 
@@ -240,6 +242,7 @@ features:
 | `enabled` | No | Enables forwarded address discovery. Defaults to `false`. |
 | `inbound` | Yes when enabled | Interface index of the interface DeviceA (the client) is directly connected to. Used to discover `client_destination_address`. |
 | `outbound` | Yes when enabled | Interface index of the shared interface with Internet Connection Sharing enabled (Wi-Fi, Ethernet, or VPN). Used to discover `client_source_address`. |
+| `port` | Yes when enabled | Port (1-65535) to observe TCP and UDP traffic on, scoping discovery to the actual game/server traffic. |
 | `interval` | No | Discovery window length in milliseconds. Defaults to `5000`. |
 
 Interface indexes can be found with `Get-NetAdapter` in PowerShell (the

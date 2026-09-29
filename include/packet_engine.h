@@ -130,6 +130,7 @@ struct ForwardedAddressDiscoveryOptions
 	bool enabled = false;
 	std::optional<uint32_t> inbound_if_idx;
 	std::optional<uint32_t> outbound_if_idx;
+	uint16_t port = 0;
 	uint64_t window_ms = 5000;
 };
 
