@@ -34,9 +34,20 @@ lag duration:
 This was true for the observations summarized so far. "Always shorter" should
 therefore be read as a provisional description of that sample, not a confirmed
 rule for every lag duration, network condition, movement pattern, or server
-state. No specific ratio or causal mechanism has been established. A future
-trial with `T_desync >= T_lag` would disconfirm the literal always-shorter
-claim.
+state. The reported estimates are:
+
+| Lag duration (`T_lag`) | Desync duration (`T_desync`) | Approximate ratio |
+| --- | --- | --- |
+| 5 s | 4 s | 0.80 |
+| 10 s | 8 s | 0.80 |
+| 20 s | 16 s | 0.80 |
+| 30 s | 24 s | 0.80 |
+| 60 s | 48-50 s | 0.80-0.83 |
+
+These observations suggest a ratio near 0.8 over the tested durations, with
+the 60-second result reported as a range. They do not establish a fixed ratio
+or causal mechanism. A future trial with `T_desync >= T_lag` would disconfirm
+the literal always-shorter claim.
 
 ## Cascading interval hypothesis
 
