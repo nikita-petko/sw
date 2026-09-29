@@ -209,6 +209,44 @@ features:
 | `output_dir` | No | Destination directory. Defaults to `pcap_files` beneath the current working directory. |
 | `enabled_for` | Yes when enabled | `"*"` for every profile, or a non-empty list of configured profile names. |
 
+Forwarded address discovery dynamically finds the client addresses used to
+filter packets when lagsw runs on a PC that shares its internet connection
+with a client device (for example, DeviceA is hard-wired to the PC, and the
+PC's Wi-Fi, Ethernet, or VPN interface has Windows Internet Connection
+Sharing enabled). Packets originating from the client are translated by
+Windows ICS as they leave the shared interface, so they arrive twice: once on
+the client's own interface with the client's real address, and once on the
+shared interface with the PC's address. This feature observes both
+interfaces to keep `client_source_address` and `client_destination_address`
+up to date automatically, overriding `--client-source-address` and
+`--client-destination-address` while addresses are being discovered.
+
+Like server discovery, each interface's addresses are tallied over a
+recurring window, and the most frequently observed address per interface is
+selected at the end of each window. This weeds out one-off addresses such as
+broadcasts that would otherwise be mistaken for the client's address.
+
+```yaml
+features:
+  forwarded_address_discovery:
+    enabled: true
+    inbound: 12
+    outbound: 21
+    interval: 5000
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `enabled` | No | Enables forwarded address discovery. Defaults to `false`. |
+| `inbound` | Yes when enabled | Interface index of the interface DeviceA (the client) is directly connected to. Used to discover `client_destination_address`. |
+| `outbound` | Yes when enabled | Interface index of the shared interface with Internet Connection Sharing enabled (Wi-Fi, Ethernet, or VPN). Used to discover `client_source_address`. |
+| `interval` | No | Discovery window length in milliseconds. Defaults to `5000`. |
+
+Interface indexes can be found with `Get-NetAdapter` in PowerShell (the
+`ifIndex` column) or `netsh interface ipv4 show interfaces`. `inbound` and
+`outbound` must reference different interfaces. Active profiles are
+automatically reconfigured whenever a discovered address changes.
+
 ### Profile fields
 
 | Field | Required | Description |

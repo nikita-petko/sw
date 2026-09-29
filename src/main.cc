@@ -313,6 +313,8 @@ int main(int argc, char* argv[])
 				if (!re_status.empty())
 					server_status += " (" + re_status + ")";
 			}
+			if (engine.is_forwarded_address_discovery_enabled())
+				server_status += " | fad: " + engine.forwarded_address_discovery_status();
 			logging::set_status(status, server_status + (active_profiles.empty() ? "" : " | " + active_profiles));
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		}

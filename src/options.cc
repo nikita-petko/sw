@@ -349,6 +349,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 	options.features.region_enforcement.enabled	   = false;
 	options.features.region_enforcement.probe_port = 0;
 	options.features.pcap_files					   = {};
+	options.features.forwarded_address_discovery	   = {};
 	std::string		line;
 	ProfileOptions* profile = nullptr;
 	std::string		section;
@@ -421,6 +422,65 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				subsection_indent	   = indent;
 				pcap_files_base_indent = indent;
 				continue;
+			}
+			if (key == "forwarded_address_discovery" && value.empty())
+			{
+				subsection		  = "forwarded_address_discovery";
+				subsection_indent = indent;
+				continue;
+			}
+			if (subsection == "forwarded_address_discovery" && indent > subsection_indent)
+			{
+				if (key == "enabled")
+				{
+					const auto parsed = parse_bool(unquote(value));
+					if (!parsed)
+					{
+						LOG_ERROR("Invalid boolean in %s at line %d", path, line_number);
+						return false;
+					}
+					options.features.forwarded_address_discovery.enabled = *parsed;
+					continue;
+				}
+				if (key == "inbound" || key == "outbound")
+				{
+					try
+					{
+						const std::string	item	 = unquote(trim(value));
+						size_t				consumed = 0;
+						const unsigned long if_idx	 = std::stoul(item, &consumed);
+						if (consumed != item.size() || if_idx > (std::numeric_limits<uint32_t>::max)())
+							throw std::invalid_argument("invalid interface index");
+						if (key == "inbound")
+							options.features.forwarded_address_discovery.inbound_if_idx = static_cast<uint32_t>(if_idx);
+						else
+							options.features.forwarded_address_discovery.outbound_if_idx = static_cast<uint32_t>(if_idx);
+						continue;
+					}
+					catch (...)
+					{
+						LOG_ERROR("Invalid %s interface index in %s at line %d", key.c_str(), path, line_number);
+						return false;
+					}
+				}
+				if (key == "interval")
+				{
+					try
+					{
+						const std::string		 item	  = unquote(trim(value));
+						size_t					 consumed = 0;
+						const unsigned long long interval = std::stoull(item, &consumed);
+						if (consumed != item.size() || interval == 0)
+							throw std::invalid_argument("invalid interval");
+						options.features.forwarded_address_discovery.window_ms = interval;
+						continue;
+					}
+					catch (...)
+					{
+						LOG_ERROR("Invalid forwarded_address_discovery interval in %s at line %d", path, line_number);
+						return false;
+					}
+				}
 			}
 			if (subsection == "region_enforcement" && indent > subsection_indent)
 			{
@@ -927,6 +987,18 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 	if (options.features.region_enforcement.enabled && options.features.region_enforcement.probe_port == 0)
 	{
 		LOG_ERROR("Feature region_enforcement is enabled but probe_port is missing or invalid in %s", path);
+		return false;
+	}
+	if (options.features.forwarded_address_discovery.enabled &&
+		(!options.features.forwarded_address_discovery.inbound_if_idx || !options.features.forwarded_address_discovery.outbound_if_idx))
+	{
+		LOG_ERROR("Feature forwarded_address_discovery is enabled but inbound and/or outbound is missing in %s", path);
+		return false;
+	}
+	if (options.features.forwarded_address_discovery.enabled &&
+		options.features.forwarded_address_discovery.inbound_if_idx == options.features.forwarded_address_discovery.outbound_if_idx)
+	{
+		LOG_ERROR("Feature forwarded_address_discovery requires inbound and outbound to be different interfaces in %s", path);
 		return false;
 	}
 	if (options.features.pcap_files.enabled && options.features.pcap_files.enabled_for.empty())

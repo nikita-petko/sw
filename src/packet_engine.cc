@@ -714,6 +714,12 @@ struct PacketEngine::State
 	uint64_t						next_check_time	 = 0;
 	std::unordered_set<std::string> probed_addresses_in_window;
 
+	HANDLE							fad_handle = INVALID_HANDLE_VALUE;
+	std::thread						fad_thread;
+	mutable std::mutex				fad_mutex;
+	std::string						fad_client_source_address;
+	std::string						fad_client_destination_address;
+
 	struct DelayedEnforcementPacket
 	{
 		std::vector<BYTE> data;
@@ -791,6 +797,44 @@ bool PacketEngine::is_authoritative_server() const
 bool PacketEngine::is_region_enforcement_enabled() const
 {
 	return options_.features.region_enforcement.enabled;
+}
+
+bool PacketEngine::is_forwarded_address_discovery_enabled() const
+{
+	return options_.features.forwarded_address_discovery.enabled;
+}
+
+std::string PacketEngine::forwarded_address_discovery_status() const
+{
+	if (!options_.features.forwarded_address_discovery.enabled)
+		return {};
+
+	std::lock_guard<std::mutex> lock(state_->fad_mutex);
+	const std::string			 source		 = state_->fad_client_source_address.empty() ? "unknown" : state_->fad_client_source_address;
+	const std::string			 destination = state_->fad_client_destination_address.empty() ? "unknown" : state_->fad_client_destination_address;
+	return "src: " + source + ", dst: " + destination;
+}
+
+std::optional<std::string> PacketEngine::effective_client_source_address() const
+{
+	if (options_.features.forwarded_address_discovery.enabled)
+	{
+		std::lock_guard<std::mutex> lock(state_->fad_mutex);
+		if (!state_->fad_client_source_address.empty())
+			return state_->fad_client_source_address;
+	}
+	return options_.client_source_address;
+}
+
+std::optional<std::string> PacketEngine::effective_client_destination_address() const
+{
+	if (options_.features.forwarded_address_discovery.enabled)
+	{
+		std::lock_guard<std::mutex> lock(state_->fad_mutex);
+		if (!state_->fad_client_destination_address.empty())
+			return state_->fad_client_destination_address;
+	}
+	return options_.client_destination_address;
 }
 
 std::string PacketEngine::region_enforcement_status() const
@@ -880,17 +924,19 @@ std::string PacketEngine::server_filter(const ProfileOptions& profile) const
 	const auto		   enforcement =
 		profile.windivert_options.client_address_enforcement.value_or(WinDivertOptions::ClientAddressEnforcement::both);
 	std::string client_filter;
+	const std::optional<std::string> client_source		= effective_client_source_address();
+	const std::optional<std::string> client_destination = effective_client_destination_address();
 	if (enforcement == WinDivertOptions::ClientAddressEnforcement::source ||
 		enforcement == WinDivertOptions::ClientAddressEnforcement::both)
-		if (options_.client_source_address)
-			client_filter = "ip.SrcAddr == " + *options_.client_source_address;
+		if (client_source)
+			client_filter = "ip.SrcAddr == " + *client_source;
 	if (enforcement == WinDivertOptions::ClientAddressEnforcement::destination ||
 		enforcement == WinDivertOptions::ClientAddressEnforcement::both)
-		if (options_.client_destination_address)
+		if (client_destination)
 		{
 			if (!client_filter.empty())
 				client_filter += " or ";
-			client_filter += "ip.DstAddr == " + *options_.client_destination_address;
+			client_filter += "ip.DstAddr == " + *client_destination;
 		}
 	if (!client_filter.empty())
 		combined_filter = "(" + combined_filter + ") and (" + client_filter + ")";
@@ -1168,6 +1214,12 @@ void PacketEngine::print_state() const
 		log_state_line(state_width, "probe port:      " + highlight(std::to_string(options_.features.region_enforcement.probe_port)));
 		log_state_line(state_width, "probe status:    " + highlight(region_enforcement_status()));
 		log_state_line(state_width, "enforced region: " + highlight(current_enforced_region()));
+		LOG_INFO("%s", format_state_divider(state_width).c_str());
+	}
+	if (options_.features.forwarded_address_discovery.enabled)
+	{
+		LOG_INFO("%s", format_state_divider(state_width, "forwarded address discovery").c_str());
+		log_state_line(state_width, "addresses:       " + highlight(forwarded_address_discovery_status()));
 		LOG_INFO("%s", format_state_divider(state_width).c_str());
 	}
 	LOG_INFO("+%s+", std::string(state_width - 2, '-').c_str());
@@ -1714,6 +1766,31 @@ void PacketEngine::start_workers()
 
 		start_region_enforcement();
 	}
+
+	if (options_.features.forwarded_address_discovery.enabled)
+	{
+		const uint32_t	   inbound_if_idx  = *options_.features.forwarded_address_discovery.inbound_if_idx;
+		const uint32_t	   outbound_if_idx = *options_.features.forwarded_address_discovery.outbound_if_idx;
+		const std::string filter =
+			"outbound and (ifIdx == " + std::to_string(inbound_if_idx) + " or ifIdx == " + std::to_string(outbound_if_idx) + ")";
+		LOG_DEBUG("Forwarded address discovery setup: opening filter '%s'", filter.c_str());
+		// a dedicated priority avoids losing packets to other priority-0 handles (server discovery, profiles) with overlapping filters
+		state_->fad_handle = WinDivertOpen(filter.c_str(), WINDIVERT_LAYER_NETWORK, 1000, WINDIVERT_FLAG_SNIFF);
+		if (state_->fad_handle == INVALID_HANDLE_VALUE)
+		{
+			const DWORD error = GetLastError();
+			LOG_ERROR("Forwarded address discovery setup: failed to open WinDivert handle %lu: %s",
+					  error,
+					  format_win32_error(error).c_str());
+		}
+		else
+		{
+			WinDivertSetParam(state_->fad_handle, WINDIVERT_PARAM_QUEUE_LENGTH, 4096);
+			WinDivertSetParam(state_->fad_handle, WINDIVERT_PARAM_QUEUE_TIME, 1024);
+			LOG_INFO("Forwarded address discovery enabled (inbound ifIdx %u, outbound ifIdx %u)", inbound_if_idx, outbound_if_idx);
+			state_->fad_thread = std::thread(&PacketEngine::forwarded_address_discovery_recv, this);
+		}
+	}
 }
 
 void PacketEngine::stop_workers()
@@ -1723,6 +1800,8 @@ void PacketEngine::stop_workers()
 		WinDivertShutdown(state_->discovery_handle, WINDIVERT_SHUTDOWN_RECV);
 	if (state_->probe_handle != INVALID_HANDLE_VALUE)
 		WinDivertShutdown(state_->probe_handle, WINDIVERT_SHUTDOWN_RECV);
+	if (state_->fad_handle != INVALID_HANDLE_VALUE)
+		WinDivertShutdown(state_->fad_handle, WINDIVERT_SHUTDOWN_RECV);
 	stop_region_enforcement();
 	teardown();
 	for (std::thread& cleanup_thread : state_->cleanup_threads)
@@ -1732,6 +1811,8 @@ void PacketEngine::stop_workers()
 		state_->discovery_thread.join();
 	if (state_->probe_thread.joinable())
 		state_->probe_thread.join();
+	if (state_->fad_thread.joinable())
+		state_->fad_thread.join();
 	for (std::thread& region_thread : state_->region_threads)
 		if (region_thread.joinable())
 			region_thread.join();
@@ -1745,6 +1826,11 @@ void PacketEngine::stop_workers()
 	{
 		WinDivertClose(state_->probe_handle);
 		state_->probe_handle = INVALID_HANDLE_VALUE;
+	}
+	if (state_->fad_handle != INVALID_HANDLE_VALUE)
+	{
+		WinDivertClose(state_->fad_handle);
+		state_->fad_handle = INVALID_HANDLE_VALUE;
 	}
 }
 
@@ -2106,6 +2192,146 @@ void PacketEngine::probe_packets()
 			if (error != ERROR_INVALID_HANDLE && error != ERROR_OPERATION_ABORTED)
 				LOG_ERROR("Probe detection recv: WinDivertRecv error %lu: %s", error, format_win32_error(error).c_str());
 		}
+	}
+}
+
+void PacketEngine::forwarded_address_discovery_recv()
+{
+	const uint32_t inbound_if_idx	= *options_.features.forwarded_address_discovery.inbound_if_idx;
+	const uint32_t outbound_if_idx = *options_.features.forwarded_address_discovery.outbound_if_idx;
+	const uint64_t window_ms		= options_.features.forwarded_address_discovery.window_ms;
+
+	std::unordered_map<std::string, uint64_t> destination_counts;
+	std::unordered_map<std::string, uint64_t> source_counts;
+
+	// picks the most frequently observed address within the window, weeding out one-off broadcast/noise addresses
+	auto apply_winner = [&](std::unordered_map<std::string, uint64_t>& counts, bool is_destination) {
+		const char* label = is_destination ? "client destination address (inbound)" : "client source address (outbound)";
+		if (counts.empty())
+		{
+			LOG_DEBUG("Forwarded address discovery: no packets observed for %s in the last %s window", label, logging::format_duration(window_ms).c_str());
+			return;
+		}
+		const auto winner = std::max_element(counts.begin(), counts.end(), [](const auto& left, const auto& right) {
+			return left.second < right.second;
+		});
+		LOG_DEBUG("Forwarded address discovery: %s window closed with %zu candidate address(es); winner '%s' with %llu packet(s)",
+				  label,
+				  counts.size(),
+				  winner->first.c_str(),
+				  static_cast<unsigned long long>(winner->second));
+		std::string previous;
+		bool		changed = false;
+		{
+			std::lock_guard<std::mutex> lock(state_->fad_mutex);
+			std::string&				 target = is_destination ? state_->fad_client_destination_address : state_->fad_client_source_address;
+			if (target != winner->first)
+			{
+				previous = target;
+				target	 = winner->first;
+				changed	 = true;
+			}
+		}
+		if (!changed)
+			return;
+		LOG_INFO("Forwarded address discovery: %s changed from '%s' to '%s' (%llu packets in %s)",
+				 label,
+				 previous.empty() ? "none" : previous.c_str(),
+				 winner->first.c_str(),
+				 static_cast<unsigned long long>(winner->second),
+				 logging::format_duration(window_ms).c_str());
+
+		std::vector<int> active_profiles;
+		{
+			std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
+			for (size_t index = 0; index < state_->active_profiles.size(); ++index)
+				if (state_->active_profiles[index])
+					active_profiles.push_back(static_cast<int>(index + 1));
+		}
+		for (const int profile : active_profiles)
+			teardown(profile);
+		for (const int profile : active_profiles)
+			setup(profile);
+	};
+
+	uint64_t window_started = GetTickCount64();
+	BYTE	 packet_data[0xFFFF];
+	while (!shutdown_)
+	{
+		WINDIVERT_ADDRESS address;
+		UINT			  received_length = 0;
+		if (WinDivertRecv(state_->fad_handle, packet_data, sizeof(packet_data), &received_length, &address))
+		{
+			const bool is_inbound_interface  = address.Network.IfIdx == inbound_if_idx;
+			const bool is_outbound_interface = address.Network.IfIdx == outbound_if_idx;
+			if (!is_inbound_interface && !is_outbound_interface)
+			{
+				LOG_DEBUG("Forwarded address discovery: ignoring packet on unrelated ifIdx %u (outbound=%d)",
+						  address.Network.IfIdx,
+						  address.Outbound);
+				continue;
+			}
+			PWINDIVERT_IPHDR   ip_header   = nullptr;
+			PWINDIVERT_IPV6HDR ipv6_header = nullptr;
+			if (!WinDivertHelperParsePacket(packet_data,
+											received_length,
+											&ip_header,
+											&ipv6_header,
+											nullptr,
+											nullptr,
+											nullptr,
+											nullptr,
+											nullptr,
+											nullptr,
+											nullptr,
+											nullptr,
+											nullptr))
+			{
+				LOG_DEBUG("Forwarded address discovery: failed to parse packet on ifIdx %u (%s)",
+						  address.Network.IfIdx,
+						  is_inbound_interface ? "inbound" : "outbound");
+				continue;
+			}
+			std::string address_text;
+			if (ip_header)
+				address_text = format_ipv4_address(is_inbound_interface ? ip_header->DstAddr : ip_header->SrcAddr);
+			else if (ipv6_header)
+				address_text = format_ipv6_address(is_inbound_interface ? ipv6_header->DstAddr : ipv6_header->SrcAddr);
+			if (address_text.empty())
+			{
+				LOG_DEBUG("Forwarded address discovery: packet on ifIdx %u (%s) had no IPv4/IPv6 header",
+						  address.Network.IfIdx,
+						  is_inbound_interface ? "inbound" : "outbound");
+				continue;
+			}
+			auto& counts = is_inbound_interface ? destination_counts : source_counts;
+			++counts[address_text];
+			LOG_DEBUG("Forwarded address discovery: observed %s = %s on ifIdx %u (outbound=%d) [count=%llu]",
+					  is_inbound_interface ? "dst" : "src",
+					  address_text.c_str(),
+					  address.Network.IfIdx,
+					  address.Outbound,
+					  static_cast<unsigned long long>(counts[address_text]));
+		}
+		else if (!shutdown_)
+		{
+			const DWORD error = GetLastError();
+			if (error != ERROR_INVALID_HANDLE && error != ERROR_OPERATION_ABORTED)
+				LOG_ERROR("Forwarded address discovery recv: WinDivertRecv error %lu: %s", error, format_win32_error(error).c_str());
+		}
+
+		const uint64_t now = GetTickCount64();
+		if (now - window_started < window_ms)
+			continue;
+		LOG_DEBUG("Forwarded address discovery: window closed after %s (dst candidates=%zu, src candidates=%zu)",
+				  logging::format_duration(now - window_started).c_str(),
+				  destination_counts.size(),
+				  source_counts.size());
+		apply_winner(destination_counts, true);
+		apply_winner(source_counts, false);
+		destination_counts.clear();
+		source_counts.clear();
+		window_started = now;
 	}
 }
 

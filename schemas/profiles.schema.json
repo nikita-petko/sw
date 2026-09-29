@@ -104,6 +104,39 @@
             }
           },
           "additionalProperties": false
+        },
+        "forwarded_address_discovery": {
+          "type": "object",
+          "description": "Dynamically discovers client source/destination addresses when this PC forwards traffic for another device (e.g. via Internet Connection Sharing).",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false,
+              "description": "Whether forwarded address discovery is enabled."
+            },
+            "inbound": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Interface index of the interface the client device is directly connected to. Used to discover client_destination_address."
+            },
+            "outbound": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Interface index of the shared/internet-facing interface (e.g. Wi-Fi, Ethernet, or VPN with Internet Connection Sharing enabled). Used to discover client_source_address."
+            },
+            "interval": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 5000,
+              "description": "Length of the discovery window in milliseconds. The most frequently observed address per interface within each window is selected, weeding out one-off addresses such as broadcasts."
+            }
+          },
+          "required": [
+            "enabled",
+            "inbound",
+            "outbound"
+          ],
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

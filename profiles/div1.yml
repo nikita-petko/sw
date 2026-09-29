@@ -5,23 +5,25 @@ servers:
     - "104.155.45.25:BRU-EUC-25"
     - "34.76.248.132:BRU-EUC-132"
 
+  # Game Server Regions
+
+  # Netherlands (Groningen)
   EU:
-    # Game servers (Netherlands - Groningen)
     - "34.13.202.203:GR-EUC-203"
     - "34.90.202.108:GR-EUC-108"
 
+  # Asia (Tokyo)
   ASIA:
-    # Asia Servers (Tokyo)
     - "136.110.106.37:13-ASE-37"
     - "34.104.143.167:13-ASE-167"
 
+  # US (Iowa)
   US:
-    # US Servers (Iowa)
     - "136.112.189.19:IA-USC-19"
     - "35.232.75.10:IA-USC-10"
 
+  # Oceania (Sydney)
   OCEANIA:
-    # Oceania Servers (Sydney)
     - "34.116.109.80:NSW-OCE-80"
     - "34.151.127.98:NSW-OCE-98"
 
@@ -33,8 +35,18 @@ features:
       - "Long (Recv)"
       - "RPM"
 
+  forwarded_address_discovery:
+    enabled: false
+    interval: 5000
+    inbound: 5 # Ethernet interface index (Xbox)
+    outbound: 67 # OpenVPN interface index
+
 profiles:
-  - name: "RPM"
+  # Trickle profile: introduces a small delay to packets
+  # to let a little bit of network traffic through without significant delay
+  #
+  # See research/division1_rpm_exploit_variants.md for more details on why this profile is configured this way.
+  - name: "Trickle"
     key: x
     mode: toggle
     disables: "*"
@@ -45,6 +57,11 @@ profiles:
       forward: true
       client_address_enforcement: both
 
+  # Long (Recv) profile: Defers incoming packets to introduce a delay without affecting outgoing traffic.
+  # When used in The Division 1 game, this will cause all server updates to freeze for the duration of the delay.
+  # However you will still move and update normally for others on their screen (what you are doing on your screen is what will be seen)
+  #
+  # See research/division1_lag_switch_weapon_swap_analysis.md for more details.
   - name: "Long (Recv)"
     keys:
       - z
@@ -52,7 +69,7 @@ profiles:
     key_mode: oneof
     mode: toggle
     disables: 
-      - "RPM"
+      - "Trickle"
     filter: "tcp.Psh and tcp.SrcPort == 55000"
     retransmission_mode: none
     delay_mode: ratio
@@ -62,24 +79,36 @@ profiles:
       forward: true
       server_direction: source
       client_address_enforcement: destination
-      
-  - name: "Long (Recv1)"
+
+  # Long (Send - Instant Release) profile: Defers outgoing packets but allows for immediate release using the configured key.
+  # When used in The Division 1 game, this will cause all client updates to freeze for the duration of the delay.
+  # However, you can immediately release outgoing packets using the configured key.
+  #
+  # See research/division1_lag_switch_weapon_swap_analysis.md and research/division1_desync_duration_vs_lag_duration.md for more details.
+  - name: "Long (Send - Instant Release)"
     keys:
-      - v
+      - ctrl
     key_mode: oneof
     mode: toggle
-    disables: 
-      - "RPM"
-    filter: "tcp.Psh and tcp.SrcPort == 55000"
     retransmission_mode: none
-    delay_mode: from_timestamp
-    delay: 0
+    ack_restoration: false
+    disables: 
+      - "Trickle"
+      - "Long (Send - Release Delay)"
+    respect_disable_wait: false
+    filter: "tcp.Psh and tcp.DstPort == 55000"
+    delay_mode: ratio
+    ratio: 10%
+    delay_ms: 18000
     windivert_options:
       forward: true
-      server_direction: source
-      client_address_enforcement: destination
+      server_direction: destination
+      client_address_enforcement: source
 
-  - name: "Long (Send - with delay)"
+  # Long (Send - Release Delay) profile: Same as the "Long (Send - Instant Release)" profile but introduces a delay before releasing outgoing packets.
+  # 
+  # The reasoning and rationale behind the disable wait percentage on this is described in research/division1_lag_switch_weapon_swap_analysis.md.
+  - name: "Long (Send - Release Delay)"
     keys:
       - alt
       - space
@@ -87,8 +116,8 @@ profiles:
     mode: toggle
     retransmission_mode: none
     disables: 
-      - "RPM"
-      - "Long (Send)"
+      - "Trickle"
+      - "Long (Send - Instant Release)"
     filter: "tcp.Psh and tcp.DstPort == 55000"
     delay_mode: ratio
     disable_wait_percent: 15
@@ -99,42 +128,17 @@ profiles:
       server_direction: destination
       client_address_enforcement: source
 
-  - name: "Long (Send)"
-    keys:
-      - ctrl
-    key_mode: oneof
-    mode: toggle
-    retransmission_mode: none
-    ack_restoration: false
-    disables: 
-      - "RPM"
-      - "Long (Send - with delay)"
-    respect_disable_wait: false
-    filter: "tcp.Psh and tcp.DstPort == 55000"
-    delay_mode: ratio
-    ratio: 10%
-    delay_ms: 18000
-    windivert_options:
-      forward: true
-      server_direction: destination
-      client_address_enforcement: source
-
-  - name: "Long (C Send)"
+  - name: "Long (Recv - Drop)"
     keys:
       - c
     key_mode: oneof
     mode: toggle
-    retransmission_mode: none
-    ack_restoration: false
     disables: 
-      - "RPM"
-      - "Long (Send - with delay)"
-    respect_disable_wait: false
-    filter: "tcp.Psh and tcp.DstPort == 55000"
-    delay_mode: ratio
-    ratio: 2
-    delay_ms: 8000
+      - "Trickle"
+    filter: "tcp.Psh and tcp.SrcPort == 55000"
+    retransmission_mode: none
+    delay_mode: drop
     windivert_options:
       forward: true
-      server_direction: destination
-      client_address_enforcement: source
+      server_direction: source
+      client_address_enforcement: destination

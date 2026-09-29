@@ -123,10 +123,19 @@ struct PcapFilesOptions
 	std::vector<std::string> enabled_for;
 };
 
+struct ForwardedAddressDiscoveryOptions
+{
+	bool enabled = false;
+	std::optional<uint32_t> inbound_if_idx;
+	std::optional<uint32_t> outbound_if_idx;
+	uint64_t window_ms = 5000;
+};
+
 struct FeaturesOptions
 {
 	RegionEnforcementOptions region_enforcement;
 	PcapFilesOptions pcap_files;
+	ForwardedAddressDiscoveryOptions forwarded_address_discovery;
 };
 
 struct PacketEngineOptions
@@ -165,6 +174,9 @@ public:
 	bool is_running(int profile) const;
 	bool is_authoritative_server() const;
 	bool is_region_enforcement_enabled() const;
+	std::string region_enforcement_status() const;
+	bool is_forwarded_address_discovery_enabled() const;
+	std::string forwarded_address_discovery_status() const;
 	uint64_t running_time_ms() const;
 	uint64_t profile_running_time_ms(int profile) const;
 	size_t pending_packets() const;
@@ -176,7 +188,6 @@ public:
 	std::vector<std::string> configured_regions() const;
 	std::string current_server_region() const;
 	std::string client_region() const;
-	std::string region_enforcement_status() const;
 	void print_state() const;
 
 private:
@@ -192,6 +203,9 @@ private:
 	std::string region_enforcement_filter() const;
 	void resolve_region(const std::string& address, bool preserve_name = false);
 	void resolve_client_region();
+	void forwarded_address_discovery_recv();
+	std::optional<std::string> effective_client_source_address() const;
+	std::optional<std::string> effective_client_destination_address() const;
 	std::string server_filter(const ProfileOptions& profile) const;
 
 	PacketEngineOptions options_;
