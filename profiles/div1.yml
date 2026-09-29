@@ -35,6 +35,12 @@ features:
       - "Long (Recv)"
       - "RPM"
 
+  desync_countdown:
+    enabled: true
+    enabled_for:
+      - "Long (Send - Instant Release)"
+      - "Long (Send - Release Delay)"
+
   forwarded_address_discovery:
     enabled: false
     port: 55000
@@ -140,7 +146,7 @@ profiles:
       - c
     key_mode: oneof
     mode: period
-    activation_period: 2500
+    activation_period: 3000
     filter: "tcp.Psh and tcp.SrcPort == 55000"
     retransmission_mode: none
     delay_mode: from_timestamp

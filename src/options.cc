@@ -271,6 +271,32 @@ bool add_pcap_enabled_for(const std::string& value, PcapFilesOptions& pcap_files
 	return true;
 }
 
+bool add_desync_countdown_enabled_for(const std::string& value, DesyncCountdownOptions& countdown, const char* path, int line_number)
+{
+	std::string list = trim(value);
+	if (list.size() >= 2 && list.front() == '[' && list.back() == ']')
+		list = list.substr(1, list.size() - 2);
+	else if (list.empty())
+		return true;
+	else
+		list += ',';
+	for (size_t start = 0; start < list.size();)
+	{
+		const size_t	  end  = list.find(',', start);
+		const std::string item = unquote(trim(list.substr(start, end == std::string::npos ? std::string::npos : end - start)));
+		if (item.empty())
+		{
+			LOG_ERROR("Invalid desync_countdown enabled_for value in %s at line %d", path, line_number);
+			return false;
+		}
+		countdown.enabled_for.push_back(item);
+		if (end == std::string::npos)
+			break;
+		start = end + 1;
+	}
+	return true;
+}
+
 bool add_server(const std::string& value, PacketEngineOptions& options, const std::string& group, const char* path, int line_number)
 {
 	const std::string item = unquote(trim(value));
@@ -351,6 +377,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 	options.features.region_enforcement.enabled	   = false;
 	options.features.region_enforcement.probe_port = 0;
 	options.features.pcap_files					   = {};
+	options.features.desync_countdown			   = {};
 	options.features.forwarded_address_discovery	   = {};
 	std::string		line;
 	ProfileOptions* profile = nullptr;
@@ -361,6 +388,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 	int				servers_base_indent	   = -1;
 	int				features_base_indent   = -1;
 	int				pcap_files_base_indent = -1;
+	int				desync_countdown_base_indent = -1;
 	int				line_number			   = 0;
 	while (std::getline(file, line))
 	{
@@ -390,6 +418,13 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				return false;
 			continue;
 		}
+		if (subsection == "desync_countdown_enabled_for" && content.front() == '-' && content.find(':') == std::string::npos)
+		{
+			if (indent <= subsection_indent ||
+				!add_desync_countdown_enabled_for(content.substr(1), options.features.desync_countdown, path, line_number))
+				return false;
+			continue;
+		}
 		if ((subsection == "addresses" || subsection == "server_group") && content.front() == '-')
 		{
 			if (indent <= subsection_indent ||
@@ -410,6 +445,11 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			subsection		  = "pcap_files";
 			subsection_indent = pcap_files_base_indent;
 		}
+		if (subsection == "desync_countdown_enabled_for" && indent <= subsection_indent)
+		{
+			subsection		  = "desync_countdown";
+			subsection_indent = desync_countdown_base_indent;
+		}
 		if (features_base_indent != -1 && section == "features" && indent > features_base_indent)
 		{
 			if (key == "region_enforcement" && value.empty())
@@ -423,6 +463,13 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				subsection			   = "pcap_files";
 				subsection_indent	   = indent;
 				pcap_files_base_indent = indent;
+				continue;
+			}
+			if (key == "desync_countdown" && value.empty())
+			{
+				subsection					 = "desync_countdown";
+				subsection_indent		 = indent;
+				desync_countdown_base_indent = indent;
 				continue;
 			}
 			if (key == "forwarded_address_discovery" && value.empty())
@@ -563,6 +610,46 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 					subsection		  = "pcap_files_enabled_for";
 					subsection_indent = indent;
 					if (!add_pcap_enabled_for(value, options.features.pcap_files, path, line_number))
+						return false;
+					continue;
+				}
+			}
+			if (subsection == "desync_countdown" && indent > subsection_indent)
+			{
+				if (key == "enabled")
+				{
+					const auto parsed = parse_bool(unquote(value));
+					if (!parsed)
+					{
+						LOG_ERROR("Invalid boolean in %s at line %d", path, line_number);
+						return false;
+					}
+					options.features.desync_countdown.enabled = *parsed;
+					continue;
+				}
+				if (key == "duration_percent")
+				{
+					try
+					{
+						const std::string item = unquote(trim(value));
+						size_t				 consumed = 0;
+						const unsigned long percent = std::stoul(item, &consumed);
+						if (consumed != item.size() || percent == 0 || percent > 100)
+							throw std::invalid_argument("invalid percentage");
+						options.features.desync_countdown.duration_percent = static_cast<uint8_t>(percent);
+						continue;
+					}
+					catch (...)
+					{
+						LOG_ERROR("Invalid desync_countdown duration_percent in %s at line %d", path, line_number);
+						return false;
+					}
+				}
+				if (key == "enabled_for")
+				{
+					subsection		  = "desync_countdown_enabled_for";
+					subsection_indent = indent;
+					if (!add_desync_countdown_enabled_for(value, options.features.desync_countdown, path, line_number))
 						return false;
 					continue;
 				}
@@ -1073,6 +1160,33 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			if (configured_profile == options.profiles.end())
 			{
 				LOG_ERROR("Feature pcap_files enables unknown profile '%s'", enabled_profile.c_str());
+				return false;
+			}
+		}
+	}
+	if (options.features.desync_countdown.enabled && options.features.desync_countdown.enabled_for.empty())
+	{
+		LOG_ERROR("Feature desync_countdown is enabled but enabled_for is missing or empty in %s", path);
+		return false;
+	}
+	if (options.features.desync_countdown.duration_percent == 0 || options.features.desync_countdown.duration_percent > 100)
+	{
+		LOG_ERROR("Feature desync_countdown duration_percent must be between 1 and 100 in %s", path);
+		return false;
+	}
+	if (options.features.desync_countdown.enabled)
+	{
+		for (const std::string& enabled_profile : options.features.desync_countdown.enabled_for)
+		{
+			if (enabled_profile == "*")
+				continue;
+			const auto configured_profile =
+				std::find_if(options.profiles.begin(), options.profiles.end(), [&](const ProfileOptions& candidate) {
+					return candidate.name == enabled_profile;
+				});
+			if (configured_profile == options.profiles.end())
+			{
+				LOG_ERROR("Feature desync_countdown enables unknown profile '%s'", enabled_profile.c_str());
 				return false;
 			}
 		}

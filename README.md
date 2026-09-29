@@ -209,6 +209,27 @@ features:
 | `output_dir` | No | Destination directory. Defaults to `pcap_files` beneath the current working directory. |
 | `enabled_for` | Yes when enabled | `"*"` for every profile, or a non-empty list of configured profile names. |
 
+The optional `desync_countdown` feature displays an approximate status-line
+countdown after selected profiles are deactivated. The estimate is 80% of the
+profile's most recent active duration, based on preliminary observations; it
+is not a measurement of server state or a guarantee that desync ends at that
+time. It is disabled by default.
+
+```yaml
+features:
+  desync_countdown:
+    enabled: true
+    duration_percent: 80
+    enabled_for:
+      - "RPM"
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `enabled` | No | Enables the approximate countdown. Defaults to `false`. |
+| `duration_percent` | No | Estimated desync duration as a percentage of the selected profile's active duration. Defaults to `80`; valid values are `1`-`100`. |
+| `enabled_for` | Yes when enabled | `"*"` for every profile, or a non-empty list of configured profile names. |
+
 Forwarded address discovery dynamically finds the client addresses used to
 filter packets when lagsw runs on a PC that shares its internet connection
 with a client device (for example, DeviceA is hard-wired to the PC, and the

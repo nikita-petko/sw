@@ -125,6 +125,13 @@ struct PcapFilesOptions
 	std::vector<std::string> enabled_for;
 };
 
+struct DesyncCountdownOptions
+{
+	bool enabled = false;
+	uint8_t duration_percent = 80;
+	std::vector<std::string> enabled_for;
+};
+
 struct ForwardedAddressDiscoveryOptions
 {
 	bool enabled = false;
@@ -138,6 +145,7 @@ struct FeaturesOptions
 {
 	RegionEnforcementOptions region_enforcement;
 	PcapFilesOptions pcap_files;
+	DesyncCountdownOptions desync_countdown;
 	ForwardedAddressDiscoveryOptions forwarded_address_discovery;
 };
 
@@ -175,6 +183,7 @@ public:
 	void teardown();
 	bool is_running() const;
 	bool is_running(int profile) const;
+	std::optional<uint64_t> profile_desync_countdown_ms(int profile) const;
 	bool is_authoritative_server() const;
 	bool is_region_enforcement_enabled() const;
 	std::string region_enforcement_status() const;

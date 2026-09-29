@@ -672,6 +672,7 @@ struct PacketEngine::State
 		uint64_t			  enabled_time_min		= (std::numeric_limits<uint64_t>::max)();
 		uint64_t			  enabled_time_max		= 0;
 		uint64_t			  last_enabled_time		= 0;
+		uint64_t			  last_disabled_at		= 0;
 		uint64_t			  enabled_count			= 0;
 		std::atomic<uint64_t> packets_caught		= 0;
 		std::atomic<uint64_t> delayed_packets_sent	= 0;
@@ -878,6 +879,24 @@ uint64_t PacketEngine::profile_running_time_ms(int profile) const
 	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
 	const size_t				index = static_cast<size_t>(profile - 1);
 	return state_->active_profiles[index] ? GetTickCount64() - state_->profile_stats[index].enabled_since : 0;
+}
+
+std::optional<uint64_t> PacketEngine::profile_desync_countdown_ms(int profile) const
+{
+	if (profile < 1 || static_cast<size_t>(profile) > options_.profiles.size())
+		return std::nullopt;
+	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
+	const size_t				index = static_cast<size_t>(profile - 1);
+	const State::ProfileStats& stats = state_->profile_stats[index];
+	if (state_->active_profiles[index] || stats.enabled_count == 0 || stats.last_disabled_at == 0)
+		return std::nullopt;
+	const uint64_t duration_percent = options_.features.desync_countdown.duration_percent;
+	const uint64_t estimate_ms = (stats.last_enabled_time / 100) * duration_percent +
+								  (stats.last_enabled_time % 100) * duration_percent / 100;
+	const uint64_t elapsed_ms = GetTickCount64() - stats.last_disabled_at;
+	if (elapsed_ms >= estimate_ms)
+		return std::nullopt;
+	return estimate_ms - elapsed_ms;
 }
 
 size_t PacketEngine::pending_packets() const
@@ -1606,6 +1625,7 @@ void PacketEngine::teardown(int profile)
 		State::ProfileStats& stats = state_->profile_stats[profile - 1];
 		enabled_time			   = GetTickCount64() - stats.enabled_since;
 		stats.last_enabled_time	   = enabled_time;
+		stats.last_disabled_at	   = GetTickCount64();
 		stats.enabled_time_total += enabled_time;
 		if (enabled_time < stats.enabled_time_min)
 			stats.enabled_time_min = enabled_time;

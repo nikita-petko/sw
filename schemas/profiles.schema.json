@@ -105,6 +105,41 @@
           },
           "additionalProperties": false
         },
+        "desync_countdown": {
+          "type": "object",
+          "description": "Approximate post-deactivation positional-desync countdown for selected profiles.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false,
+              "description": "Whether the status-line countdown is enabled."
+            },
+            "duration_percent": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 80,
+              "description": "Estimated desync duration as a percentage of the selected profile's most recent active duration."
+            },
+            "enabled_for": {
+              "oneOf": [
+                {
+                  "const": "*"
+                },
+                {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              ],
+              "description": "A wildcard or profile-name list for which to show estimates. Required when enabled."
+            }
+          },
+          "additionalProperties": false
+        },
         "forwarded_address_discovery": {
           "type": "object",
           "description": "Dynamically discovers client source/destination addresses when this PC forwards traffic for another device (e.g. via Internet Connection Sharing).",

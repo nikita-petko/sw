@@ -69,6 +69,14 @@ std::vector<bool> find_active_profiles(const PacketEngineOptions& options)
 	return active;
 }
 
+bool desync_countdown_enabled_for(const DesyncCountdownOptions& countdown, const ProfileOptions& profile)
+{
+	if (!countdown.enabled)
+		return false;
+	return std::find(countdown.enabled_for.begin(), countdown.enabled_for.end(), "*") != countdown.enabled_for.end() ||
+		   std::find(countdown.enabled_for.begin(), countdown.enabled_for.end(), profile.name) != countdown.enabled_for.end();
+}
+
 const char* format_mode(ProfileActivationMode mode)
 {
 	return mode == ProfileActivationMode::hold ? "hold" : mode == ProfileActivationMode::period ? "period" : "toggle";
@@ -307,6 +315,18 @@ int main(int argc, char* argv[])
 					active_profiles += " (" + logging::format_duration(remaining_ms) + " left)";
 				}
 			}
+			std::string desync_countdowns;
+			for (size_t index = 0; index < options.profiles.size(); ++index)
+			{
+				if (!desync_countdown_enabled_for(options.features.desync_countdown, options.profiles[index]))
+					continue;
+				const auto remaining_ms = engine.profile_desync_countdown_ms(static_cast<int>(index + 1));
+				if (!remaining_ms)
+					continue;
+				if (!desync_countdowns.empty())
+					desync_countdowns += ", ";
+				desync_countdowns += options.profiles[index].name + " ~" + logging::format_duration(*remaining_ms) + " left";
+			}
 			const std::string server_region = engine.current_server_region();
 			const std::string client_region = engine.client_region();
 			std::string		  region;
@@ -323,7 +343,9 @@ int main(int argc, char* argv[])
 			}
 			if (engine.is_forwarded_address_discovery_enabled())
 				server_status += " | fad: " + engine.forwarded_address_discovery_status();
-			logging::set_status(status, server_status + (active_profiles.empty() ? "" : " | " + active_profiles));
+			logging::set_status(status,
+							server_status + (active_profiles.empty() ? "" : " | " + active_profiles) +
+							(desync_countdowns.empty() ? "" : " | desync: " + desync_countdowns));
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		}
 	});
