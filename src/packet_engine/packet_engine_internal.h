@@ -1,0 +1,117 @@
+#ifndef PACKET_ENGINE_INTERNAL_H_
+#define PACKET_ENGINE_INTERNAL_H_
+
+#include <windows.h>
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstdint>
+#include <fstream>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+#include "packet_engine.h"
+#include "packet_engine_util.h"
+#include "region_lookup.h"
+#include "windivert_runtime.h"
+#include "../modules/packet_mode.h"
+
+struct PacketEngine::Session
+{
+	explicit Session(int profile_number, HANDLE divert_handle, PacketMode* packet_mode)
+	: profile(profile_number)
+	, handle(divert_handle)
+	, mode(packet_mode)
+	{
+	}
+
+	int							   profile;
+	HANDLE						   handle;
+	std::atomic<bool>			   stopping = false;
+	std::mutex					   packet_mutex;
+	std::condition_variable		   packet_changed;
+	uint64_t					   next_receive_order = 0;
+	PacketQueue					   delayed_packets;
+	PacketMode*					   mode;
+	std::unique_ptr<std::ofstream> pcap_file;
+	std::string					   pcap_guid;
+	std::string					   pcap_path;
+	std::thread					   receive_thread;
+	std::thread					   send_thread;
+};
+
+struct PacketEngine::State
+{
+	struct ProfileStats
+	{
+		uint64_t			  enabled_since			= 0;
+		uint64_t			  enabled_time_total	= 0;
+		uint64_t			  enabled_time_min		= (std::numeric_limits<uint64_t>::max)();
+		uint64_t			  enabled_time_max		= 0;
+		uint64_t			  last_enabled_time		= 0;
+		uint64_t			  last_disabled_at		= 0;
+		uint64_t			  enabled_count			= 0;
+		std::atomic<uint64_t> packets_caught		= 0;
+		std::atomic<uint64_t> delayed_packets_sent	= 0;
+		std::atomic<uint64_t> teardown_packets_sent = 0;
+	};
+
+	explicit State(size_t profile_count) : profile_stats(profile_count) {}
+
+	std::mutex										  lifecycle_mutex;
+	std::condition_variable							  lifecycle_changed;
+	std::vector<bool>								  active_profiles;
+	std::vector<ProfileStats>						  profile_stats;
+	std::vector<std::shared_ptr<Session>>			  active_sessions;
+	std::vector<std::thread>						  cleanup_threads;
+	HANDLE											  discovery_handle = INVALID_HANDLE_VALUE;
+	std::thread										  discovery_thread;
+	std::mutex										  discovery_mutex;
+	std::string										  discovered_server;
+	std::unordered_map<std::string, uint64_t>		  discovery_counts;
+	bool											  authoritative_server		  = false;
+	bool											  select_authoritative_server = false;
+	std::mutex										  region_mutex;
+	std::unordered_map<std::string, std::string>	  server_regions;
+	std::unordered_map<std::string, RegionCacheEntry> region_cache;
+	std::unordered_set<std::string>					  region_lookups_started;
+	std::vector<std::thread>						  region_threads;
+	std::string										  client_region;
+
+	HANDLE							probe_handle = INVALID_HANDLE_VALUE;
+	std::thread						probe_thread;
+	HANDLE							region_enforcement_handle = INVALID_HANDLE_VALUE;
+	std::thread						region_enforcement_recv_thread;
+	std::thread						region_enforcement_send_thread;
+	std::mutex						region_enforcement_mutex;
+	std::condition_variable			region_enforcement_changed;
+	std::atomic<bool>				region_enforcement_stopping = false;
+	mutable std::mutex				probe_mutex;
+	bool							probe_received	 = false;
+	uint64_t						probe_window_end = 0;
+	uint64_t						next_check_time	 = 0;
+	std::unordered_set<std::string> probed_addresses_in_window;
+
+	HANDLE							fad_handle = INVALID_HANDLE_VALUE;
+	std::thread						fad_thread;
+	mutable std::mutex				fad_mutex;
+	std::string						fad_client_source_address;
+	std::string						fad_client_destination_address;
+
+	struct DelayedEnforcementPacket
+	{
+		std::vector<BYTE> data;
+		WINDIVERT_ADDRESS address;
+		uint64_t		  release_at = 0;
+	};
+	std::vector<DelayedEnforcementPacket> enforcement_queue;
+};
+
+#endif

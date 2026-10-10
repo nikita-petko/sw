@@ -1,7 +1,7 @@
 target("lagsw")
     set_version("5-beta.1")
     set_kind("binary")
-    add_files("*.cc", "modules/*.cc", "*.rc")
+    add_files("*.cc", "modules/*.cc", "packet_engine/*.cc", "*.rc")
 
     add_includedirs("../include", "../win_divert/include")
 
