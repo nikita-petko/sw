@@ -23,3 +23,5 @@ install_manifest.txt
 build.ninja
 
 pcap_files/
+lol/
+dist/
