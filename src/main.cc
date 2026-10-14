@@ -298,10 +298,15 @@ int main(int argc, char* argv[])
 								   logging::format_duration(next_batch) + " left until next batch...)";
 				status.insert(status.size() - 1, held_for);
 			}
+			const bool override_activation =
+				options.features.desync_countdown.display == DesyncCountdownDisplay::override_activation;
 			std::string active_profiles;
 			for (size_t index = 0; index < options.profiles.size(); ++index)
 			{
 				if (!engine.is_running(static_cast<int>(index + 1)))
+					continue;
+				if (override_activation && desync_countdown_enabled_for(options.features.desync_countdown, options.profiles[index]) &&
+					engine.profile_desync_countdown_ms(static_cast<int>(index + 1)))
 					continue;
 				if (!active_profiles.empty())
 					active_profiles += ", ";

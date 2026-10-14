@@ -227,6 +227,7 @@ features:
 | Field | Required | Description |
 | --- | --- | --- |
 | `enabled` | No | Enables the approximate countdown. Defaults to `false`. |
+| `display` | No | `alongside` (default) shows the countdown next to profile activations; `override` shows it instead of the profile's activation status; `until_reactivated` hides it once the profile is reactivated. |
 | `duration_percent` | No | Estimated desync duration as a percentage of the selected profile's active duration. Defaults to `80`; valid values are `1`-`100`. |
 | `enabled_for` | Yes when enabled | `"*"` for every profile, or a non-empty list of configured profile names. |
 

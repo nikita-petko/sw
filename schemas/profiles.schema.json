@@ -114,6 +114,12 @@
               "default": false,
               "description": "Whether the status-line countdown is enabled."
             },
+            "display": {
+              "type": "string",
+              "enum": ["alongside", "override", "until_reactivated"],
+              "default": "alongside",
+              "description": "alongside: show the countdown next to profile activations; override: show the countdown instead of the profile's activation status; until_reactivated: hide the countdown when the profile is reactivated."
+            },
             "duration_percent": {
               "type": "integer",
               "minimum": 1,

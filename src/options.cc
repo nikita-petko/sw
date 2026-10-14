@@ -627,6 +627,22 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 					options.features.desync_countdown.enabled = *parsed;
 					continue;
 				}
+				if (key == "display")
+				{
+					const std::string mode = unquote(trim(value));
+					if (mode == "alongside")
+						options.features.desync_countdown.display = DesyncCountdownDisplay::alongside;
+					else if (mode == "override")
+						options.features.desync_countdown.display = DesyncCountdownDisplay::override_activation;
+					else if (mode == "until_reactivated")
+						options.features.desync_countdown.display = DesyncCountdownDisplay::until_reactivated;
+					else
+					{
+						LOG_ERROR("Invalid desync_countdown display '%s' in %s at line %d", mode.c_str(), path, line_number);
+						return false;
+					}
+					continue;
+				}
 				if (key == "duration_percent")
 				{
 					try

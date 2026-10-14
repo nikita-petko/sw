@@ -125,9 +125,17 @@ struct PcapFilesOptions
 	std::vector<std::string> enabled_for;
 };
 
+enum class DesyncCountdownDisplay
+{
+	alongside,
+	override_activation,
+	until_reactivated,
+};
+
 struct DesyncCountdownOptions
 {
 	bool enabled = false;
+	DesyncCountdownDisplay display = DesyncCountdownDisplay::alongside;
 	uint8_t duration_percent = 80;
 	std::vector<std::string> enabled_for;
 };
