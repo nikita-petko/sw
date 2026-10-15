@@ -21,7 +21,7 @@ void PacketEngine::start_region_enforcement()
 	}
 	WinDivertSetParam(state_->region_enforcement_handle, WINDIVERT_PARAM_QUEUE_LENGTH, 4096);
 	WinDivertSetParam(state_->region_enforcement_handle, WINDIVERT_PARAM_QUEUE_TIME, 1024);
-	LOG_INFO("Region enforcement filter active: %s", filter.c_str());
+	LOG_REGION("Region enforcement filter active: %s", filter.c_str());
 	state_->region_enforcement_recv_thread = std::thread(&PacketEngine::region_enforcement_recv, this);
 	state_->region_enforcement_send_thread = std::thread(&PacketEngine::region_enforcement_send, this);
 }
@@ -141,7 +141,7 @@ void PacketEngine::resolve_region(const std::string& address, bool preserve_name
 			save_region_cache(state_->region_cache);
 		}
 		LOG_DEBUG("Region lookup for '%s': cached result", address.c_str());
-		LOG_INFO("Resolved region for server '%s': %s", address.c_str(), label->c_str());
+		LOG_REGION("Resolved region for server '%s': %s", address.c_str(), label->c_str());
 
 		if (!preserve_name)
 		{
@@ -156,7 +156,7 @@ void PacketEngine::resolve_region(const std::string& address, bool preserve_name
 				else
 					LOG_DEBUG("Region lookup for '%s': server no longer tracked, skipping rename", address.c_str());
 			}
-			LOG_INFO("Server '%s' renamed to '%s'", address.c_str(), new_name.c_str());
+			LOG_REGION("Server '%s' renamed to '%s'", address.c_str(), new_name.c_str());
 		}
 	});
 }
@@ -198,7 +198,7 @@ void PacketEngine::resolve_client_region()
 			save_region_cache(state_->region_cache);
 		}
 		LOG_DEBUG("Client region lookup: cached result");
-		LOG_INFO("Resolved client region: %s", label->c_str());
+		LOG_REGION("Resolved client region: %s", label->c_str());
 	});
 }
 void PacketEngine::region_enforcement_recv()

@@ -253,25 +253,25 @@ int main(int argc, char* argv[])
 											? "immediately"
 											: logging::format_duration(static_cast<uint64_t>(profile.delay_ms));
 		const std::string filter	  = profile.filter.value_or(options.global_filter);
-		LOG_INFO("  [%zu/%zu] %s", index + 1, options.profiles.size(), profile.name.c_str());
-		LOG_INFO("    action: %s %s", delay_description.c_str(), delay_value.c_str());
-		LOG_INFO("    trigger: %s | key_mode: %s | mode: %s",
+		LOG_DETAIL("  [%zu/%zu] %s", index + 1, options.profiles.size(), profile.name.c_str());
+		LOG_DETAIL("    action: %s %s", delay_description.c_str(), delay_value.c_str());
+		LOG_DETAIL("    trigger: %s | key_mode: %s | mode: %s",
 				 format_keys(profile).c_str(),
 				 format_key_mode(profile.key_mode),
 				 format_mode(profile.mode));
-		LOG_INFO("    disables: %s | wait: %ums + %u%% | respect_wait: %s",
+		LOG_DETAIL("    disables: %s | wait: %ums + %u%% | respect_wait: %s",
 				 format_disable_targets(profile).c_str(),
 				 profile.disable_wait_ms,
 				 profile.disable_wait_percent,
 				 profile.respect_disable_wait ? "true" : "false");
-		LOG_INFO("    retransmission: %s | subsequent_packet_hold: %s | ratio: %s%s | ratio_selection: %s",
+		LOG_DETAIL("    retransmission: %s | subsequent_packet_hold: %s | ratio: %s%s | ratio_selection: %s",
 				 format_retransmission_mode(profile.retransmission_mode),
 				 format_subsequent_packet_hold_mode(profile.subsequent_packet_hold_mode),
 				 profile.ratio_configured ? std::to_string(profile.ratio).c_str() : "not set",
 				 profile.ratio_configured && profile.ratio_percent ? "%" : (profile.ratio_configured ? " packets" : ""),
 				 format_ratio_selection(profile.ratio_selection));
-		LOG_INFO("    windivert: %s", format_windivert_options(profile).c_str());
-		LOG_INFO("    filter: %s", filter.c_str());
+		LOG_DETAIL("    windivert: %s", format_windivert_options(profile).c_str());
+		LOG_DETAIL("    filter: %s", filter.c_str());
 	}
 
 	::SetConsoleCtrlHandler(nullptr, TRUE);
@@ -451,14 +451,14 @@ int main(int argc, char* argv[])
 			{
 				disable_at[target] = GetTickCount64() + wait_ms;
 				if (percentage_wait_ms != 0)
-					LOG_INFO("Profile %zu will deactivate in %s (%s extra from %u%% of %s)",
+					LOG_DEACTIVATE("Profile %zu will deactivate in %s (%s extra from %u%% of %s)",
 							 target + 1,
 							 logging::format_duration(wait_ms).c_str(),
 							 logging::format_duration(percentage_wait_ms).c_str(),
 							 target_options.disable_wait_percent,
 							 logging::format_duration(enabled_for_ms).c_str());
 				else
-					LOG_INFO("Profile %zu will deactivate in %s", target + 1, logging::format_duration(wait_ms).c_str());
+					LOG_DEACTIVATE("Profile %zu will deactivate in %s", target + 1, logging::format_duration(wait_ms).c_str());
 			}
 		};
 		auto disable_targets = [&](size_t source) {
@@ -497,7 +497,7 @@ int main(int argc, char* argv[])
 		for (size_t index = 0; index < options.profiles.size(); ++index)
 			if (period_deactivate_at[index] != 0 && now >= period_deactivate_at[index])
 			{
-				LOG_INFO("Profile %zu reached its activation period", index + 1);
+				LOG_ACTIVATE("Profile %zu reached its activation period", index + 1);
 				schedule_teardown(index, false);
 			}
 		for (size_t index = 0; index < options.profiles.size(); ++index)

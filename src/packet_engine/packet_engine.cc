@@ -23,12 +23,12 @@ PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(opt
 	{
 		const std::string label = server.name == server.address ? server.address : server.name + " [" + server.address + "]";
 		if (server.group.empty())
-			LOG_INFO("Pre-configured server: %s", label.c_str());
+			LOG_SERVER("Pre-configured server: %s", label.c_str());
 		else
 		{
 			if (logged_server_groups.insert(server.group).second)
-				LOG_INFO("Pre-configured server group '%s':", server.group.c_str());
-			LOG_INFO("  %s", label.c_str());
+				LOG_SERVER("Pre-configured server group '%s':", server.group.c_str());
+			LOG_SERVER("  %s", label.c_str());
 		}
 	}
 	state_->select_authoritative_server = !options_.initial_server || *options_.initial_server == "none";
@@ -46,7 +46,7 @@ PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(opt
 		if (server_index_ == 0 && !state_->select_authoritative_server)
 			LOG_WARN("Server '%s' does not exist; using none", options_.initial_server->c_str());
 	}
-	LOG_INFO("Initial server: %s", current_server().c_str());
+	LOG_SERVER("Initial server: %s", current_server().c_str());
 }
 
 PacketEngine::~PacketEngine()
@@ -352,7 +352,7 @@ void PacketEngine::cycle_server(int direction)
 	server_index_						= current;
 	state_->authoritative_server		= false;
 	state_->select_authoritative_server = false;
-	LOG_INFO("Server changed to: %s", current_server().c_str());
+	LOG_SERVER("Server changed to: %s", current_server().c_str());
 
 	std::vector<int> active_profiles;
 	{
@@ -379,7 +379,7 @@ void PacketEngine::cycle_enforced_region(int direction)
 	else
 		current = current == 0 ? option_count - 1 : current - 1;
 	enforced_region_index_ = current;
-	LOG_INFO("Enforced region changed to: %s", current_enforced_region().c_str());
+	LOG_REGION("Enforced region changed to: %s", current_enforced_region().c_str());
 
 	stop_region_enforcement();
 	start_region_enforcement();
@@ -492,7 +492,7 @@ void PacketEngine::setup(int profile)
 			  profile_options.name.c_str(),
 			  forward ? "NETWORK_FORWARD" : "NETWORK",
 			  capture_filter.c_str());
-	LOG_INFO("Lag switch enabled, profile = %s (%s, mode = %s). %s",
+	LOG_ACTIVATE("Lag switch enabled, profile = %s (%s, mode = %s). %s",
 			 profile_options.name.c_str(),
 			 format_keys(profile_options).c_str(),
 			 profile_options.mode == ProfileActivationMode::hold ? "hold"
@@ -565,7 +565,7 @@ void PacketEngine::teardown(int profile)
 				session->pcap_file.reset();
 			WinDivertClose(session->handle);
 			timeEndPeriod(1);
-			LOG_INFO("profile #%d - %s teardown: disabled after %s",
+			LOG_DEACTIVATE("profile #%d - %s teardown: disabled after %s",
 					 profile,
 					 options_.profiles[profile - 1].name.c_str(),
 					 logging::format_duration(enabled_time).c_str());

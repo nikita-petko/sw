@@ -1,5 +1,5 @@
 target("lagsw")
-    set_version("5-beta.1")
+    set_version("6")
     set_kind("binary")
     add_files("*.cc", "modules/*.cc", "packet_engine/*.cc", "*.rc")
 

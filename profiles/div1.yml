@@ -28,15 +28,9 @@ servers:
     - "34.151.127.98:NSW-OCE-98"
 
 features:
-  pcap_files:
-    enabled: false
-    enabled_for:
-      - "Long (Send)"
-      - "Long (Recv)"
-      - "RPM"
-
   desync_countdown:
     enabled: true
+    display: override
     enabled_for:
       - "Long (Send - Instant Release)"
       - "Long (Send - Release Delay)"
@@ -135,13 +129,13 @@ profiles:
       server_direction: destination
       client_address_enforcement: source
 
-  # Long (Force TP) profile: Forces teleportation of desynced player character in The Division 1 game.
+  # Force TP profile: Forces teleportation of desynced player character in The Division 1 game.
   # It triggers a forced teleportation of the player's character by manipulating the network packets.
   # This profile essentially is a macro that automates the process of forcing a teleportation by
   # holding inbound for 3 seconds.
   #
   # See research/division1_lag_switch_weapon_swap_analysis.md and research/division1_desync_duration_vs_lag_duration.md for more details.
-  - name: "Long (Force TP)"
+  - name: "Force TP"
     keys:
       - c
     key_mode: oneof

@@ -73,6 +73,26 @@ const char* level_color(logging::level message_level)
 	}
 	return "";
 }
+
+const char* style_color(logging::style message_style)
+{
+	switch (message_style)
+	{
+		case logging::style::activate:
+			return "\033[1;92m";
+		case logging::style::deactivate:
+			return "\033[1;35m";
+		case logging::style::server:
+			return "\033[94m";
+		case logging::style::region:
+			return "\033[96m";
+		case logging::style::detail:
+			return "\033[90m";
+		case logging::style::normal:
+			break;
+	}
+	return "\033[32m";
+}
 }  // namespace
 
 namespace logging {
@@ -109,23 +129,36 @@ void set_level(level minimum)
 	minimum_level = minimum;
 }
 
-void write(level message_level, const char* format, ...)
+static void write_impl(level message_level, const char* color, const char* format, va_list arguments)
 {
 	std::lock_guard lock(log_mutex);
 	if (static_cast<int>(message_level) > static_cast<int>(minimum_level))
 		return;
 
-	char	message[max_log_message];
-	va_list arguments;
-	va_start(arguments, format);
+	char message[max_log_message];
 	std::vsnprintf(message, sizeof(message), format, arguments);
-	va_end(arguments);
 
 	clear_status_line();
-	std::printf("%s[%s] %s\033[0m\n", level_color(message_level), level_name(message_level), message);
+	std::printf("%s[%s] %s\033[0m\n", color, level_name(message_level), message);
 	if (!status_line.empty())
 		print_status_line(status_line, status_right_line);
 	std::fflush(stdout);
+}
+
+void write(level message_level, const char* format, ...)
+{
+	va_list arguments;
+	va_start(arguments, format);
+	write_impl(message_level, level_color(message_level), format, arguments);
+	va_end(arguments);
+}
+
+void write_styled(style message_style, const char* format, ...)
+{
+	va_list arguments;
+	va_start(arguments, format);
+	write_impl(level::info, style_color(message_style), format, arguments);
+	va_end(arguments);
 }
 
 void set_status(const std::string& status)

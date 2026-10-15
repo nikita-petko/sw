@@ -78,7 +78,7 @@ void PacketEngine::discover_packets()
 					if (first_seen)
 					{
 						const std::string server_label = format_server_label(address_text);
-						LOG_INFO("Server '%s' is potentially the authoritative server (first packet received)", server_label.c_str());
+						LOG_SERVER("Server '%s' is potentially the authoritative server (first packet received)", server_label.c_str());
 						if (options_.resolve_region)
 						{
 							if (is_public_address(address_text))
@@ -128,7 +128,7 @@ void PacketEngine::discover_packets()
 							 existing_server->name.c_str());
 				state_->discovered_server	   = winner->first;
 				const std::string server_label = format_server_label(winner->first);
-				LOG_INFO("Server '%s' is the authoritative server (%llu packets in %s)",
+				LOG_SERVER("Server '%s' is the authoritative server (%llu packets in %s)",
 						 server_label.c_str(),
 						 static_cast<unsigned long long>(winner->second),
 						 logging::format_duration(options_.discovery_window_ms).c_str());
@@ -218,7 +218,7 @@ void PacketEngine::probe_packets()
 								server->name == server->address ? server->address : server->name + " [" + server->address + "]";
 							if (enforced_region != "none" && !enforced_region.empty() && server_region == enforced_region)
 							{
-								LOG_INFO("Server '%s' within enforced region '%s' was probed",
+								LOG_SERVER("Server '%s' within enforced region '%s' was probed",
 										 server_label.c_str(),
 										 enforced_region.c_str());
 							}
@@ -283,7 +283,7 @@ void PacketEngine::forwarded_address_discovery_recv()
 		}
 		if (!changed)
 			return;
-		LOG_INFO("Forwarded address discovery: %s changed from '%s' to '%s' (%llu packets in %s)",
+		LOG_SERVER("Forwarded address discovery: %s changed from '%s' to '%s' (%llu packets in %s)",
 				 label,
 				 previous.empty() ? "none" : previous.c_str(),
 				 winner->first.c_str(),
