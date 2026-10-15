@@ -23,8 +23,10 @@
 #include "windivert_runtime.h"
 #include "../modules/packet_mode.h"
 
+/// Runtime resources and packet queues owned by one active profile.
 struct PacketEngine::Session
 {
+	/// Creates a profile session from its index, WinDivert handle, and packet mode.
 	explicit Session(int profile_number, HANDLE divert_handle, PacketMode* packet_mode)
 	: profile(profile_number)
 	, handle(divert_handle)
@@ -47,8 +49,10 @@ struct PacketEngine::Session
 	std::thread					   send_thread;
 };
 
+/// Shared mutable runtime state for packet-engine workers and status queries.
 struct PacketEngine::State
 {
+	/// Timing and packet counters for one configured profile.
 	struct ProfileStats
 	{
 		uint64_t			  enabled_since			= 0;
@@ -63,6 +67,7 @@ struct PacketEngine::State
 		std::atomic<uint64_t> teardown_packets_sent = 0;
 	};
 
+	/// Initializes per-profile statistics for the configured profile count.
 	explicit State(size_t profile_count) : profile_stats(profile_count) {}
 
 	std::mutex										  lifecycle_mutex;
@@ -105,6 +110,7 @@ struct PacketEngine::State
 	std::string						fad_client_source_address;
 	std::string						fad_client_destination_address;
 
+	/// A packet buffered until its region-enforcement release time.
 	struct DelayedEnforcementPacket
 	{
 		std::vector<BYTE> data;
