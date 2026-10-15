@@ -1,5 +1,7 @@
 # lagsw
 
+![](https://share.cdn.vmminfra.dev/petko-new/2026/10/powershell_04MIiHw9Ux.png)
+
 `lagsw` is a Windows console utility that temporarily delays matching network
 packets. It uses the embedded [WinDivert](win_divert/README) driver to capture
 packets, hold them in memory, and reinject them after the configured delay.
