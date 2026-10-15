@@ -289,12 +289,14 @@ automatically reconfigured whenever a discovered address changes.
 | `disable_wait_ms` | No | Time in milliseconds this profile remains active after it is disabled. Defaults to `0`. |
 | `disable_wait_percent` | No | Additional wait equal to this percentage of the profile's current enabled time, from `0` to `100`. This is added to `disable_wait_ms`. Defaults to `0`. |
 | `respect_disable_wait` | No | When this profile disables another profile with a configured disable wait, wait for that profile to stop before activating. Defaults to `true`; set to `false` to activate immediately. |
-| `delay_mode` | No | `from_timestamp`, `send_all_after_delay`, `ratio`, `drop`, `drop_and_send`, `hold_and_send`, `drop_until_toggle`, or `hold_until_deactivation`; defaults to `from_timestamp`. |
+| `delay_mode` | No | `from_timestamp`, `send_all_after_delay`, `ratio`, `drop`, `drop_and_send`, `hold_and_send`, `drop_until_toggle`, `hold_until_deactivation`, or `packet_group_send`; defaults to `from_timestamp`.|
 | `retransmission_mode` | No | `none` allows retransmissions; `only_seq` drops duplicate sequence numbers; `only_ack` drops duplicate acknowledgment numbers; `both` requires a unique `(SeqNum, AckNum)` pair. Defaults to `none`. |
 | `subsequent_packet_hold_mode` | No | For `hold_and_send`, `none` holds only the configured initial packet count; `seq_only`, `ack_only`, or `seq_ack` also holds subsequent TCP packets matching an initially held packet. Defaults to `none`. |
 | `delay_ms` | No | Delay in milliseconds. Defaults to `0`. |
 | `ratio` | For `ratio`, `drop_and_send`, or `hold_and_send` mode | Positive packet count, or a positive percentage such as `50%`. Percentage ratios also require `delay_ms > 0` and may not exceed `100%`; `hold_and_send` requires a packet count. |
 | `amount` | For `hold_until_deactivation` mode | Number of deferred packets released on deactivation; `0` releases all deferred packets. Defaults to `0`. |
+| `group_count` | For `packet_group_send` mode | Positive number of packet groups to capture. Activation-key presses delimit groups and then send one group per press.|
+| `group_order` | No | `fifo`, `lifo`, or `random`; order in which `packet_group_send` releases captured groups. Defaults to `fifo`.|
 | `ratio_selection` | No | `first`, `last`, or `random`; controls which packets a percentage-based `ratio` releases immediately: the first x, the last x, or a random x of the batch. Defaults to `first`. |
 | `filter` | No | Profile-specific WinDivert filter. Overrides `global_filter`. |
 | `windivert_options` | No | WinDivert capture options described below. |
@@ -338,6 +340,14 @@ while the other is active switches directly to the requested profile.
   remaining packets during deactivation. An `amount` of `0` releases all held
   packets at once. When `send_key` is configured, pressing it releases the
   configured amount while leaving the profile active. This mode requires
+  `mode: toggle`.
+- `packet_group_send`: Captures packets into `group_count` groups. The first
+  activation starts capturing group 1; each subsequent activation starts the
+  next group. After the final group has been captured, each activation sends
+  one group in `group_order` (`fifo`, `lifo`, or `random`) order. Packets within
+  each group retain their original receive order. The profile deactivates after
+  its final group is sent. Group capture, send, and completion are logged, and
+  the active group and stage are shown in the status bar. This mode requires
   `mode: toggle`.
 
 When `delay_ms` is zero, queued packets wait until the profile is deactivated.

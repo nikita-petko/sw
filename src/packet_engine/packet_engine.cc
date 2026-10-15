@@ -160,6 +160,18 @@ uint64_t PacketEngine::profile_running_time_ms(int profile) const
 	return state_->active_profiles[index] ? GetTickCount64() - state_->profile_stats[index].enabled_since : 0;
 }
 
+std::string PacketEngine::profile_packet_status(int profile) const
+{
+	if (profile < 1 || static_cast<size_t>(profile) > options_.profiles.size())
+		return {};
+	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
+	const std::shared_ptr<Session>& session = state_->active_sessions[profile - 1];
+	if (!session)
+		return {};
+	std::lock_guard<std::mutex> packet_lock(session->packet_mutex);
+	return session->mode->status();
+}
+
 std::optional<uint64_t> PacketEngine::profile_desync_countdown_ms(int profile) const
 {
 	if (profile < 1 || static_cast<size_t>(profile) > options_.profiles.size())

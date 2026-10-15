@@ -165,6 +165,10 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 							  addresses.destination.c_str(),
 							  sent);
 				}
+				{
+					std::lock_guard<std::mutex> packet_lock(session->packet_mutex);
+					session->mode->packet_send_completed(*node, sent != 0);
+				}
 			}
 			for (size_t index = 0; index < ready_packets.size(); ++index)
 			{

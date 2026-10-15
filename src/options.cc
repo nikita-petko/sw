@@ -147,6 +147,8 @@ std::optional<PacketDelayMode> parse_delay_mode(const std::string& value)
 		return PacketDelayMode::drop_until_toggle;
 	if (value == "hold_until_deactivation")
 		return PacketDelayMode::hold_until_deactivation;
+	if (value == "packet_group_send")
+		return PacketDelayMode::packet_group_send;
 	return std::nullopt;
 }
 
@@ -184,6 +186,17 @@ std::optional<RatioSelection> parse_ratio_selection(const std::string& value)
 		return RatioSelection::last;
 	if (value == "random")
 		return RatioSelection::random;
+	return std::nullopt;
+}
+
+std::optional<PacketGroupOrder> parse_packet_group_order(const std::string& value)
+{
+	if (value == "fifo")
+		return PacketGroupOrder::fifo;
+	if (value == "lifo")
+		return PacketGroupOrder::lifo;
+	if (value == "random")
+		return PacketGroupOrder::random;
 	return std::nullopt;
 }
 
@@ -892,7 +905,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			{
 				LOG_ERROR(
 					"Invalid delay_mode in %s at line %d: expected from_timestamp, send_all_after_delay, ratio, drop, drop_and_send, "
-					"hold_and_send, drop_until_toggle, or hold_until_deactivation",
+					"hold_and_send, drop_until_toggle, hold_until_deactivation, or packet_group_send",
 					path,
 					line_number);
 				return false;
@@ -1042,6 +1055,33 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				return false;
 			}
 		}
+		else if (key == "group_count")
+		{
+			try
+			{
+				size_t consumed = 0;
+				const std::string count_value = unquote(value);
+				const long parsed = std::stol(count_value, &consumed);
+				if (consumed != count_value.size() || parsed < 0 || parsed > (std::numeric_limits<int32_t>::max)())
+					throw std::invalid_argument("invalid group count");
+				profile->group_count = static_cast<int32_t>(parsed);
+			}
+			catch (...)
+			{
+				LOG_ERROR("Invalid group_count in %s at line %d", path, line_number);
+				return false;
+			}
+		}
+		else if (key == "group_order")
+		{
+			const auto order = parse_packet_group_order(unquote(value));
+			if (!order)
+			{
+				LOG_ERROR("Invalid group_order in %s at line %d: expected fifo, lifo, or random", path, line_number);
+				return false;
+			}
+			profile->group_order = *order;
+		}
 		else if (key == "ratio_selection")
 		{
 			const auto selection = parse_ratio_selection(unquote(value));
@@ -1096,6 +1136,18 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		if (item.delay_mode == PacketDelayMode::hold_until_deactivation && item.mode != ProfileActivationMode::toggle)
 		{
 			LOG_ERROR("Profile '%s' requires toggle mode for hold_until_deactivation", item.name.c_str());
+			return false;
+		}
+		if (item.delay_mode == PacketDelayMode::packet_group_send &&
+			(item.group_count <= 0 || item.mode != ProfileActivationMode::toggle))
+		{
+			LOG_ERROR("Profile '%s' requires a positive group_count and toggle mode for packet_group_send",
+					  item.name.c_str());
+			return false;
+		}
+		if (item.delay_mode != PacketDelayMode::packet_group_send && item.group_count != 0)
+		{
+			LOG_ERROR("Profile '%s' can only set group_count when delay_mode is packet_group_send", item.name.c_str());
 			return false;
 		}
 		for (const std::string& disabled_name : item.disables)

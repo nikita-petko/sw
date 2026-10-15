@@ -175,6 +175,20 @@ const char* format_ratio_selection(RatioSelection selection)
 	return "unknown";
 }
 
+const char* format_packet_group_order(PacketGroupOrder order)
+{
+	switch (order)
+	{
+		case PacketGroupOrder::fifo:
+			return "fifo";
+		case PacketGroupOrder::lifo:
+			return "lifo";
+		case PacketGroupOrder::random:
+			return "random";
+	}
+	return "unknown";
+}
+
 std::string format_windivert_options(const ProfileOptions& profile)
 {
 	std::string result;
@@ -247,8 +261,13 @@ int main(int argc, char* argv[])
 			: profile.delay_mode == PacketDelayMode::drop_until_toggle ? "Drop, hold, then send after"
 			: profile.delay_mode == PacketDelayMode::hold_until_deactivation ? "Hold, then send on deactivation"
 			: profile.delay_mode == PacketDelayMode::drop			   ? "Drop packets"
+			: profile.delay_mode == PacketDelayMode::packet_group_send
+				? "Capture " + std::to_string(profile.group_count) + " packet groups"
 																	   : "Delay each by";
-		const std::string delay_value = indefinite_delay ? "profile is deactivated"
+		const std::string delay_value = profile.delay_mode == PacketDelayMode::packet_group_send
+											? "in " + std::string(format_packet_group_order(profile.group_order)) +
+												  " order, one group per activation press"
+										: indefinite_delay ? "profile is deactivated"
 										: profile.delay_mode == PacketDelayMode::drop
 											? "immediately"
 											: logging::format_duration(static_cast<uint64_t>(profile.delay_ms));
@@ -305,12 +324,16 @@ int main(int argc, char* argv[])
 			{
 				if (!engine.is_running(static_cast<int>(index + 1)))
 					continue;
-				if (override_activation && desync_countdown_enabled_for(options.features.desync_countdown, options.profiles[index]) &&
+				if (override_activation && options.profiles[index].delay_mode != PacketDelayMode::packet_group_send &&
+					desync_countdown_enabled_for(options.features.desync_countdown, options.profiles[index]) &&
 					engine.profile_desync_countdown_ms(static_cast<int>(index + 1)))
 					continue;
 				if (!active_profiles.empty())
 					active_profiles += ", ";
 				active_profiles += options.profiles[index].name;
+				const std::string packet_status = engine.profile_packet_status(static_cast<int>(index + 1));
+				if (!packet_status.empty())
+					active_profiles += " [" + packet_status + "]";
 				if (options.profiles[index].mode == ProfileActivationMode::period)
 				{
 					const uint64_t elapsed_ms = engine.profile_running_time_ms(static_cast<int>(index + 1));
@@ -585,7 +608,8 @@ int main(int argc, char* argv[])
 			{
 				if (shared_profiles_running[index] && engine.is_running(profile) &&
 					(options.profiles[index].delay_mode == PacketDelayMode::drop_until_toggle ||
-					 options.profiles[index].delay_mode == PacketDelayMode::hold_until_deactivation))
+					 options.profiles[index].delay_mode == PacketDelayMode::hold_until_deactivation ||
+					 options.profiles[index].delay_mode == PacketDelayMode::packet_group_send))
 				{
 					LOG_DEBUG("Toggling profile %d", profile);
 					if (engine.toggle(profile))
@@ -594,7 +618,9 @@ int main(int argc, char* argv[])
 						LOG_DEBUG("Profile %d released and deactivated (%s mode)",
 								  profile,
 								  options.profiles[index].delay_mode == PacketDelayMode::drop_until_toggle ? "drop_until_toggle"
-																						 : "hold_until_deactivation");
+								  : options.profiles[index].delay_mode == PacketDelayMode::hold_until_deactivation
+									  ? "hold_until_deactivation"
+									  : "packet_group_send");
 					}
 				}
 				else if (shared_profiles_running[index] && engine.is_running(profile))

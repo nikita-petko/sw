@@ -10,6 +10,7 @@ std::unique_ptr<PacketMode> create_drop_and_send_mode(const ProfileOptions& opti
 std::unique_ptr<PacketMode> create_hold_and_send_mode(const ProfileOptions& options);
 std::unique_ptr<PacketMode> create_drop_until_toggle_mode(const ProfileOptions& options);
 std::unique_ptr<PacketMode> create_hold_until_deactivation_mode(const ProfileOptions& options);
+std::unique_ptr<PacketMode> create_packet_group_send_mode(const ProfileOptions& options);
 
 std::unique_ptr<PacketMode> create_packet_mode(const ProfileOptions& options)
 {
@@ -31,6 +32,8 @@ std::unique_ptr<PacketMode> create_packet_mode(const ProfileOptions& options)
 			return create_drop_until_toggle_mode(options);
 		case PacketDelayMode::hold_until_deactivation:
 			return create_hold_until_deactivation_mode(options);
+		case PacketDelayMode::packet_group_send:
+			return create_packet_group_send_mode(options);
 	}
 	throw std::logic_error("unsupported packet delay mode");
 }

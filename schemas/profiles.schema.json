@@ -333,7 +333,8 @@
             "drop_and_send",
             "hold_and_send",
             "drop_until_toggle",
-            "hold_until_deactivation"
+            "hold_until_deactivation",
+            "packet_group_send"
           ],
           "default": "from_timestamp",
           "description": "Strategy for packet delaying, dropping, or reinjection."
@@ -389,6 +390,21 @@
           "minimum": 0,
           "default": 0,
           "description": "For hold_until_deactivation, the number of deferred packets released on deactivation; 0 releases all deferred packets."
+        },
+        "group_count": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Positive number of packet groups to capture when delay_mode is packet_group_send."
+        },
+        "group_order": {
+          "type": "string",
+          "enum": [
+            "fifo",
+            "lifo",
+            "random"
+          ],
+          "default": "fifo",
+          "description": "Order in which packet_group_send releases captured groups."
         },
         "ratio_selection": {
           "type": "string",

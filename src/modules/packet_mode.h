@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <memory>
 #include <queue>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -27,6 +28,10 @@ struct PacketNode
 	uint64_t		   release_at;
 	/// Receive-order tie breaker for packets with equal release times.
 	uint64_t		   receive_order;
+	/// Zero-based packet group, used by packet_group_send mode.
+	size_t			   group_index = 0;
+	/// Whether this packet belongs to an explicit packet group.
+	bool			   grouped = false;
 };
 
 /// Priority-queue comparator ordering packets by release time, then receive order.
@@ -91,6 +96,10 @@ public:
 	virtual bool toggle(PacketQueue&) { return false; }
 	/// Flushes mode-specific queued packets on demand when supported.
 	virtual void flush_on_demand(PacketQueue&) {}
+	/// Notifies the mode after a released packet has been processed by WinDivertSend.
+	virtual void packet_send_completed(const PacketNode&, bool) {}
+	/// Returns optional mode-specific state for the profile status bar.
+	virtual std::string status() const { return {}; }
 	/// Moves or releases all remaining queued packets during teardown.
 	virtual void flush(PacketQueue& packets, std::vector<PacketNode*>& pending_packets) = 0;
 

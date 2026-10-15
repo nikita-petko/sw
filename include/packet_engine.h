@@ -74,6 +74,15 @@ enum class PacketDelayMode
 	hold_and_send,          ///< Hold packets, then send them when the profile deactivates.
 	drop_until_toggle,      ///< Drop packets until the profile is toggled off.
 	hold_until_deactivation,///< Hold packets until the profile deactivates.
+	packet_group_send,      ///< Capture packet groups, then send one ordered group per activation key press.
+};
+
+/// Order in which packet groups are sent by packet_group_send mode.
+enum class PacketGroupOrder
+{
+	fifo,   ///< Send groups in capture order.
+	lifo,   ///< Send groups in reverse capture order.
+	random, ///< Send groups in a random order.
 };
 
 /// Which queued TCP retransmissions are recognized and discarded.
@@ -139,6 +148,10 @@ struct ProfileOptions
 	int32_t ratio = 1;
 	/// Number of packets used by modes that take an amount.
 	int32_t amount = 0;
+	/// Number of groups to capture in packet_group_send mode.
+	int32_t group_count = 0;
+	/// Order used to send captured packet groups.
+	PacketGroupOrder group_order = PacketGroupOrder::fifo;
 	/// Whether ratio is interpreted as a percentage.
 	bool ratio_percent = false;
 	/// Whether ratio was explicitly configured.
@@ -296,6 +309,8 @@ public:
 	uint64_t running_time_ms() const;
 	/// Returns the active time in milliseconds for a profile.
 	uint64_t profile_running_time_ms(int profile) const;
+	/// Returns packet-mode progress text for an active profile, if available.
+	std::string profile_packet_status(int profile) const;
 	/// Returns the total number of packets currently queued for release.
 	size_t pending_packets() const;
 	/// Returns the milliseconds until the next queued packet batch is due.
