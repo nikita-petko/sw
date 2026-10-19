@@ -132,7 +132,9 @@ profiles:
   # Force TP profile: Forces teleportation of desynced player character in The Division 1 game.
   # It triggers a forced teleportation of the player's character by manipulating the network packets.
   # This profile essentially is a macro that automates the process of forcing a teleportation by
-  # holding inbound for 3 seconds.
+  # holding inbound for 3 seconds. This number isn't a true guide for what to use to force a teleportation;
+  # as in the end it is directly proportional to how long the other player has been desynced, but 3 seconds
+  # will usually suffice for typical desync durations of around 20-30s.
   #
   # See research/division1_lag_switch_weapon_swap_analysis.md and research/division1_desync_duration_vs_lag_duration.md for more details.
   - name: "Force TP"
