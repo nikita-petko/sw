@@ -1,20 +1,14 @@
 #ifndef PACKET_ENGINE_UTIL_H_
 #define PACKET_ENGINE_UTIL_H_
 
-#include <windows.h>
 #include <cstdint>
 #include <fstream>
 #include <string>
 #include "packet_engine.h"
 #include "packet_headers.h"
 
-/// Returns the system message for a Win32 error, without trailing line breaks.
-std::string format_win32_error(DWORD error);
-
 /// Returns whether PCAP capture is enabled globally and for the given profile.
 bool pcap_files_enabled_for(const PcapFilesOptions& pcap_files, const ProfileOptions& profile);
-/// Formats a GUID in its standard hyphenated representation.
-std::string format_guid(const GUID& guid);
 /// Writes a 32-bit value to a PCAP stream in the platform's byte order.
 void write_pcap_u32(std::ofstream& file, uint32_t value);
 /// Writes a 16-bit value to a PCAP stream in the platform's byte order.

@@ -6,51 +6,12 @@
 
 #include "log.h"
 
-std::string format_win32_error(DWORD error)
-{
-	char*		message = nullptr;
-	const DWORD length	= FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-										 nullptr,
-										 error,
-										 0,
-										 reinterpret_cast<char*>(&message),
-										 0,
-										 nullptr);
-	if (length == 0)
-		return "unknown error";
-	std::string result(message, length);
-	LocalFree(message);
-	while (!result.empty() && (result.back() == '\r' || result.back() == '\n'))
-		result.pop_back();
-	return result;
-}
-
 bool pcap_files_enabled_for(const PcapFilesOptions& pcap_files, const ProfileOptions& profile)
 {
 	return pcap_files.enabled &&
 		   std::any_of(pcap_files.enabled_for.begin(), pcap_files.enabled_for.end(), [&](const std::string& enabled_profile) {
 			   return enabled_profile == "*" || enabled_profile == profile.name;
 		   });
-}
-
-std::string format_guid(const GUID& guid)
-{
-	char text[37] = {};
-	std::snprintf(text,
-				  sizeof(text),
-				  "%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-				  static_cast<unsigned long>(guid.Data1),
-				  guid.Data2,
-				  guid.Data3,
-				  guid.Data4[0],
-				  guid.Data4[1],
-				  guid.Data4[2],
-				  guid.Data4[3],
-				  guid.Data4[4],
-				  guid.Data4[5],
-				  guid.Data4[6],
-				  guid.Data4[7]);
-	return text;
 }
 
 void write_pcap_u32(std::ofstream& file, uint32_t value)

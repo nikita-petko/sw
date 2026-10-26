@@ -5,25 +5,35 @@ target("lagsw")
 
     add_includedirs("../include")
 
-    -- Packet capture backend; WinDivert is the only one and is Windows-only
+    -- Operating-system services (input, timers, HTTPS, ...), one implementation per platform
     if is_plat("windows") then
-        add_rules("backend.windivert")
+        add_files("platform/platform_windows.cc")
+    else
+        add_files("platform/platform_posix.cc")
+        add_packages("libcurl")
     end
 
-    -- Add UAC admin policy
-    set_policy("windows.manifest.uac", "admin")
+    -- Packet capture backend; WinDivert is Windows-only, other platforms use the stub until a real backend exists
+    if is_plat("windows") then
+        add_rules("backend.windivert")
 
-    -- For timeBeginPeriod
-    add_links("winmm")
+        -- Add UAC admin policy
+        set_policy("windows.manifest.uac", "admin")
 
-    -- Link user32 for GetAsyncKeyState
-    add_links("user32")
+        -- For timeBeginPeriod
+        add_links("winmm")
 
-    -- Link winhttp for optional server region lookups
-    add_links("winhttp")
+        -- Link user32 for GetAsyncKeyState
+        add_links("user32")
 
-    -- Link ole32 for per-capture PCAP GUID generation
-    add_links("ole32")
+        -- Link winhttp for optional server region lookups
+        add_links("winhttp")
+
+        -- Link ole32 for per-capture PCAP GUID generation
+        add_links("ole32")
+    else
+        add_rules("backend.stub")
+    end
 
     -- `xmake package [-o <dir>] lagsw` creates <dir>/lagsw-<version>-<arch>-<mode>/ and a matching .zip (default dir: dist)
     on_package(function (target)

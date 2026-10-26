@@ -1,6 +1,3 @@
-#include <windows.h>
-
-#include <conio.h>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -14,30 +11,17 @@
 #include "options.h"
 #include "packet_engine.h"
 #include "packet_backend.h"
+#include "platform.h"
 
 namespace {
 int get_key_without_waiting()
 {
-	if (!_kbhit())
-		return -1;
-	const int key = _getch();
-	if (key != 0 && key != 0xE0)
-		return key;
-	const int extended_key = _getch();
-	if (extended_key == 0x4B)
-		return VK_LEFT;
-	if (extended_key == 0x4D)
-		return VK_RIGHT;
-	if (extended_key == 0x49)
-		return VK_PRIOR;
-	if (extended_key == 0x51)
-		return VK_NEXT;
-	return -1;
+	return platform::read_key();
 }
 
 bool is_key_held(int key)
 {
-	return (::GetAsyncKeyState(key) & 0x8000) != 0;
+	return platform::is_key_held(key);
 }
 
 bool profiles_share_activation_key(const ProfileOptions& first, const ProfileOptions& second)
@@ -89,13 +73,13 @@ const char* format_key_mode(ProfileKeyMode mode)
 
 std::string format_key(int key)
 {
-	if (key == VK_SPACE)
+	if (key == platform::key::space)
 		return "space";
-	if (key == VK_MENU)
+	if (key == platform::key::alt)
 		return "alt";
-	if (key == VK_CONTROL)
+	if (key == platform::key::ctrl)
 		return "ctrl";
-	if (key == VK_SHIFT)
+	if (key == platform::key::shift)
 		return "shift";
 	if (key >= 0x20 && key <= 0x7E)
 		return std::string(1, static_cast<char>(key));
@@ -218,18 +202,11 @@ std::string format_capture_options(const ProfileOptions& profile)
 	return result.empty() ? "default" : result;
 }
 
-void enable_virtual_terminal()
-{
-	HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
-	DWORD  mode	  = 0;
-	if (output != INVALID_HANDLE_VALUE && GetConsoleMode(output, &mode))
-		SetConsoleMode(output, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
-}
 }  // namespace
 
 int main(int argc, char* argv[])
 {
-	enable_virtual_terminal();
+	platform::enable_terminal_colors();
 	if (!backend::initialize())
 	{
 		LOG_ERROR("Failed to initialize the %s capture backend", backend::name());
@@ -293,7 +270,7 @@ int main(int argc, char* argv[])
 		LOG_DETAIL("    filter: %s", filter.c_str());
 	}
 
-	::SetConsoleCtrlHandler(nullptr, TRUE);
+	platform::ignore_interrupt();
 
 	PacketEngine engine(options);
 	LOG_INFO(
@@ -391,29 +368,29 @@ int main(int argc, char* argv[])
 		if (key != -1)
 			LOG_DEBUG("Input received: %d", key);
 
-		if (key == 'q' || key == 'Q' || key == VK_BACK)
+		if (key == 'q' || key == 'Q' || key == platform::key::backspace)
 			break;
-		if (key == VK_PRIOR)
+		if (key == platform::key::page_up)
 		{
 			engine.cycle_server(-1);
 			continue;
 		}
-		if (key == VK_NEXT)
+		if (key == platform::key::page_down)
 		{
 			engine.cycle_server(1);
 			continue;
 		}
-		if (key == VK_LEFT)
+		if (key == platform::key::left)
 		{
 			engine.cycle_enforced_region(-1);
 			continue;
 		}
-		if (key == VK_RIGHT)
+		if (key == platform::key::right)
 		{
 			engine.cycle_enforced_region(1);
 			continue;
 		}
-		if (key == VK_TAB)
+		if (key == platform::key::tab)
 		{
 			engine.print_state();
 			continue;
@@ -472,7 +449,7 @@ int main(int argc, char* argv[])
 			}
 			if (disable_at[target] == 0)
 			{
-				disable_at[target] = GetTickCount64() + wait_ms;
+				disable_at[target] = platform::tick_ms() + wait_ms;
 				if (percentage_wait_ms != 0)
 					LOG_DEACTIVATE("Profile %zu will deactivate in %s (%s extra from %u%% of %s)",
 							 target + 1,
@@ -514,9 +491,9 @@ int main(int argc, char* argv[])
 			pending_activation[index] = false;
 			engine.setup(static_cast<int>(index + 1));
 			if (engine.is_running(static_cast<int>(index + 1)) && options.profiles[index].mode == ProfileActivationMode::period)
-				period_deactivate_at[index] = GetTickCount64() + options.profiles[index].activation_period_ms;
+				period_deactivate_at[index] = platform::tick_ms() + options.profiles[index].activation_period_ms;
 		};
-		const uint64_t now = GetTickCount64();
+		const uint64_t now = platform::tick_ms();
 		for (size_t index = 0; index < options.profiles.size(); ++index)
 			if (period_deactivate_at[index] != 0 && now >= period_deactivate_at[index])
 			{

@@ -1,11 +1,12 @@
 #ifndef REGION_LOOKUP_H_
 #define REGION_LOOKUP_H_
 
-#include <windows.h>
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <unordered_map>
+
+#include "platform.h"
 
 /// Cached region label and resolved server name, with an expiration timestamp.
 struct RegionCacheEntry
@@ -36,17 +37,9 @@ void load_region_cache(std::unordered_map<std::string, RegionCacheEntry>& cache)
 void save_region_cache(const std::unordered_map<std::string, RegionCacheEntry>& cache);
 
 /// HTTP status, retry delay, and response body returned by an HTTPS request.
-struct HttpResponse
-{
-	/// HTTP response status code.
-	DWORD		status				= 0;
-	/// Server-provided delay before retrying a rate-limited request.
-	DWORD		retry_after_seconds = 0;
-	/// Response body.
-	std::string body;
-};
+using HttpResponse = platform::HttpResponse;
 
 /// Sends an HTTPS GET request, retrying rate-limited responses when instructed.
-HttpResponse https_get_until_not_rate_limited(const std::wstring& host, const std::wstring& path);
+HttpResponse https_get_until_not_rate_limited(const std::string& host, const std::string& path);
 
 #endif

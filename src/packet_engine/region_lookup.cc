@@ -1,6 +1,5 @@
 #include "region_lookup.h"
 
-#include <winhttp.h>
 #include <cctype>
 #include <cstdlib>
 #include <ctime>
@@ -146,10 +145,10 @@ std::optional<std::string> extract_region_label(const std::string& response)
 
 std::string region_cache_path()
 {
-	const char* local_app_data = std::getenv("LOCALAPPDATA");
-	if (!local_app_data || *local_app_data == '\0')
+	const std::string directory = platform::data_directory();
+	if (directory.empty())
 		return {};
-	return std::string(local_app_data) + "\\lagsw\\region-cache.csv";
+	return directory + "/region-cache.csv";
 }
 
 std::string csv_field(const std::string& value)
@@ -254,7 +253,7 @@ void save_region_cache(const std::unordered_map<std::string, RegionCacheEntry>& 
 	if (path.empty())
 		return;
 	const std::string directory = path.substr(0, path.find_last_of("\\/"));
-	CreateDirectoryA(directory.c_str(), nullptr);
+	platform::make_directory(directory);
 	const std::string temporary_path = path + ".tmp";
 	std::ofstream	  file(temporary_path, std::ios::trunc);
 	if (!file)
@@ -263,115 +262,20 @@ void save_region_cache(const std::unordered_map<std::string, RegionCacheEntry>& 
 		file << csv_field(address) << ',' << csv_field(entry.label) << ',' << csv_field(entry.server_name) << ',' << entry.expires_at
 			 << '\n';
 	file.close();
-	if (!MoveFileExA(temporary_path.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-		DeleteFileA(temporary_path.c_str());
+	platform::replace_file(temporary_path, path);
 }
 
-// queries ipapi.co over HTTPS; callers use the status to avoid caching errors
-HttpResponse https_get(const std::wstring& host, const std::wstring& path)
-{
-	HttpResponse result;
-	HINTERNET	 session = WinHttpOpen(L"lagsw/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-	if (!session)
-	{
-		LOG_DEBUG("https_get: WinHttpOpen failed %lu", GetLastError());
-		return result;
-	}
-	WinHttpSetTimeouts(session, 3000, 3000, 3000, 3000);
-	if (HINTERNET connect = WinHttpConnect(session, host.c_str(), INTERNET_DEFAULT_HTTPS_PORT, 0))
-	{
-		LOG_DEBUG("https_get: connected to host");
-		if (HINTERNET request = WinHttpOpenRequest(connect,
-												   L"GET",
-												   path.c_str(),
-												   nullptr,
-												   WINHTTP_NO_REFERER,
-												   WINHTTP_DEFAULT_ACCEPT_TYPES,
-												   WINHTTP_FLAG_SECURE))
-		{
-			LOG_DEBUG("https_get: request opened, sending");
-			if (WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
-				WinHttpReceiveResponse(request, nullptr))
-			{
-				DWORD status	  = 0;
-				DWORD status_size = sizeof(status);
-				if (WinHttpQueryHeaders(request,
-										WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-										WINHTTP_HEADER_NAME_BY_INDEX,
-										&status,
-										&status_size,
-										WINHTTP_NO_HEADER_INDEX))
-				{
-					result.status = status;
-					// Retry-After can be a delta-seconds count or an HTTP-date, so it isn't queryable via WINHTTP_QUERY_FLAG_NUMBER
-					DWORD retry_after_bytes = 0;
-					WinHttpQueryHeaders(request,
-										WINHTTP_QUERY_RETRY_AFTER,
-										WINHTTP_HEADER_NAME_BY_INDEX,
-										WINHTTP_NO_OUTPUT_BUFFER,
-										&retry_after_bytes,
-										WINHTTP_NO_HEADER_INDEX);
-					if (retry_after_bytes > 0)
-					{
-						std::wstring retry_after_text(retry_after_bytes / sizeof(wchar_t), L'\0');
-						if (WinHttpQueryHeaders(request,
-												WINHTTP_QUERY_RETRY_AFTER,
-												WINHTTP_HEADER_NAME_BY_INDEX,
-												retry_after_text.data(),
-												&retry_after_bytes,
-												WINHTTP_NO_HEADER_INDEX))
-						{
-							retry_after_text.resize(wcsnlen(retry_after_text.c_str(), retry_after_text.size()));
-							try
-							{
-								result.retry_after_seconds = std::stoul(retry_after_text);
-							}
-							catch (const std::exception&)
-							{
-								LOG_DEBUG("https_get: Retry-After header is not a delta-seconds value, ignoring");
-							}
-						}
-					}
-					LOG_DEBUG("https_get: response received, status %lu, reading body", status);
-				}
-				else
-					LOG_DEBUG("https_get: response received, status unknown, reading body");
-				DWORD available = 0;
-				while (WinHttpQueryDataAvailable(request, &available) && available > 0)
-				{
-					std::vector<char> buffer(available);
-					DWORD			  read = 0;
-					if (!WinHttpReadData(request, buffer.data(), available, &read))
-						break;
-					result.body.append(buffer.data(), read);
-				}
-				LOG_DEBUG("https_get: finished reading %zu total bytes", result.body.size());
-			}
-			else
-				LOG_DEBUG("https_get: send/receive failed %lu", GetLastError());
-			WinHttpCloseHandle(request);
-		}
-		else
-			LOG_DEBUG("https_get: WinHttpOpenRequest failed %lu", GetLastError());
-		WinHttpCloseHandle(connect);
-	}
-	else
-		LOG_DEBUG("https_get: WinHttpConnect failed %lu", GetLastError());
-	WinHttpCloseHandle(session);
-	return result;
-}
-
-HttpResponse https_get_until_not_rate_limited(const std::wstring& host, const std::wstring& path)
+HttpResponse https_get_until_not_rate_limited(const std::string& host, const std::string& path)
 {
 	while (true)
 	{
-		HttpResponse response = https_get(host, path);
+		HttpResponse response = platform::https_get(host, path);
 		if (response.status != 429)
 			return response;
-		const DWORD delay_seconds = response.retry_after_seconds == 0 ? 1 : response.retry_after_seconds;
-		LOG_DEBUG("https_get: rate limited, retrying in %lu second(s)", delay_seconds);
-		const DWORD delay_ms =
-			delay_seconds > (std::numeric_limits<DWORD>::max)() / 1000 ? (std::numeric_limits<DWORD>::max)() : delay_seconds * 1000;
-		Sleep(delay_ms);
+		const uint32_t delay_seconds = response.retry_after_seconds == 0 ? 1 : response.retry_after_seconds;
+		LOG_DEBUG("https_get: rate limited, retrying in %u second(s)", delay_seconds);
+		const uint32_t delay_ms =
+			delay_seconds > (std::numeric_limits<uint32_t>::max)() / 1000 ? (std::numeric_limits<uint32_t>::max)() : delay_seconds * 1000;
+		platform::sleep_ms(delay_ms);
 	}
 }

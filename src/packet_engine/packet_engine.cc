@@ -126,7 +126,7 @@ std::string PacketEngine::region_enforcement_status() const
 	if (!state_->probe_received)
 		return "Waiting for probes...";
 
-	const uint64_t now = GetTickCount64();
+	const uint64_t now = platform::tick_ms();
 	if (now >= state_->next_check_time)
 		return "~0s";
 
@@ -136,7 +136,7 @@ std::string PacketEngine::region_enforcement_status() const
 
 uint64_t PacketEngine::running_time_ms() const
 {
-	const uint64_t				now = GetTickCount64();
+	const uint64_t				now = platform::tick_ms();
 	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
 	uint64_t					earliest_enabled   = now;
 	bool						has_active_profile = false;
@@ -157,7 +157,7 @@ uint64_t PacketEngine::profile_running_time_ms(int profile) const
 		return 0;
 	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
 	const size_t				index = static_cast<size_t>(profile - 1);
-	return state_->active_profiles[index] ? GetTickCount64() - state_->profile_stats[index].enabled_since : 0;
+	return state_->active_profiles[index] ? platform::tick_ms() - state_->profile_stats[index].enabled_since : 0;
 }
 
 std::string PacketEngine::profile_packet_status(int profile) const
@@ -185,7 +185,7 @@ std::optional<uint64_t> PacketEngine::profile_desync_countdown_ms(int profile) c
 	const uint64_t duration_percent = options_.features.desync_countdown.duration_percent;
 	const uint64_t estimate_ms = (stats.last_enabled_time / 100) * duration_percent +
 								  (stats.last_enabled_time % 100) * duration_percent / 100;
-	const uint64_t elapsed_ms = GetTickCount64() - stats.last_disabled_at;
+	const uint64_t elapsed_ms = platform::tick_ms() - stats.last_disabled_at;
 	if (elapsed_ms >= estimate_ms)
 		return std::nullopt;
 	return estimate_ms - elapsed_ms;
@@ -208,7 +208,7 @@ uint64_t PacketEngine::next_batch_in_ms() const
 {
 	uint64_t					next_release	   = (std::numeric_limits<uint64_t>::max)();
 	bool						has_queued_packets = false;
-	const uint64_t				now				   = GetTickCount64();
+	const uint64_t				now				   = platform::tick_ms();
 	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
 	for (const auto& session : state_->active_sessions)
 		if (session)
@@ -374,7 +374,7 @@ void PacketEngine::setup(int profile)
 	}
 	if (state_->active_sessions[profile - 1])
 		return;
-	timeBeginPeriod(1);
+	platform::begin_timer_resolution();
 	const ProfileOptions& profile_options = options_.profiles[profile - 1];
 	const bool			  sniff			  = profile_options.capture_options.sniff.value_or(false);
 	const bool			  forward		  = profile_options.capture_options.forward.value_or(false);
@@ -391,18 +391,18 @@ void PacketEngine::setup(int profile)
 				  profile,
 				  profile_options.name.c_str(),
 				  open_error.c_str());
-		timeEndPeriod(1);
+		platform::end_timer_resolution();
 		return;
 	}
 	std::shared_ptr<Session> session(new Session(profile, std::move(handle), packet_modes_[profile - 1].get()));
 	if (pcap_files_enabled_for(options_.features.pcap_files, profile_options))
 	{
-		GUID guid = {};
-		if (FAILED(CoCreateGuid(&guid)))
+		const std::string guid = platform::generate_guid();
+		if (guid.empty())
 			LOG_ERROR("profile #%d - %s PCAP capture: failed to generate a GUID", profile, profile_options.name.c_str());
 		else
 		{
-			session->pcap_guid = format_guid(guid);
+			session->pcap_guid = guid;
 			std::error_code error;
 			std::filesystem::create_directories(options_.features.pcap_files.output_dir, error);
 			if (error)
@@ -446,7 +446,7 @@ void PacketEngine::setup(int profile)
 			}
 		}
 	}
-	state_->profile_stats[profile - 1].enabled_since = GetTickCount64();
+	state_->profile_stats[profile - 1].enabled_since = platform::tick_ms();
 	state_->active_sessions[profile - 1] = session;
 	state_->active_profiles[profile - 1] = true;
 	{
@@ -514,9 +514,9 @@ void PacketEngine::teardown(int profile)
 			return;
 		LOG_DEBUG("profile #%d - %s teardown: stopping workers", profile, options_.profiles[profile - 1].name.c_str());
 		State::ProfileStats& stats = state_->profile_stats[profile - 1];
-		enabled_time			   = GetTickCount64() - stats.enabled_since;
+		enabled_time			   = platform::tick_ms() - stats.enabled_since;
 		stats.last_enabled_time	   = enabled_time;
-		stats.last_disabled_at	   = GetTickCount64();
+		stats.last_disabled_at	   = platform::tick_ms();
 		stats.enabled_time_total += enabled_time;
 		if (enabled_time < stats.enabled_time_min)
 			stats.enabled_time_min = enabled_time;
@@ -536,7 +536,7 @@ void PacketEngine::teardown(int profile)
 			if (pcap_captured)
 				session->pcap_file.reset();
 			session->handle->close();
-			timeEndPeriod(1);
+			platform::end_timer_resolution();
 			LOG_DEACTIVATE("profile #%d - %s teardown: disabled after %s",
 					 profile,
 					 options_.profiles[profile - 1].name.c_str(),

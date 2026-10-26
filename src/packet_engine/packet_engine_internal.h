@@ -1,7 +1,6 @@
 #ifndef PACKET_ENGINE_INTERNAL_H_
 #define PACKET_ENGINE_INTERNAL_H_
 
-#include <windows.h>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -18,6 +17,7 @@
 #include <vector>
 
 #include "packet_engine.h"
+#include "platform.h"
 #include "packet_backend.h"
 #include "packet_headers.h"
 #include "packet_engine_util.h"

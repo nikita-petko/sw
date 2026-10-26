@@ -15,7 +15,7 @@ void PacketEngine::discover_packets()
 		});
 		return server == options_.servers.end() ? address : server->name + " [" + address + "]";
 	};
-	uint64_t window_started = GetTickCount64();
+	uint64_t window_started = platform::tick_ms();
 	bool	 was_running	= false;
 	uint8_t	 packet_data[0xFFFF];
 	while (!shutdown_)
@@ -35,14 +35,14 @@ void PacketEngine::discover_packets()
 				packet_counts.clear();
 				std::lock_guard<std::mutex> lock(state_->discovery_mutex);
 				state_->discovery_counts.clear();
-				window_started = GetTickCount64();
+				window_started = platform::tick_ms();
 				continue;
 			}
 			if (was_running)
 			{
 				LOG_DEBUG("Server discovery enabled after all profiles were deactivated");
 				was_running	   = false;
-				window_started = GetTickCount64();
+				window_started = platform::tick_ms();
 			}
 			ParsedPacket parsed;
 			if (parse_packet(packet_data, received_length, parsed))
@@ -92,7 +92,7 @@ void PacketEngine::discover_packets()
 			LOG_ERROR("Server discovery recv: %s", io_error.c_str());
 		}
 
-		const uint64_t now = GetTickCount64();
+		const uint64_t 		now = platform::tick_ms();
 		if (now - window_started < options_.discovery_window_ms)
 			continue;
 		if (!packet_counts.empty())
@@ -156,7 +156,7 @@ void PacketEngine::probe_packets()
 			{
 				const Ipv4Header* ip_header	  = parsed.ipv4;
 				const Ipv6Header* ipv6_header = parsed.ipv6;
-				const uint64_t	  now		  = GetTickCount64();
+				const uint64_t	  now		  = platform::tick_ms();
 				std::string		  server_address;
 				if (ip_header)
 					server_address = format_ipv4_address(address.outbound ? ip_header->DstAddr : ip_header->SrcAddr);
@@ -280,8 +280,8 @@ void PacketEngine::forwarded_address_discovery_recv()
 		for (const int profile : active_profiles)
 			setup(profile);
 	};
-
-	uint64_t window_started = GetTickCount64();
+
+	uint64_t window_started = platform::tick_ms();
 	uint8_t	 packet_data[0xFFFF];
 	while (!shutdown_)
 	{
@@ -337,7 +337,7 @@ void PacketEngine::forwarded_address_discovery_recv()
 			LOG_ERROR("Forwarded address discovery recv: %s", io_error.c_str());
 		}
 
-		const uint64_t now = GetTickCount64();
+		const uint64_t 		now = platform::tick_ms();
 		if (now - window_started < window_ms)
 			continue;
 		LOG_DEBUG("Forwarded address discovery: window closed after %s (dst candidates=%zu, src candidates=%zu)",

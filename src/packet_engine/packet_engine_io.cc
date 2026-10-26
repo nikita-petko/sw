@@ -51,7 +51,7 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 								   received_length,
 								   address,
 								   session->profile,
-								   GetTickCount64(),
+								   platform::tick_ms(),
 								   session->next_receive_order++,
 								   session->delayed_packets);
 			session->packet_changed.notify_one();
@@ -99,7 +99,7 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 				if (session->stopping)
 					break;
 
-				const uint64_t now = GetTickCount64();
+				const uint64_t now = platform::tick_ms();
 				if (session->delayed_packets.top()->release_at > now)
 				{
 					if (session->delayed_packets.top()->release_at == (std::numeric_limits<uint64_t>::max)())

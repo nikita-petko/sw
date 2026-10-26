@@ -108,11 +108,11 @@ void PacketEngine::resolve_region(const std::string& address, bool preserve_name
 	LOG_DEBUG("Region lookup for '%s': queued", address.c_str());
 	state_->region_threads.emplace_back([this, address, preserve_name] {
 		LOG_DEBUG("Region lookup for '%s': requesting https://ipapi.co/%s/json/", address.c_str(), address.c_str());
-		const std::wstring path		= L"/" + std::wstring(address.begin(), address.end()) + L"/json/";
-		const HttpResponse response = https_get_until_not_rate_limited(L"ipapi.co", path);
+		const std::string  path		= "/" + address + "/json/";
+		const HttpResponse response = https_get_until_not_rate_limited("ipapi.co", path);
 		if (response.status < 200 || response.status >= 300 || response.body.empty())
 		{
-			LOG_DEBUG("Region lookup for '%s': unsuccessful response (status %lu), giving up", address.c_str(), response.status);
+			LOG_DEBUG("Region lookup for '%s': unsuccessful response (status %u), giving up", address.c_str(), response.status);
 			return;
 		}
 		LOG_DEBUG("Region lookup for '%s': received %zu byte response", address.c_str(), response.body.size());
@@ -167,10 +167,10 @@ void PacketEngine::resolve_client_region()
 	LOG_DEBUG("Client region lookup: queued");
 	state_->region_threads.emplace_back([this] {
 		LOG_DEBUG("Client region lookup: requesting https://ipapi.co/json/");
-		const HttpResponse response = https_get_until_not_rate_limited(L"ipapi.co", L"/json/");
+		const HttpResponse response = https_get_until_not_rate_limited("ipapi.co", "/json/");
 		if (response.status < 200 || response.status >= 300 || response.body.empty())
 		{
-			LOG_DEBUG("Client region lookup: unsuccessful response (status %lu), giving up", response.status);
+			LOG_DEBUG("Client region lookup: unsuccessful response (status %u), giving up", response.status);
 			return;
 		}
 		LOG_DEBUG("Client region lookup: received %zu byte response", response.body.size());
@@ -209,7 +209,7 @@ void PacketEngine::region_enforcement_recv()
 			continue;
 		}
 
-		const uint64_t now		  = GetTickCount64();
+		const uint64_t now		  = platform::tick_ms();
 		const uint64_t delay_ms	  = 1000 + (static_cast<uint64_t>(std::rand()) % 501);
 		const uint64_t release_at = now + delay_ms;
 
@@ -250,7 +250,7 @@ void PacketEngine::region_enforcement_send()
 			if (state_->region_enforcement_stopping || shutdown_)
 				break;
 
-			const uint64_t now				= GetTickCount64();
+			const uint64_t now				= platform::tick_ms();
 			uint64_t	   earliest_release = (std::numeric_limits<uint64_t>::max)();
 			for (const auto& pkt : state_->enforcement_queue)
 			{

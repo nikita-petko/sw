@@ -1,11 +1,12 @@
 #include <log.h>
 
-#include <windows.h>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <mutex>
 #include <string>
+
+#include "platform.h"
 
 namespace {
 constexpr size_t max_log_message = 1024;
@@ -22,11 +23,7 @@ void clear_status_line()
 
 int console_width()
 {
-	CONSOLE_SCREEN_BUFFER_INFO console_info;
-	const HANDLE			   output = GetStdHandle(STD_OUTPUT_HANDLE);
-	if (output == INVALID_HANDLE_VALUE || !GetConsoleScreenBufferInfo(output, &console_info))
-		return 0;
-	return console_info.srWindow.Right - console_info.srWindow.Left + 1;
+	return platform::console_width();
 }
 
 void print_status_line(const std::string& status, const std::string& right_status = {})

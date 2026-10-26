@@ -60,7 +60,7 @@ void PacketEngine::print_state() const
 		{
 			std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
 			if (active_profiles[index])
-				enabled_time_current = GetTickCount64() - stats.enabled_since;
+				enabled_time_current = platform::tick_ms() - stats.enabled_since;
 			enabled_time_total = stats.enabled_time_total;
 			enabled_time_min   = stats.enabled_count == 0 ? 0 : stats.enabled_time_min;
 			enabled_time_max   = stats.enabled_time_max;
