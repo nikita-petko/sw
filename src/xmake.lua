@@ -1,5 +1,5 @@
 target("lagsw")
-    set_version("5")
+    set_version("6")
     set_kind("binary")
     add_files("*.cc", "modules/*.cc", "packet_engine/*.cc")
 
@@ -11,6 +11,8 @@ target("lagsw")
     else
         add_files("platform/platform_posix.cc")
         add_packages("libcurl")
+        -- The static libcurl from vcpkg does not propagate its zlib dependency to the link line
+        add_packages("zlib")
     end
 
     -- Packet capture backend; WinDivert is Windows-only, other platforms use the stub until a real backend exists

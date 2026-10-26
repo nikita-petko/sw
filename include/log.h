@@ -2,6 +2,7 @@
 #define LOG_H_
 
 #include <string>
+#include <cstdint>
 
 namespace logging {
 
@@ -26,7 +27,7 @@ enum class style
 };
 
 /// Formats a millisecond duration as a compact human-readable string.
-std::string format_duration(uint64_t duration_ms);
+std::string format_duration(std::uint64_t duration_ms);
 /// Sets the minimum severity written by the logging functions.
 void set_level(level minimum_level);
 /// Writes a printf-style message at the given severity.

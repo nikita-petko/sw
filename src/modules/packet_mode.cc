@@ -8,6 +8,7 @@
 #include "log.h"
 
 namespace {
+[[maybe_unused]] static
 const char* retransmission_mode_name(RetransmissionMode mode)
 {
 	switch (mode)

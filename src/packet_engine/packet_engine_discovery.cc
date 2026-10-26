@@ -64,7 +64,7 @@ void PacketEngine::discover_packets()
 					const bool configured_server = existing_server != options_.servers.end();
 					if (existing_server == options_.servers.end())
 					{
-						options_.servers.push_back({address_text, address_text});
+						options_.servers.push_back({address_text, address_text, ""});
 						existing_server = options_.servers.end() - 1;
 					}
 					if (first_seen)
@@ -109,7 +109,7 @@ void PacketEngine::discover_packets()
 				});
 				if (existing_server == options_.servers.end())
 				{
-					options_.servers.push_back({winner->first, winner->first});
+					options_.servers.push_back({winner->first, winner->first, ""});
 					existing_server = options_.servers.end() - 1;
 				}
 				else
@@ -280,7 +280,8 @@ void PacketEngine::forwarded_address_discovery_recv()
 		for (const int profile : active_profiles)
 			setup(profile);
 	};
-
+
+
 	uint64_t window_started = platform::tick_ms();
 	uint8_t	 packet_data[0xFFFF];
 	while (!shutdown_)

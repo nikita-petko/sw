@@ -1,7 +1,5 @@
 #include "packet_engine_internal.h"
 
-#include <objbase.h>
-#include <mmsystem.h>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
