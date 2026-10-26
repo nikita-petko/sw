@@ -6,7 +6,7 @@ param([switch]$Elevated)
 # ---- Preconfigured settings: edit these ----
 $ExeName  = 'lagsw.exe'
 $AppArgs  = @(
-    '--config', 'profiles/div1.yml',
+    '--config', 'profiles/div1.sw.yml',
     '--log-level', 'info',
     '--resolve-region'
     # '--server', 'name-or-address'

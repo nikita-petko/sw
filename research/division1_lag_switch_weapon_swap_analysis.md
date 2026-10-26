@@ -240,7 +240,7 @@ authoritative game server is not part of this repository:
 ## 9. Empirical findings: conditions for consistently reproducing sniper damage
 
 Hands-on testing while tuning the profiles in this repository (see
-[`profiles/div1.yml`](../profiles/div1.yml)) found that the plain outbound
+[`profiles/div1.sw.yml`](../profiles/div1.sw.yml)) found that the plain outbound
 weapon-swap variant described in Section 2 is **not a fixed, deterministic
 trigger** — whether the delayed low-damage shots register as the swapped-to
 high-damage weapon is sensitive to several variables that are not obvious from
@@ -300,7 +300,7 @@ fixed `delay_ms` and an instantaneous release; it needs the hold time *after*
 the weapon swap to be tunable independently of the capture delay, and ideally
 tunable per attempt based on how much was queued and how long the withholding
 period lasted. This observation is what motivated the recent profile changes
-in this repository (see [`profiles/div1.yml`](../profiles/div1.yml)):
+in this repository (see [`profiles/div1.sw.yml`](../profiles/div1.sw.yml)):
 separating the "withhold fire events" profile (`RPM`, `from_timestamp`) from
 the long-hold profiles (`Long (Recv)` / `Long (Send)`, `ratio`-based with a
 large `delay_ms` and partial percentage release), so that the post-swap hold

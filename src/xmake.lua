@@ -46,14 +46,27 @@ target("lagsw")
         os.mkdir(pkgdir)
 
         os.cp(target:targetfile(), pkgdir)
-        os.cp(path.join(os.projectdir(), "scripts", "*"), pkgdir)
+        -- Windows-only helper scripts are skipped on Linux and vice versa
+        local scripts = is_plat("windows") and {"*.ps1", "*.cmd"} or {"*.sh"}
+        for _, pattern in ipairs(scripts) do
+            os.cp(path.join(os.projectdir(), "scripts", pattern), pkgdir)
+        end
         os.cp(path.join(os.projectdir(), "profiles"), pkgdir)
 
-        local zip = path.join(outdir, name .. ".zip")
-        os.tryrm(zip)
-        -- bsdtar ships with Windows 10+
-        os.vrunv("tar", {"-a", "-c", "-f", zip, "-C", pkgdir, "."})
-        cprint("${green}packaged: %s", zip)
+        if is_plat("windows") then
+            local zip = path.join(outdir, name .. ".zip")
+            os.tryrm(zip)
+            -- bsdtar ships with Windows 10+
+            os.vrunv("tar", {"-a", "-c", "-f", zip, "-C", pkgdir, "."})
+            cprint("${green}packaged: %s", zip)
+        else
+            -- tar preserves the executable bits of the binary and bootstrap.sh
+            os.runv("chmod", {"+x", path.join(pkgdir, target:basename())})
+            local archive = path.join(outdir, name .. ".tar.gz")
+            os.tryrm(archive)
+            os.vrunv("tar", {"-czf", archive, "-C", pkgdir, "."})
+            cprint("${green}packaged: %s", archive)
+        end
     end)
     before_clean(function (target)
         import("core.base.option")

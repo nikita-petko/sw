@@ -7,7 +7,7 @@ Research document. Derived from a packet capture (`full-init.pcapng`, ~384KB,
 startup: matchmaking, region-latency probing, voice-server connection, and
 the initial handshake/steady-state traffic of the main game server
 connection. Findings are correlated against this repository's existing
-[`profiles/div1.yml`](../profiles/div1.yml) and
+[`profiles/div1.sw.yml`](../profiles/div1.sw.yml) and
 [`README.md`](../README.md), which independently encode several of the same
 server roles and ports observed in the capture. This document is a factual,
 observation-driven companion to
@@ -68,7 +68,7 @@ until it is released.
 ## 3. Observed server roles, by port and IP
 
 Correlating the capture's destination IPs/ports against the named server
-groups already present in [`profiles/div1.yml`](../profiles/div1.yml) shows a
+groups already present in [`profiles/div1.sw.yml`](../profiles/div1.sw.yml) shows a
 consistent multi-service architecture, where a single game session requires
 establishing several independent TCP connections to different
 Google-Cloud-hosted IPs, distinguished by destination port. Reverse-DNS
@@ -90,11 +90,11 @@ server" for these two hosts:
 | --- | --- | --- |
 | `27015` | **Public-key bootstrap service** ("public-key-store") | First connection made in the capture, to `34.78.88.218:27015`, whose hostname literally identifies it as a public-key store; see Section 6 for why the 32-byte value observed in the pre-TLS handshake preamble (Section 4) is a plausible candidate for material originating from this service. Port 27015 is also the conventional Source-engine/Steam matchmaking/query port, which may be an incidental reuse rather than a matchmaking role here |
 | `51000` | **Directory / bootstrap config broker** ("proxy-core") | Connection to `34.76.151.88:51000`; a separate, out-of-band raw/plaintext probe against this host (see Section 6) returned a directory listing of all 10 candidate backend servers plus a per-server port/service table, indicating this host's role is distributing server topology, not carrying voice media as originally assumed from the port number alone |
-| `55002` | Region-latency probe ("region enforcement") | Five parallel connections opened in this capture to `34.76.248.132`, `34.13.202.203`, `136.110.106.37`, `136.112.189.19`, `34.116.109.80` — these are 5 of the 10 candidate addresses also present in [`profiles/div1.yml`](../profiles/div1.yml), and `55002` is exactly the `features.region_enforcement.probe_port` value already configured in that profile. [division1_server_list_and_latency_probes.md](division1_server_list_and_latency_probes.md) shows across five sessions that this is a **random sample of 5 of the 10 candidates, with replacement**, refreshed on a roughly 5-minute interval for the life of the client — not a fixed subset tied to this one capture |
+| `55002` | Region-latency probe ("region enforcement") | Five parallel connections opened in this capture to `34.76.248.132`, `34.13.202.203`, `136.110.106.37`, `136.112.189.19`, `34.116.109.80` — these are 5 of the 10 candidate addresses also present in [`profiles/div1.sw.yml`](../profiles/div1.sw.yml), and `55002` is exactly the `features.region_enforcement.probe_port` value already configured in that profile. [division1_server_list_and_latency_probes.md](division1_server_list_and_latency_probes.md) shows across five sessions that this is a **random sample of 5 of the 10 candidates, with replacement**, refreshed on a roughly 5-minute interval for the life of the client — not a fixed subset tied to this one capture |
 | `55000` (lobby) | Persistent, low-traffic control-plane connection, held for the duration of any menu session | Opened to a europe-west1 candidate (`104.155.45.25` in this capture; also observed alternating with `34.76.248.132` across sessions in the companion document) as soon as the home-menu loading screen appears; single-digit packet counts over multi-second windows |
 | `55000` (authoritative game server) | The actual gameplay session, opened only once a match starts | In this capture, opened to `34.90.202.108` and carrying by far the most traffic (493 server→client and 397 client→server packets). [division1_server_list_and_latency_probes.md](division1_server_list_and_latency_probes.md) reports this connection targets a **server-assigned IP that is not guaranteed to be, and in the one fully-traced session was not, a member of the set the client had probed on `55002`** — see Section 6a |
 
-The server list already hard-coded into [`profiles/div1.yml`](../profiles/div1.yml)
+The server list already hard-coded into [`profiles/div1.sw.yml`](../profiles/div1.sw.yml)
 matches the 10-address candidate pool observed across both the network
 traffic in this capture and the client's own embedded resource (Section 6),
 so it is not speculative as a *candidate list*. However, per
@@ -272,12 +272,12 @@ directly on connection, before or instead of a TLS session being negotiated.
 | `0x02`–`0x06` | `a4 0c d2 04 00` | Unidentified 5-byte field — plausibly a sequence number, timestamp fragment, or response-length hint; no repeated structure was available across samples to confirm |
 | `0x07`–`0x26` | 32 bytes, high entropy | A 32-byte opaque token positioned immediately before the server address list. 32 bytes is also the exact length of an Ed25519/X25519 public key. Given that a sibling connection from the same client run resolves to a host literally named `public-key-store` (Section 3), the most plausible reading is that this token is public-key or key-derivation material the client uses to validate or bootstrap trust in the server list that immediately follows it — this is a structural inference from hostname and length evidence, not a confirmed decode |
 | `0x27` | `0a` (10) | Count of address entries that follow |
-| `0x28` onward | Pascal-style length-prefixed ASCII strings, e.g. `0d 31 30 34 2e 31 35 35 2e 34 35 2e 32 35` = length `13` + `"104.155.45.25"` | 10 server IPv4 addresses in dotted-decimal text form. All 10 addresses exactly match, as a set, the 10 addresses already hard-coded across `servers.addresses` and the `EU`/`ASIA`/`US`/`OCEANIA` groups in [`profiles/div1.yml`](../profiles/div1.yml) (only the order differs) |
+| `0x28` onward | Pascal-style length-prefixed ASCII strings, e.g. `0d 31 30 34 2e 31 35 35 2e 34 35 2e 32 35` = length `13` + `"104.155.45.25"` | 10 server IPv4 addresses in dotted-decimal text form. All 10 addresses exactly match, as a set, the 10 addresses already hard-coded across `servers.addresses` and the `EU`/`ASIA`/`US`/`OCEANIA` groups in [`profiles/div1.sw.yml`](../profiles/div1.sw.yml) (only the order differs) |
 | After the address list | `14` (20) | Count of 6-byte records that follow (2 per server × 10 servers) |
 | Each 6-byte record | e.g. `d8 ad 03 00 00 00` / `da ad 03 00 01 01` | A repeating `[d8|da] ad 03 [selector] [00|01] [index]` shape: a constant 2-byte tag body (`ad 03`) preceded by an alternating discriminator byte (`d8` or `da`), a `selector` byte that takes only 5 distinct values (`00`, `16`, `1a`, `1f`, `23`) across the whole table, a flag byte that mirrors the `d8`/`da` discriminator (`00`/`01`), and a final byte that increments once per server index (`00`–`09`) |
 
 The 6-byte record table's counts line up neatly with
-[`profiles/div1.yml`](../profiles/div1.yml)'s grouping of the same 10
+[`profiles/div1.sw.yml`](../profiles/div1.sw.yml)'s grouping of the same 10
 addresses into 5 named groups of 2 servers each (`servers.addresses`, `EU`,
 `ASIA`, `US`, `OCEANIA`): it contains exactly 20 records (2 per server) and
 the `selector` byte takes exactly 5 distinct values. This document originally
@@ -300,7 +300,7 @@ response from `proxy-core`, indicates this is a shared serialization format
 used both for a default list embedded in the client and for any
 server-refreshed copy of it, rather than something invented solely for this
 one network response. This means the server list in
-[`profiles/div1.yml`](../profiles/div1.yml) reflects a real, currently-valid
+[`profiles/div1.sw.yml`](../profiles/div1.sw.yml) reflects a real, currently-valid
 candidate pool by two independent lines of evidence (embedded resource and
 network response) — but, per Section 6a below, that candidate pool is not
 necessarily identical to the pool of servers eligible for actual game-host
@@ -332,7 +332,7 @@ This matters directly for this repository's own tooling: `lagsw`'s
 `servers.discovery_port` mechanism (see [`README.md`](../README.md))
 identifies the "authoritative server" as whichever configured address
 receives the most packets on a given port during a discovery window. Because
-the candidate pool in [`profiles/div1.yml`](../profiles/div1.yml) is drawn
+the candidate pool in [`profiles/div1.sw.yml`](../profiles/div1.sw.yml) is drawn
 from the same 10-address list used for `55002` probing, and that list is not
 guaranteed to contain the real game host, `lagsw`'s discovery/server-list
 approach should be treated as a best-effort heuristic that may need its
@@ -376,7 +376,7 @@ selectively hold and release.
 
 This capture provides direct, observation-based support for several claims
 made in the companion exploit documents and encoded in
-[`profiles/div1.yml`](../profiles/div1.yml):
+[`profiles/div1.sw.yml`](../profiles/div1.sw.yml):
 
 - The exclusive use of TCP for the game session (Section 2) confirms the
   premise, used throughout both exploit documents, that packet delay/drop is
@@ -385,7 +385,7 @@ made in the companion exploit documents and encoded in
   released, which is central to how the "release a burst on demand" behavior
   in both exploits is achieved.
 - The server list and `55002` probe port already present in
-  [`profiles/div1.yml`](../profiles/div1.yml) are shown to be accurate,
+  [`profiles/div1.sw.yml`](../profiles/div1.sw.yml) are shown to be accurate,
   currently-live values, not placeholders, since they match observed traffic
   exactly (Section 3).
 - The steady-state, small-frequent-push/small-frequent-ack cadence on the
@@ -397,7 +397,7 @@ made in the companion exploit documents and encoded in
   events) independently of the server's ongoing push stream.
 - The server-directory response served by `proxy-core` (Section 6) confirms
   that the exact 10-address candidate server set used throughout this
-  repository's [`profiles/div1.yml`](../profiles/div1.yml) is the game's real,
+  repository's [`profiles/div1.sw.yml`](../profiles/div1.sw.yml) is the game's real,
   dynamically-served topology rather than a static snapshot that could go
   stale, which matters for keeping `lagsw`'s `servers` groupings and
   `discovery_port` behavior aligned with the live environment.
@@ -442,7 +442,7 @@ made in the companion exploit documents and encoded in
   inside its TLS session) is not established.
 - As detailed in Section 6a, this document's original single-capture
   analysis could not, and did not, establish how the authoritative game host
-  is actually selected; treat any assumption that "the probed/`profiles/div1.yml`
+  is actually selected; treat any assumption that "the probed/`profiles/div1.sw.yml`
   candidate list is the same as the assignable game-host pool" as unverified,
   per [division1_server_list_and_latency_probes.md](division1_server_list_and_latency_probes.md).
   That document's own open questions (exact `selector`-byte semantics, varint
@@ -471,7 +471,7 @@ application traffic, after which the game session settles into a regular
 small server-push / small client-ack cadence consistent with a
 server-authoritative, tick-driven combat and world-state stream. These
 findings directly corroborate the server list and probe-port configuration
-already present in [`profiles/div1.yml`](../profiles/div1.yml) and support
+already present in [`profiles/div1.sw.yml`](../profiles/div1.sw.yml) and support
 the transport-layer assumptions made in the companion analyses of the
 weapon-swap lag switch and the RPM exploit family — while also showing, per
 [division1_server_list_and_latency_probes.md](division1_server_list_and_latency_probes.md),

@@ -391,7 +391,7 @@ startup to fail with an error.
 - `RPM`: Space toggles a one-second `send_all_after_delay` batch.
 - `Long`: Alt toggles a nine-second `send_all_after_delay` batch.
 
-[`profiles/div1.yml`](profiles/div1.yml) demonstrates timestamp, count-based
+[`profiles/div1.sw.yml`](profiles/div1.sw.yml) demonstrates timestamp, count-based
 ratio, percentage ratio, hold, and indefinite packet-hold behavior. It uses
 `forward: true` for every profile and is a useful reference for more advanced
 configurations.
