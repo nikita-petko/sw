@@ -1,0 +1,8 @@
+{
+  "C_Cpp.intelliSenseEngine": "default",
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/.vscode/compile_commands.json",
+
+  "yaml.schemas": {
+    "schemas/profiles.schema.json": "*.sw.yml"
+  }
+}

@@ -3,8 +3,10 @@
 ![](https://share.cdn.vmminfra.dev/petko-new/2026/10/powershell_04MIiHw9Ux.png)
 
 `lagsw` is a Windows console utility that temporarily delays matching network
-packets. It uses the embedded [WinDivert](win_divert/README) driver to capture
-packets, hold them in memory, and reinject them after the configured delay.
+packets. On Windows it uses the embedded [WinDivert](win_divert/README) driver
+to capture packets, hold them in memory, and reinject them after the configured
+delay. Non-Windows builds currently use a stub packet backend and do not capture
+or delay network traffic.
 
 Profiles define which key or key combination activates packet capture, which
 packets are captured, and how those packets are released. This makes it useful
@@ -57,7 +59,7 @@ xmake clean
 The configuration file must be supplied explicitly:
 
 ```powershell
-lagsw.exe --config profiles/test.yml
+lagsw.exe --config profiles/div1.sw.yml
 ```
 
 To discover the busiest server on a port while the program runs, configure
@@ -70,7 +72,7 @@ servers:
 ```
 
 ```powershell
-lagsw.exe --config profiles/test.yml
+lagsw.exe --config profiles/div1.sw.yml
 ```
 
 Options:
@@ -83,7 +85,6 @@ Options:
 | `--client-address <address>` | Set both the client source and destination addresses. |
 | `--client-source-address <address>` | Set the client source address. |
 | `--client-destination-address <address>` | Set the client destination address. |
-  client_address_enforcement: both
 | `--resolve-region` | Resolve the geographic region of discovered servers. Successful lookups are cached locally for 30 days. |
 | `--help`, `-h` | Print command help and exit. |
 
@@ -98,6 +99,8 @@ While the program is running:
   and a packet-ranked list for the active discovery window.
 - Press Page Up or Page Down to cycle the configured server filter, including
   `none` (which applies no server filter).
+- When region enforcement is enabled, press Left or Right to cycle the enforced
+  server group.
 - Press `q`, `Q`, or Backspace to quit.
 
 Multiple profiles can be active at the same time. Profiles may share keys; a
@@ -119,6 +122,9 @@ never replaced by discovery. Discovery is temporarily paused while any profile
 is active and resumes with a fresh window after all profiles are deactivated.
 Profiles with `server_direction` use the selected server when they are next
 activated.
+
+Non-Windows builds use the stub backend, so packet capture, server discovery,
+and packet delay are available only with the Windows WinDivert backend.
 
 ## Configuration
 
@@ -148,11 +154,18 @@ profiles:
       server_direction: destination
 ```
 
-Servers may also be grouped. Selecting any server in a group applies the
-profile filter to every server in that group:
+Servers can be grouped by region or another label. Selecting any server in a
+group applies the profile filter to every server in that group. A server
+configuration can combine named groups, an `addresses` list, and automatic
+discovery:
 
 ```yaml
 servers:
+  discovery_port: 55000
+  interval: 5000
+  addresses:
+    - "104.155.45.25:BRU-EUC-25"
+    - "34.76.248.132:BRU-EUC-132"
   EU:
     - "34.13.202.203:GR-EUC-203"
     - "34.90.202.108:GR-EUC-108"
@@ -163,8 +176,8 @@ servers:
 | Field | Required | Description |
 | --- | --- | --- |
 | `global_filter` | No | WinDivert filter used by profiles that do not define `filter`. Defaults to `tcp.DstPort == 55000 or tcp.SrcPort == 55000`. |
-| `servers` | No | Either a string array of server addresses, or an object enabling server discovery (see below). |
-| `features` | No | Optional feature configuration, including debug PCAP capture. |
+| `servers` | No | A list of server addresses, or a mapping of server groups with optional `addresses`, `discovery_port`, and `interval` fields. |
+| `features` | No | Optional feature configuration, including PCAP capture, desynchronization countdown, forwarded-address discovery, and region enforcement. |
 | `profiles` | Yes | A non-empty list of profile definitions. |
 
 `servers` as a list is a set of known server addresses. An entry may use
@@ -176,7 +189,8 @@ servers:
   - "203.0.113.10:backup server"
 ```
 
-`servers` as an object enables server discovery instead of a fixed list:
+Server discovery can be enabled alongside the configured address list and
+groups:
 
 ```yaml
 servers:
@@ -232,6 +246,24 @@ features:
 | `display` | No | `alongside` (default) shows the countdown next to profile activations; `override` shows it instead of the profile's activation status; `until_reactivated` hides it once the profile is reactivated. |
 | `duration_percent` | No | Estimated desync duration as a percentage of the selected profile's active duration. Defaults to `80`; valid values are `1`-`100`. |
 | `enabled_for` | Yes when enabled | `"*"` for every profile, or a non-empty list of configured profile names. |
+
+Region enforcement delays TCP PSH packets from configured servers outside the
+currently selected server group. Use the Left and Right arrow keys to change
+the selected group while the program is running. The configured probe port is
+used to observe server-region probe traffic; the status line shows the
+selected group and the next-check countdown.
+
+```yaml
+features:
+  region_enforcement:
+    enabled: true
+    probe_port: 55002
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `enabled` | No | Enables region enforcement. Defaults to `false`. |
+| `probe_port` | Yes when enabled | Port (1-65535) used to observe region-probe traffic. |
 
 Forwarded address discovery dynamically finds the client addresses used to
 filter packets when lagsw runs on a PC that shares its internet connection
@@ -291,6 +323,7 @@ automatically reconfigured whenever a discovered address changes.
 | `respect_disable_wait` | No | When this profile disables another profile with a configured disable wait, wait for that profile to stop before activating. Defaults to `true`; set to `false` to activate immediately. |
 | `delay_mode` | No | `from_timestamp`, `send_all_after_delay`, `ratio`, `drop`, `drop_and_send`, `hold_and_send`, `drop_until_toggle`, `hold_until_deactivation`, or `packet_group_send`; defaults to `from_timestamp`.|
 | `retransmission_mode` | No | `none` allows retransmissions; `only_seq` drops duplicate sequence numbers; `only_ack` drops duplicate acknowledgment numbers; `both` requires a unique `(SeqNum, AckNum)` pair. Defaults to `none`. |
+| `ack_restoration` | No | Includes bare TCP ACKs in the profile filter and prevents sent PSH packets from moving the acknowledged sequence backward. Defaults to `false`. |
 | `subsequent_packet_hold_mode` | No | For `hold_and_send`, `none` holds only the configured initial packet count; `seq_only`, `ack_only`, or `seq_ack` also holds subsequent TCP packets matching an initially held packet. Defaults to `none`. |
 | `delay_ms` | No | Delay in milliseconds. Defaults to `0`. |
 | `ratio` | For `ratio`, `drop_and_send`, or `hold_and_send` mode | Positive packet count, or a positive percentage such as `50%`. Percentage ratios also require `delay_ms > 0` and may not exceed `100%`; `hold_and_send` requires a packet count. |
@@ -386,15 +419,12 @@ startup to fail with an error.
 
 ## Included profiles
 
-[`profiles/test.yml`](profiles/test.yml) provides two simple toggle profiles:
-
-- `RPM`: Space toggles a one-second `send_all_after_delay` batch.
-- `Long`: Alt toggles a nine-second `send_all_after_delay` batch.
-
-[`profiles/div1.sw.yml`](profiles/div1.sw.yml) demonstrates timestamp, count-based
-ratio, percentage ratio, hold, and indefinite packet-hold behavior. It uses
-`forward: true` for every profile and is a useful reference for more advanced
-configurations.
+[`profiles/div1.sw.yml`](profiles/div1.sw.yml) is the checked-in example
+configuration. It combines server discovery with named server groups and
+demonstrates timestamp-based delay, percentage-based ratio handling,
+deactivation waits, timed activation, and packet holding with a zero delay.
+Its filters and addresses are tailored to its example game and network setup;
+review and adapt them before using the configuration elsewhere.
 
 ## Troubleshooting
 
@@ -404,8 +434,9 @@ configurations.
 - **No packets are delayed:** Check the active profile's filter, layer, and
   `outbound` setting. Use `--log-level debug` to inspect received packets.
 - **The configuration is rejected:** Check that every profile has a name and
-  unique key, that all booleans are exactly `true` or `false`, and that a
-  `ratio` profile has a positive ratio and `delay_ms`.
+  a valid `key` or `keys` value; activation keys may be shared. Check that
+  booleans are valid and that `ratio` and `drop_and_send` profiles have a
+  positive ratio and `delay_ms`.
 - **The console appears stuck:** This is expected while packets are being held.
   Press the active toggle key again, release a hold key, or press `q` to stop;
   queued packets are flushed during teardown.
