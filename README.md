@@ -1,6 +1,12 @@
 # lagsw
 
+### Windows (WinDivert)
+
 ![](https://share.cdn.vmminfra.dev/petko-new/2026/10/powershell_04MIiHw9Ux.png)
+
+### Linux (Stub - See NFQ docs for more information on the progress)
+
+![](https://share.cdn.vmminfra.dev/petko-linux/261026_12h33m37s_screenshot.png)
 
 `lagsw` is a Windows console utility that temporarily delays matching network
 packets. On Windows it uses the embedded [WinDivert](win_divert/README) driver

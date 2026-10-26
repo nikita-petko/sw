@@ -8,6 +8,7 @@ build/
 # MacOS Cache
 .DS_Store
 
+compile_commands.json
 
 .vscode/*
 !.vscode/settings.json
