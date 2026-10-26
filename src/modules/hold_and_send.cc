@@ -18,9 +18,9 @@ public:
 		held_packet_numbers_.clear();
 	}
 
-	void capture_packet(const BYTE*				 packet,
-						UINT					 length,
-						const WINDIVERT_ADDRESS& address,
+	void capture_packet(const uint8_t*				 packet,
+						uint32_t					 length,
+						const backend::PacketMeta& address,
 						int						 profile,
 						uint64_t				 now,
 						uint64_t				 receive_order,

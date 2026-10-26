@@ -11,9 +11,9 @@ class HoldUntilDeactivationMode final : public PacketMode
 public:
 	explicit HoldUntilDeactivationMode(ProfileOptions options) : PacketMode(std::move(options), "hold_until_deactivation") {}
 
-	void capture_packet(const BYTE* packet,
-						UINT length,
-						const WINDIVERT_ADDRESS& address,
+	void capture_packet(const uint8_t* packet,
+						uint32_t length,
+						const backend::PacketMeta& address,
 						int profile,
 						uint64_t,
 						uint64_t receive_order,

@@ -12,14 +12,15 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 	const std::string	  profile_label	  = "profile #" + std::to_string(profile) + " - " + profile_options.name;
 	while (!session->stopping)
 	{
-		BYTE			  packet_data[0xFFFF];
-		WINDIVERT_ADDRESS address;
-		UINT			  received_length = 0;
-		if (!WinDivertRecv(session->handle, packet_data, sizeof(packet_data), &received_length, &address))
+		uint8_t			 packet_data[0xFFFF];
+		backend::PacketMeta address;
+		uint32_t		 received_length = 0;
+		std::string		 io_error;
+		const backend::IoStatus status = session->handle->recv(packet_data, sizeof(packet_data), received_length, address, io_error);
+		if (status != backend::IoStatus::ok)
 		{
-			const DWORD error = GetLastError();
-			if (!session->stopping && error != ERROR_INVALID_HANDLE && error != ERROR_OPERATION_ABORTED)
-				LOG_ERROR("%s recv: WinDivertRecv error %lu: %s", profile_label.c_str(), error, format_win32_error(error).c_str());
+			if (status == backend::IoStatus::error && !session->stopping)
+				LOG_ERROR("%s recv: %s", profile_label.c_str(), io_error.c_str());
 			continue;
 		}
 		state_->profile_stats[profile - 1].packets_caught.fetch_add(1);
@@ -40,7 +41,7 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 				session->pcap_file.reset();
 			}
 		}
-		const bool sniff = profile_options.windivert_options.sniff.value_or(false);
+		const bool sniff = profile_options.capture_options.sniff.value_or(false);
 		if (!sniff)
 		{
 			std::lock_guard<std::mutex> lock(session->packet_mutex);
@@ -55,29 +56,18 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 								   session->delayed_packets);
 			session->packet_changed.notify_one();
 		}
-		PWINDIVERT_TCPHDR	  tcp_header = nullptr;
-		const PacketAddresses addresses	 = packet_addresses(packet_data, received_length);
-		if (WinDivertHelperParsePacket(packet_data,
-									   received_length,
-									   nullptr,
-									   nullptr,
-									   nullptr,
-									   nullptr,
-									   nullptr,
-									   &tcp_header,
-									   nullptr,
-									   nullptr,
-									   nullptr,
-									   nullptr,
-									   nullptr) &&
-			tcp_header != nullptr)
+		ParsedPacket		  parsed;
+		const PacketAddresses addresses = packet_addresses(packet_data, received_length);
+		if (parse_packet(packet_data, received_length, parsed) && parsed.tcp != nullptr)
 		{
+			const TcpHeader* tcp_header = parsed.tcp;
+			(void)tcp_header;
 			LOG_DEBUG("%s recv: TCP packet: Length = %u, Flags = %s, Sequence = %u, Ack = %u, Src = %s, Dst = %s",
 					  profile_label.c_str(),
 					  received_length,
 					  format_tcp_flags(*tcp_header).c_str(),
-					  WinDivertHelperNtohl(tcp_header->SeqNum),
-					  WinDivertHelperNtohl(tcp_header->AckNum),
+					  swap_u32(tcp_header->SeqNum),
+					  swap_u32(tcp_header->AckNum),
 					  addresses.source.c_str(),
 					  addresses.destination.c_str());
 		}
@@ -125,36 +115,24 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 			}
 			for (PacketNode* node : ready_packets)
 			{
-				UINT sent = 0;
+				uint32_t	sent = 0;
+				std::string io_error;
 				session->mode->prepare_packet_for_send(node->packet, node->length, node->address);
-				if (!WinDivertSend(session->handle, node->packet, node->length, &sent, node->address))
+				if (session->handle->send(node->packet, node->length, *node->address, sent, io_error) != backend::IoStatus::ok)
 				{
-					const DWORD error = GetLastError();
-					LOG_ERROR("%s send: WinDivertSend failed %lu: %s", profile_label.c_str(), error, format_win32_error(error).c_str());
+					LOG_ERROR("%s send: failed: %s", profile_label.c_str(), io_error.c_str());
 				}
 				else if (sent != 0)
 				{
 					state_->profile_stats[session->profile - 1].delayed_packets_sent.fetch_add(1);
-					const PacketAddresses addresses		 = packet_addresses(node->packet, node->length);
-					PWINDIVERT_TCPHDR	  tcp_header	 = nullptr;
-					const bool			  has_tcp_header = WinDivertHelperParsePacket(node->packet,
-																					  node->length,
-																					  nullptr,
-																					  nullptr,
-																					  nullptr,
-																					  nullptr,
-																					  nullptr,
-																					  &tcp_header,
-																					  nullptr,
-																					  nullptr,
-																					  nullptr,
-																					  nullptr,
-																					  nullptr) &&
-														   tcp_header != nullptr;
-
+					const PacketAddresses addresses = packet_addresses(node->packet, node->length);
+					ParsedPacket		  parsed;
+					const bool			  has_tcp_header = parse_packet(node->packet, node->length, parsed) && parsed.tcp != nullptr;
+					const TcpHeader*	  tcp_header	 = parsed.tcp;
 #ifdef NDEBUG
 					// Suppress warning for unused variable 'has_tcp_header' in release builds
 					(void)has_tcp_header;
+					(void)tcp_header;
 #endif
 
 					LOG_DEBUG("%s send: delayed packet: Length = %u, Flags = %s, Src = %s, Dst = %s, SendLen = %u",
@@ -184,36 +162,24 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 		}
 		for (PacketNode* node : pending_packets)
 		{
-			UINT sent = 0;
+			uint32_t	sent = 0;
+			std::string io_error;
 			session->mode->prepare_packet_for_send(node->packet, node->length, node->address);
-			if (!WinDivertSend(session->handle, node->packet, node->length, &sent, node->address))
+			if (session->handle->send(node->packet, node->length, *node->address, sent, io_error) != backend::IoStatus::ok)
 			{
-				const DWORD error = GetLastError();
-				LOG_ERROR("%s flush: WinDivertSend failed %lu: %s", profile_label.c_str(), error, format_win32_error(error).c_str());
+				LOG_ERROR("%s flush: send failed: %s", profile_label.c_str(), io_error.c_str());
 			}
 			else if (sent != 0)
 			{
 				state_->profile_stats[session->profile - 1].teardown_packets_sent.fetch_add(1);
-				const PacketAddresses addresses		 = packet_addresses(node->packet, node->length);
-				PWINDIVERT_TCPHDR	  tcp_header	 = nullptr;
-				const bool			  has_tcp_header = WinDivertHelperParsePacket(node->packet,
-																				  node->length,
-																				  nullptr,
-																				  nullptr,
-																				  nullptr,
-																				  nullptr,
-																				  nullptr,
-																				  &tcp_header,
-																				  nullptr,
-																				  nullptr,
-																				  nullptr,
-																				  nullptr,
-																				  nullptr) &&
-													   tcp_header != nullptr;
-
+				const PacketAddresses addresses = packet_addresses(node->packet, node->length);
+				ParsedPacket		  parsed;
+				const bool			  has_tcp_header = parse_packet(node->packet, node->length, parsed) && parsed.tcp != nullptr;
+				const TcpHeader*	  tcp_header	 = parsed.tcp;
 #ifdef NDEBUG
 				// Suppress warning for unused variable 'has_tcp_header' in release builds
 				(void)has_tcp_header;
+				(void)tcp_header;
 #endif
 
 				LOG_DEBUG("%s flush: sent packet: Length = %u, Flags = %s, Src = %s, Dst = %s, SendLen = %u",

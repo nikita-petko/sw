@@ -13,7 +13,7 @@
 #include "log.h"
 #include "options.h"
 #include "packet_engine.h"
-#include "windivert_runtime.h"
+#include "packet_backend.h"
 
 namespace {
 int get_key_without_waiting()
@@ -189,7 +189,7 @@ const char* format_packet_group_order(PacketGroupOrder order)
 	return "unknown";
 }
 
-std::string format_windivert_options(const ProfileOptions& profile)
+std::string format_capture_options(const ProfileOptions& profile)
 {
 	std::string result;
 	const auto	append = [&](const char* label, const std::string& value) {
@@ -199,21 +199,21 @@ std::string format_windivert_options(const ProfileOptions& profile)
 		result += "=";
 		result += value;
 	};
-	if (profile.windivert_options.sniff)
-		append("sniff", profile.windivert_options.sniff.value() ? "true" : "false");
-	if (profile.windivert_options.forward)
-		append("forward", profile.windivert_options.forward.value() ? "true" : "false");
-	if (profile.windivert_options.outbound)
-		append("outbound", profile.windivert_options.outbound.value() ? "true" : "false");
-	if (profile.windivert_options.client_address_enforcement)
+	if (profile.capture_options.sniff)
+		append("sniff", profile.capture_options.sniff.value() ? "true" : "false");
+	if (profile.capture_options.forward)
+		append("forward", profile.capture_options.forward.value() ? "true" : "false");
+	if (profile.capture_options.outbound)
+		append("outbound", profile.capture_options.outbound.value() ? "true" : "false");
+	if (profile.capture_options.client_address_enforcement)
 	{
 		static const char* client_enforcement[] = {"none", "source", "destination", "both"};
-		append("client_addr", client_enforcement[static_cast<int>(profile.windivert_options.client_address_enforcement.value())]);
+		append("client_addr", client_enforcement[static_cast<int>(profile.capture_options.client_address_enforcement.value())]);
 	}
-	if (profile.windivert_options.server_direction)
+	if (profile.capture_options.server_direction)
 	{
 		static const char* server_direction[] = {"source", "destination", "both"};
-		append("server_dir", server_direction[static_cast<int>(profile.windivert_options.server_direction.value())]);
+		append("server_dir", server_direction[static_cast<int>(profile.capture_options.server_direction.value())]);
 	}
 	return result.empty() ? "default" : result;
 }
@@ -230,9 +230,9 @@ void enable_virtual_terminal()
 int main(int argc, char* argv[])
 {
 	enable_virtual_terminal();
-	if (!initialize_windivert())
+	if (!backend::initialize())
 	{
-		LOG_ERROR("Failed to initialize embedded WinDivert");
+		LOG_ERROR("Failed to initialize the %s capture backend", backend::name());
 		return 1;
 	}
 
@@ -289,7 +289,7 @@ int main(int argc, char* argv[])
 				 profile.ratio_configured ? std::to_string(profile.ratio).c_str() : "not set",
 				 profile.ratio_configured && profile.ratio_percent ? "%" : (profile.ratio_configured ? " packets" : ""),
 				 format_ratio_selection(profile.ratio_selection));
-		LOG_DETAIL("    windivert: %s", format_windivert_options(profile).c_str());
+		LOG_DETAIL("    capture: %s", format_capture_options(profile).c_str());
 		LOG_DETAIL("    filter: %s", filter.c_str());
 	}
 

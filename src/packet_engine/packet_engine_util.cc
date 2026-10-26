@@ -105,7 +105,7 @@ std::string format_state_divider(size_t width, const std::string& label)
 	return "|" + std::string(left_width, '-') + text + std::string(inner_width - left_width - text.size(), '-') + "|";
 }
 
-std::string format_tcp_flags(const WINDIVERT_TCPHDR& tcp_header)
+std::string format_tcp_flags(const TcpHeader& tcp_header)
 {
 	std::string result;
 	const auto	append = [&](const char* flag, bool enabled) {
@@ -159,7 +159,7 @@ void log_state_line(size_t width, const std::string& text)
 	LOG_INFO("| %s%*s |", text.c_str(), static_cast<int>(padding), "");
 }
 
-std::string format_ipv4_address(UINT32 address)
+std::string format_ipv4_address(uint32_t address)
 {
 	const auto* bytes	   = reinterpret_cast<const unsigned char*>(&address);
 	char		buffer[16] = {};
@@ -167,7 +167,7 @@ std::string format_ipv4_address(UINT32 address)
 	return buffer;
 }
 
-std::string format_ipv6_address(const UINT32* address)
+std::string format_ipv6_address(const uint32_t* address)
 {
 	const auto* bytes	   = reinterpret_cast<const unsigned char*>(address);
 	char		buffer[64] = {};
@@ -193,28 +193,15 @@ std::string format_ipv6_address(const UINT32* address)
 	return buffer;
 }
 
-PacketAddresses packet_addresses(const BYTE* packet_data, UINT packet_length)
+PacketAddresses packet_addresses(const uint8_t* packet_data, uint32_t packet_length)
 {
-	PWINDIVERT_IPHDR   ip_header   = nullptr;
-	PWINDIVERT_IPV6HDR ipv6_header = nullptr;
-	if (!WinDivertHelperParsePacket(packet_data,
-									packet_length,
-									&ip_header,
-									&ipv6_header,
-									nullptr,
-									nullptr,
-									nullptr,
-									nullptr,
-									nullptr,
-									nullptr,
-									nullptr,
-									nullptr,
-									nullptr))
+	ParsedPacket parsed;
+	if (!parse_packet(packet_data, packet_length, parsed))
 		return {};
 
-	if (ip_header != nullptr)
-		return {format_ipv4_address(ip_header->SrcAddr), format_ipv4_address(ip_header->DstAddr)};
-	if (ipv6_header != nullptr)
-		return {format_ipv6_address(ipv6_header->SrcAddr), format_ipv6_address(ipv6_header->DstAddr)};
+	if (parsed.ipv4 != nullptr)
+		return {format_ipv4_address(parsed.ipv4->SrcAddr), format_ipv4_address(parsed.ipv4->DstAddr)};
+	if (parsed.ipv6 != nullptr)
+		return {format_ipv6_address(parsed.ipv6->SrcAddr), format_ipv6_address(parsed.ipv6->DstAddr)};
 	return {};
 }

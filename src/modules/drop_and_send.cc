@@ -10,9 +10,9 @@ class DropAndSendMode final : public PacketMode
 public:
 	explicit DropAndSendMode(ProfileOptions options) : PacketMode(std::move(options), "drop_and_send") {}
 
-	void capture_packet(const BYTE*				 packet,
-						UINT					 length,
-						const WINDIVERT_ADDRESS& address,
+	void capture_packet(const uint8_t*				 packet,
+						uint32_t					 length,
+						const backend::PacketMeta& address,
 						int						 profile,
 						uint64_t				 now,
 						uint64_t				 receive_order,
@@ -55,7 +55,7 @@ private:
 					  profile_label.c_str(),
 					  source,
 					  node->length,
-					  static_cast<unsigned long long>(node->address->Timestamp));
+					  static_cast<unsigned long long>(node->address->timestamp));
 			destroy_packet_node(node);
 		}
 		packets.erase(packets.begin(), packets.begin() + drop_count);

@@ -6,7 +6,7 @@
 #include <fstream>
 #include <string>
 #include "packet_engine.h"
-#include "windivert_runtime.h"
+#include "packet_headers.h"
 
 /// Returns the system message for a Win32 error, without trailing line breaks.
 std::string format_win32_error(DWORD error);
@@ -35,11 +35,11 @@ size_t visible_length(const std::string& text);
 void log_state_line(size_t width, const std::string& text);
 
 /// Formats the enabled TCP flags as a comma-separated list, or "-" if none are set.
-std::string format_tcp_flags(const WINDIVERT_TCPHDR& tcp_header);
+std::string format_tcp_flags(const TcpHeader& tcp_header);
 /// Formats an IPv4 address in dotted-decimal notation.
-std::string format_ipv4_address(UINT32 address);
+std::string format_ipv4_address(uint32_t address);
 /// Formats an IPv6 address as eight hexadecimal groups.
-std::string format_ipv6_address(const UINT32* address);
+std::string format_ipv6_address(const uint32_t* address);
 
 /// Textual source and destination addresses extracted from a packet.
 /// Both fields are empty when the packet cannot be parsed as IPv4 or IPv6.
@@ -50,6 +50,6 @@ struct PacketAddresses
 };
 
 /// Parses a packet and returns its IPv4 or IPv6 source and destination addresses.
-PacketAddresses packet_addresses(const BYTE* packet_data, UINT packet_length);
+PacketAddresses packet_addresses(const uint8_t* packet_data, uint32_t packet_length);
 
 #endif

@@ -13,7 +13,7 @@
 #include <vector>
 
 #include "log.h"
-#include "windivert_runtime.h"
+#include "packet_backend.h"
 
 namespace {
 constexpr const char* kDefaultFilter = "tcp.DstPort == 55000 or tcp.SrcPort == 55000";
@@ -57,27 +57,27 @@ std::optional<ProfileKeyMode> parse_key_mode(const std::string& value)
 	return std::nullopt;
 }
 
-std::optional<WinDivertOptions::ClientAddressEnforcement> parse_client_address_enforcement(const std::string& value)
+std::optional<CaptureOptions::ClientAddressEnforcement> parse_client_address_enforcement(const std::string& value)
 {
 	if (value == "none")
-		return WinDivertOptions::ClientAddressEnforcement::none;
+		return CaptureOptions::ClientAddressEnforcement::none;
 	if (value == "source")
-		return WinDivertOptions::ClientAddressEnforcement::source;
+		return CaptureOptions::ClientAddressEnforcement::source;
 	if (value == "destination")
-		return WinDivertOptions::ClientAddressEnforcement::destination;
+		return CaptureOptions::ClientAddressEnforcement::destination;
 	if (value == "both")
-		return WinDivertOptions::ClientAddressEnforcement::both;
+		return CaptureOptions::ClientAddressEnforcement::both;
 	return std::nullopt;
 }
 
-std::optional<WinDivertOptions::ServerDirection> parse_server_direction(const std::string& value)
+std::optional<CaptureOptions::ServerDirection> parse_server_direction(const std::string& value)
 {
 	if (value == "source")
-		return WinDivertOptions::ServerDirection::source;
+		return CaptureOptions::ServerDirection::source;
 	if (value == "destination")
-		return WinDivertOptions::ServerDirection::destination;
+		return CaptureOptions::ServerDirection::destination;
 	if (value == "both")
-		return WinDivertOptions::ServerDirection::both;
+		return CaptureOptions::ServerDirection::both;
 	return std::nullopt;
 }
 
@@ -839,7 +839,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 					LOG_ERROR("Invalid server_direction in %s at line %d: expected source, destination, or both", path, line_number);
 					return false;
 				}
-				profile->windivert_options.server_direction = *direction;
+				profile->capture_options.server_direction = *direction;
 				continue;
 			}
 			if (key == "client_address_enforcement")
@@ -852,7 +852,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 							  line_number);
 					return false;
 				}
-				profile->windivert_options.client_address_enforcement = *enforcement;
+				profile->capture_options.client_address_enforcement = *enforcement;
 				continue;
 			}
 			const auto parsed = parse_bool(value);
@@ -862,11 +862,11 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 				return false;
 			}
 			if (key == "sniff")
-				profile->windivert_options.sniff = *parsed;
+				profile->capture_options.sniff = *parsed;
 			else if (key == "forward")
-				profile->windivert_options.forward = *parsed;
+				profile->capture_options.forward = *parsed;
 			else if (key == "outbound")
-				profile->windivert_options.outbound = *parsed;
+				profile->capture_options.outbound = *parsed;
 			else
 			{
 				subsection.clear();
@@ -1272,45 +1272,41 @@ bool validate_filters(const char* path, const PacketEngineOptions& options)
 	}
 	if (options.features.region_enforcement.enabled && options.features.region_enforcement.probe_port != 0)
 	{
-		const std::string probe_filter	 = "tcp.Syn and (tcp.DstPort == " + std::to_string(options.features.region_enforcement.probe_port) +
-										   " or tcp.SrcPort == " + std::to_string(options.features.region_enforcement.probe_port) + ")";
-		const char*		  error			 = nullptr;
-		UINT			  error_position = 0;
-		if (!WinDivertHelperCompileFilter(probe_filter.c_str(), WINDIVERT_LAYER_NETWORK, nullptr, 0, &error, &error_position))
+		const uint16_t	  probe_port	 = options.features.region_enforcement.probe_port;
+		const std::string probe_filter	 = backend::filters::syn_probe(probe_port);
+		std::string		  error;
+		uint32_t		  error_position = 0;
+		if (!backend::validate_filter(probe_filter, false, error, error_position))
 		{
 			LOG_ERROR("Invalid filter for region probe detection on port %u: %s",
-					  options.features.region_enforcement.probe_port,
-					  error ? error : "unknown error");
+					  probe_port,
+					  error.empty() ? "unknown error" : error.c_str());
 			return false;
 		}
 
 		for (const ServerOptions& server : options.servers)
 		{
-			const std::string filter = "tcp.Psh and ip.SrcAddr == " + server.address +
-									   " and tcp.SrcPort == " + std::to_string(options.features.region_enforcement.probe_port);
-			if (!WinDivertHelperCompileFilter(filter.c_str(), WINDIVERT_LAYER_NETWORK, nullptr, 0, &error, &error_position))
+			const std::string filter = backend::filters::region_enforcement({server.address}, probe_port);
+			if (!backend::validate_filter(filter, false, error, error_position))
 			{
 				LOG_ERROR("Invalid filter for region enforcement on server '%s' port %u: %s",
 						  server.address.c_str(),
-						  options.features.region_enforcement.probe_port,
-						  error ? error : "unknown error");
+						  probe_port,
+						  error.empty() ? "unknown error" : error.c_str());
 				return false;
 			}
 		}
 	}
 	if (options.features.forwarded_address_discovery.enabled && options.features.forwarded_address_discovery.port != 0)
 	{
-		const uint16_t	   port		   = options.features.forwarded_address_discovery.port;
-		const std::string  port_filter = "tcp.DstPort == " + std::to_string(port) + " or tcp.SrcPort == " + std::to_string(port) +
-										 " or udp.DstPort == " + std::to_string(port) + " or udp.SrcPort == " + std::to_string(port);
-		const std::string filter = "outbound and (ifIdx == " + std::to_string(*options.features.forwarded_address_discovery.inbound_if_idx) +
-								   " or ifIdx == " + std::to_string(*options.features.forwarded_address_discovery.outbound_if_idx) +
-								   ") and (" + port_filter + ")";
-		const char* error		   = nullptr;
-		UINT		error_position = 0;
-		if (!WinDivertHelperCompileFilter(filter.c_str(), WINDIVERT_LAYER_NETWORK, nullptr, 0, &error, &error_position))
+		const std::string filter = backend::filters::forwarded_address(*options.features.forwarded_address_discovery.inbound_if_idx,
+																	   *options.features.forwarded_address_discovery.outbound_if_idx,
+																	   options.features.forwarded_address_discovery.port);
+		std::string		  error;
+		uint32_t		  error_position = 0;
+		if (!backend::validate_filter(filter, false, error, error_position))
 		{
-			LOG_ERROR("Invalid filter for forwarded address discovery: %s", error ? error : "unknown error");
+			LOG_ERROR("Invalid filter for forwarded address discovery: %s", error.empty() ? "unknown error" : error.c_str());
 			return false;
 		}
 	}
@@ -1318,9 +1314,8 @@ bool validate_filters(const char* path, const PacketEngineOptions& options)
 	{
 		LOG_DEBUG("Validating filter '%s' for profile '%s'", profile.filter.value_or(options.global_filter).c_str(), profile.name.c_str());
 
-		const bool		   outbound = profile.windivert_options.outbound.value_or(false);
-		const bool		   forward	= profile.windivert_options.forward.value_or(false);
-		const std::string& filter	= profile.filter.value_or(options.global_filter);
+		const bool outbound = profile.capture_options.outbound.value_or(false);
+		const bool forward	= profile.capture_options.forward.value_or(false);
 		if (outbound && forward)
 		{
 			LOG_ERROR("Invalid options for profile '%s': outbound requires forward to be false", profile.name.c_str());
@@ -1328,55 +1323,28 @@ bool validate_filters(const char* path, const PacketEngineOptions& options)
 		}
 		for (size_t server_index = 0; server_index <= options.servers.size(); ++server_index)
 		{
-			std::string server_filter = filter;
-			const auto	enforcement =
-				profile.windivert_options.client_address_enforcement.value_or(WinDivertOptions::ClientAddressEnforcement::both);
-			std::string client_filter;
-			if (enforcement == WinDivertOptions::ClientAddressEnforcement::source ||
-				enforcement == WinDivertOptions::ClientAddressEnforcement::both)
-				if (options.client_source_address)
-					client_filter = "ip.SrcAddr == " + *options.client_source_address;
-			if (enforcement == WinDivertOptions::ClientAddressEnforcement::destination ||
-				enforcement == WinDivertOptions::ClientAddressEnforcement::both)
-				if (options.client_destination_address)
-				{
-					if (!client_filter.empty())
-						client_filter += " or ";
-					client_filter += "ip.DstAddr == " + *options.client_destination_address;
-				}
-			if (!client_filter.empty())
-				server_filter = "(" + server_filter + ") and (" + client_filter + ")";
-			if (server_index != 0 && profile.windivert_options.server_direction)
+			backend::ProfileFilter spec;
+			spec.user_filter		= profile.filter.value_or(options.global_filter);
+			spec.include_bare_acks	= profile.ack_restoration;
+			spec.client_enforcement = profile.capture_options.client_address_enforcement.value_or(CaptureOptions::ClientAddressEnforcement::both);
+			spec.client_source		= options.client_source_address;
+			spec.client_destination = options.client_destination_address;
+			spec.outbound			= outbound;
+			if (server_index != 0 && profile.capture_options.server_direction)
 			{
-				const char* address_field = "ip.Addr";
-				switch (*profile.windivert_options.server_direction)
-				{
-					case WinDivertOptions::ServerDirection::source:
-						address_field = "ip.SrcAddr";
-						break;
-					case WinDivertOptions::ServerDirection::destination:
-						address_field = "ip.DstAddr";
-						break;
-					case WinDivertOptions::ServerDirection::both:
-						break;
-				}
-				server_filter = "(" + server_filter + ") and " + address_field + " == " + options.servers[server_index - 1].address;
+				spec.server_direction = profile.capture_options.server_direction;
+				spec.server_addresses = {options.servers[server_index - 1].address};
 			}
-			const std::string capture_filter = outbound ? "outbound and (" + server_filter + ")" : server_filter;
-			const char*		  error			 = nullptr;
-			UINT			  error_position = 0;
-			if (!WinDivertHelperCompileFilter(capture_filter.c_str(),
-											  forward ? WINDIVERT_LAYER_NETWORK_FORWARD : WINDIVERT_LAYER_NETWORK,
-											  nullptr,
-											  0,
-											  &error,
-											  &error_position))
+			const std::string capture_filter = backend::filters::profile(spec);
+			std::string		  error;
+			uint32_t		  error_position = 0;
+			if (!backend::validate_filter(capture_filter, forward, error, error_position))
 			{
 				LOG_ERROR("Invalid filter for profile '%s' in %s at position %u: %s",
 						  profile.name.c_str(),
 						  path,
 						  error_position,
-						  error ? error : "unknown error");
+						  error.empty() ? "unknown error" : error.c_str());
 				return false;
 			}
 		}

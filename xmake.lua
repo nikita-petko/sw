@@ -41,6 +41,7 @@ set_languages("cxx20")
 -- always generate debug information
 set_symbols("debug")
 
+includes("backends/windivert")
 includes("src/")
 includes("pocs/tcp_tls_proxy")
 includes("pocs/tls_segment_removal")

@@ -18,24 +18,25 @@
 #include <vector>
 
 #include "packet_engine.h"
+#include "packet_backend.h"
+#include "packet_headers.h"
 #include "packet_engine_util.h"
 #include "region_lookup.h"
-#include "windivert_runtime.h"
 #include "../modules/packet_mode.h"
 
 /// Runtime resources and packet queues owned by one active profile.
 struct PacketEngine::Session
 {
-	/// Creates a profile session from its index, WinDivert handle, and packet mode.
-	explicit Session(int profile_number, HANDLE divert_handle, PacketMode* packet_mode)
+	/// Creates a profile session from its index, capture channel, and packet mode.
+	explicit Session(int profile_number, std::unique_ptr<backend::PacketChannel> channel, PacketMode* packet_mode)
 	: profile(profile_number)
-	, handle(divert_handle)
+	, handle(std::move(channel))
 	, mode(packet_mode)
 	{
 	}
 
-	int							   profile;
-	HANDLE						   handle;
+	int									  profile;
+	std::unique_ptr<backend::PacketChannel> handle;
 	std::atomic<bool>			   stopping = false;
 	std::mutex					   packet_mutex;
 	std::condition_variable		   packet_changed;
@@ -76,7 +77,7 @@ struct PacketEngine::State
 	std::vector<ProfileStats>						  profile_stats;
 	std::vector<std::shared_ptr<Session>>			  active_sessions;
 	std::vector<std::thread>						  cleanup_threads;
-	HANDLE											  discovery_handle = INVALID_HANDLE_VALUE;
+	std::unique_ptr<backend::PacketChannel>			  discovery_handle;
 	std::thread										  discovery_thread;
 	std::mutex										  discovery_mutex;
 	std::string										  discovered_server;
@@ -90,9 +91,9 @@ struct PacketEngine::State
 	std::vector<std::thread>						  region_threads;
 	std::string										  client_region;
 
-	HANDLE							probe_handle = INVALID_HANDLE_VALUE;
+	std::unique_ptr<backend::PacketChannel> probe_handle;
 	std::thread						probe_thread;
-	HANDLE							region_enforcement_handle = INVALID_HANDLE_VALUE;
+	std::unique_ptr<backend::PacketChannel> region_enforcement_handle;
 	std::thread						region_enforcement_recv_thread;
 	std::thread						region_enforcement_send_thread;
 	std::mutex						region_enforcement_mutex;
@@ -104,7 +105,7 @@ struct PacketEngine::State
 	uint64_t						next_check_time	 = 0;
 	std::unordered_set<std::string> probed_addresses_in_window;
 
-	HANDLE							fad_handle = INVALID_HANDLE_VALUE;
+	std::unique_ptr<backend::PacketChannel> fad_handle;
 	std::thread						fad_thread;
 	mutable std::mutex				fad_mutex;
 	std::string						fad_client_source_address;
@@ -113,9 +114,9 @@ struct PacketEngine::State
 	/// A packet buffered until its region-enforcement release time.
 	struct DelayedEnforcementPacket
 	{
-		std::vector<BYTE> data;
-		WINDIVERT_ADDRESS address;
-		uint64_t		  release_at = 0;
+		std::vector<uint8_t> data;
+		backend::PacketMeta	 address;
+		uint64_t			 release_at = 0;
 	};
 	std::vector<DelayedEnforcementPacket> enforcement_queue;
 };

@@ -2,9 +2,8 @@
 #define PACKET_MODE_H_
 
 #include "packet_engine.h"
-#include "windivert_runtime.h"
-
-#include <windows.h>
+#include "packet_backend.h"
+#include "packet_headers.h"
 
 #include <cstdint>
 #include <memory>
@@ -17,11 +16,11 @@
 struct PacketNode
 {
 	/// Owned packet bytes.
-	BYTE*			   packet;
+	uint8_t*			 packet;
 	/// Packet size in bytes.
-	UINT			   length;
-	/// Owned WinDivert address metadata.
-	WINDIVERT_ADDRESS* address;
+	uint32_t			 length;
+	/// Owned capture metadata.
+	backend::PacketMeta* address;
 	/// Profile number associated with the packet.
 	int				   profile;
 	/// Earliest time the packet may be released.
@@ -49,19 +48,19 @@ struct PacketReleaseEarlier
 using PacketQueue = std::priority_queue<PacketNode*, std::vector<PacketNode*>, PacketReleaseEarlier>;
 
 /// Copies a packet and its metadata into a new queue node.
-PacketNode* make_packet_node(const BYTE*			  packet,
-							 UINT					  length,
-							 const WINDIVERT_ADDRESS& address,
-							 int					  profile,
-							 uint64_t				  release_at,
-							 uint64_t				  receive_order);
+PacketNode* make_packet_node(const uint8_t*				   packet,
+							 uint32_t					   length,
+							 const backend::PacketMeta& address,
+							 int						   profile,
+							 uint64_t					   release_at,
+							 uint64_t					   receive_order);
 /// Frees a packet node and its owned packet and address data.
 void		destroy_packet_node(PacketNode* node);
 /// Moves due packets into the ready list, discarding malformed queue entries.
 void		collect_due_packets(PacketQueue& packets, uint64_t now, std::vector<PacketNode*>& ready_packets);
 /// Extracts TCP sequence and acknowledgment numbers from a packet.
 /// Returns false when the packet does not contain a parseable TCP header.
-bool		get_tcp_numbers(const BYTE* packet, UINT length, uint32_t& sequence, uint32_t& acknowledgment);
+bool		get_tcp_numbers(const uint8_t* packet, uint32_t length, uint32_t& sequence, uint32_t& acknowledgment);
 
 /// Base class for profile-specific packet scheduling and release behavior.
 class PacketMode
@@ -73,13 +72,13 @@ public:
 	virtual ~PacketMode();
 
 	/// Applies common packet processing before delegating to capture_packet().
-	virtual void capture(const BYTE*			  packet,
-						 UINT					  length,
-						 const WINDIVERT_ADDRESS& address,
-						 int					  profile,
-						 uint64_t				  now,
-						 uint64_t				  receive_order,
-						 PacketQueue&			  packets);
+	virtual void capture(const uint8_t*				 packet,
+						 uint32_t					 length,
+						 const backend::PacketMeta& address,
+						 int						 profile,
+						 uint64_t					 now,
+						 uint64_t					 receive_order,
+						 PacketQueue&				 packets);
 	/// Releases due packets according to the mode's scheduling policy.
 	virtual void release(PacketQueue& packets, uint64_t now, std::vector<PacketNode*>& ready_packets) = 0;
 	/// Resets packet-mode tracking state.
@@ -91,12 +90,12 @@ public:
 		has_last_sent_ack_[1] = false;
 	}
 	/// Applies configured TCP acknowledgment restoration before sending a packet.
-	void		 prepare_packet_for_send(BYTE* packet, UINT length, const WINDIVERT_ADDRESS* address);
+	void		 prepare_packet_for_send(uint8_t* packet, uint32_t length, const backend::PacketMeta* address);
 	/// Toggles mode-specific behavior when supported; returns whether it changed state.
 	virtual bool toggle(PacketQueue&) { return false; }
 	/// Flushes mode-specific queued packets on demand when supported.
 	virtual void flush_on_demand(PacketQueue&) {}
-	/// Notifies the mode after a released packet has been processed by WinDivertSend.
+	/// Notifies the mode after a released packet has been processed by the backend send.
 	virtual void packet_send_completed(const PacketNode&, bool) {}
 	/// Returns optional mode-specific state for the profile status bar.
 	virtual std::string status() const { return {}; }
@@ -104,13 +103,13 @@ public:
 	virtual void flush(PacketQueue& packets, std::vector<PacketNode*>& pending_packets) = 0;
 
 	/// Implements the scheduling behavior for one captured packet.
-	virtual void capture_packet(const BYTE*				 packet,
-								UINT					 length,
-								const WINDIVERT_ADDRESS& address,
-								int						 profile,
-								uint64_t				 now,
-								uint64_t				 receive_order,
-								PacketQueue&			 packets) = 0;
+	virtual void capture_packet(const uint8_t*			   packet,
+								uint32_t				   length,
+								const backend::PacketMeta& address,
+								int						   profile,
+								uint64_t				   now,
+								uint64_t				   receive_order,
+								PacketQueue&			   packets) = 0;
 
 protected:
 	ProfileOptions options_;

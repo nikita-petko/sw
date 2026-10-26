@@ -25,26 +25,13 @@ const char* retransmission_mode_name(RetransmissionMode mode)
 }
 }  // namespace
 
-bool get_tcp_numbers(const BYTE* packet, UINT length, uint32_t& sequence, uint32_t& acknowledgment)
+bool get_tcp_numbers(const uint8_t* packet, uint32_t length, uint32_t& sequence, uint32_t& acknowledgment)
 {
-	WINDIVERT_TCPHDR* tcp_header = nullptr;
-	if (!WinDivertHelperParsePacket(packet,
-									length,
-									nullptr,
-									nullptr,
-									nullptr,
-									nullptr,
-									nullptr,
-									&tcp_header,
-									nullptr,
-									nullptr,
-									nullptr,
-									nullptr,
-									nullptr) ||
-		!tcp_header)
+	ParsedPacket parsed;
+	if (!parse_packet(packet, length, parsed) || !parsed.tcp)
 		return false;
-	sequence	   = WinDivertHelperNtohl(tcp_header->SeqNum);
-	acknowledgment = WinDivertHelperNtohl(tcp_header->AckNum);
+	sequence	   = swap_u32(parsed.tcp->SeqNum);
+	acknowledgment = swap_u32(parsed.tcp->AckNum);
 	return true;
 }
 
@@ -58,35 +45,23 @@ PacketMode::~PacketMode()
 	LOG_DEBUG("packet mode deinit: %s (%s)", mode_name_, options_.name.c_str());
 }
 
-void PacketMode::prepare_packet_for_send(BYTE* packet, UINT length, const WINDIVERT_ADDRESS* address)
+void PacketMode::prepare_packet_for_send(uint8_t* packet, uint32_t length, const backend::PacketMeta* address)
 {
 	if (!options_.ack_restoration)
 		return;
-	const size_t direction = address != nullptr && address->Outbound ? 1 : 0;
+	const size_t direction = address != nullptr && address->outbound ? 1 : 0;
 
-	PWINDIVERT_TCPHDR tcp_header = nullptr;
-	if (!WinDivertHelperParsePacket(packet,
-									length,
-									nullptr,
-									nullptr,
-									nullptr,
-									nullptr,
-									nullptr,
-									&tcp_header,
-									nullptr,
-									nullptr,
-									nullptr,
-									nullptr,
-									nullptr) ||
-		!tcp_header || !tcp_header->Ack)
+	ParsedPacket parsed;
+	if (!parse_packet(packet, length, parsed) || !parsed.tcp || !parsed.tcp->Ack)
 		return;
+	TcpHeader* tcp_header = parsed.tcp;
 
-	uint32_t acknowledgment = WinDivertHelperNtohl(tcp_header->AckNum);
+	uint32_t acknowledgment = swap_u32(tcp_header->AckNum);
 	if (tcp_header->Psh && has_last_sent_ack_[direction] && acknowledgment < last_sent_ack_[direction])
 	{
 		acknowledgment	   = last_sent_ack_[direction];
-		tcp_header->AckNum = WinDivertHelperHtonl(acknowledgment);
-		WinDivertHelperCalcChecksums(packet, length, nullptr, 0);
+		tcp_header->AckNum = swap_u32(acknowledgment);
+		backend::calc_checksums(packet, length);
 	}
 	if (!has_last_sent_ack_[direction] || acknowledgment > last_sent_ack_[direction])
 	{
@@ -95,13 +70,13 @@ void PacketMode::prepare_packet_for_send(BYTE* packet, UINT length, const WINDIV
 	}
 }
 
-void PacketMode::capture(const BYTE*			  packet,
-						 UINT					  length,
-						 const WINDIVERT_ADDRESS& address,
-						 int					  profile,
-						 uint64_t				  now,
-						 uint64_t				  receive_order,
-						 PacketQueue&			  packets)
+void PacketMode::capture(const uint8_t*				 packet,
+						 uint32_t					 length,
+						 const backend::PacketMeta& address,
+						 int						 profile,
+						 uint64_t					 now,
+						 uint64_t					 receive_order,
+						 PacketQueue&				 packets)
 {
 	if (options_.retransmission_mode != RetransmissionMode::none)
 	{
@@ -139,21 +114,8 @@ void PacketMode::capture(const BYTE*			  packet,
 	}
 	if (options_.ack_restoration)
 	{
-		PWINDIVERT_TCPHDR tcp_header = nullptr;
-		if (WinDivertHelperParsePacket(packet,
-									   length,
-									   nullptr,
-									   nullptr,
-									   nullptr,
-									   nullptr,
-									   nullptr,
-									   &tcp_header,
-									   nullptr,
-									   nullptr,
-									   nullptr,
-									   nullptr,
-									   nullptr) &&
-			tcp_header && tcp_header->Ack && !tcp_header->Psh)
+		ParsedPacket parsed;
+		if (parse_packet(packet, length, parsed) && parsed.tcp && parsed.tcp->Ack && !parsed.tcp->Psh)
 		{
 			packets.push(make_packet_node(packet, length, address, profile, now, receive_order));
 			return;
@@ -162,17 +124,17 @@ void PacketMode::capture(const BYTE*			  packet,
 	capture_packet(packet, length, address, profile, now, receive_order, packets);
 }
 
-PacketNode* make_packet_node(const BYTE*			  packet,
-							 UINT					  length,
-							 const WINDIVERT_ADDRESS& address,
-							 int					  profile,
-							 uint64_t				  release_at,
-							 uint64_t				  receive_order)
+PacketNode* make_packet_node(const uint8_t*				   packet,
+							 uint32_t					   length,
+							 const backend::PacketMeta& address,
+							 int						   profile,
+							 uint64_t					   release_at,
+							 uint64_t					   receive_order)
 {
 	PacketNode* node	= new PacketNode;
-	node->packet		= new BYTE[length];
+	node->packet		= new uint8_t[length];
 	node->length		= length;
-	node->address		= new WINDIVERT_ADDRESS(address);
+	node->address		= new backend::PacketMeta(address);
 	node->profile		= profile;
 	node->release_at	= release_at;
 	node->receive_order = receive_order;

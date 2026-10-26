@@ -12,15 +12,16 @@ void PacketEngine::start_region_enforcement()
 		return;
 
 	state_->region_enforcement_stopping = false;
-	state_->region_enforcement_handle	= WinDivertOpen(filter.c_str(), WINDIVERT_LAYER_NETWORK, -100, 0);
-	if (state_->region_enforcement_handle == INVALID_HANDLE_VALUE)
+	backend::OpenOptions open_options;
+	open_options.filter	  = filter;
+	open_options.priority = -100;
+	std::string open_error;
+	state_->region_enforcement_handle = backend::open(open_options, open_error);
+	if (!state_->region_enforcement_handle)
 	{
-		const DWORD error = GetLastError();
-		LOG_ERROR("Region enforcement setup: failed to open WinDivert handle %lu: %s", error, format_win32_error(error).c_str());
+		LOG_ERROR("Region enforcement setup: failed to open capture channel: %s", open_error.c_str());
 		return;
 	}
-	WinDivertSetParam(state_->region_enforcement_handle, WINDIVERT_PARAM_QUEUE_LENGTH, 4096);
-	WinDivertSetParam(state_->region_enforcement_handle, WINDIVERT_PARAM_QUEUE_TIME, 1024);
 	LOG_REGION("Region enforcement filter active: %s", filter.c_str());
 	state_->region_enforcement_recv_thread = std::thread(&PacketEngine::region_enforcement_recv, this);
 	state_->region_enforcement_send_thread = std::thread(&PacketEngine::region_enforcement_send, this);
@@ -28,17 +29,17 @@ void PacketEngine::start_region_enforcement()
 
 void PacketEngine::stop_region_enforcement()
 {
-	if (state_->region_enforcement_handle != INVALID_HANDLE_VALUE)
+	if (state_->region_enforcement_handle)
 	{
 		state_->region_enforcement_stopping = true;
-		WinDivertShutdown(state_->region_enforcement_handle, WINDIVERT_SHUTDOWN_RECV);
+		state_->region_enforcement_handle->shutdown_recv();
 		state_->region_enforcement_changed.notify_all();
 		if (state_->region_enforcement_recv_thread.joinable())
 			state_->region_enforcement_recv_thread.join();
 		if (state_->region_enforcement_send_thread.joinable())
 			state_->region_enforcement_send_thread.join();
-		WinDivertClose(state_->region_enforcement_handle);
-		state_->region_enforcement_handle = INVALID_HANDLE_VALUE;
+		state_->region_enforcement_handle->close();
+		state_->region_enforcement_handle.reset();
 	}
 }
 
@@ -67,17 +68,7 @@ std::string PacketEngine::region_enforcement_filter() const
 	if (delayed_addresses.empty())
 		return {};
 
-	if (delayed_addresses.size() == 1)
-		return "tcp.Psh and ip.SrcAddr == " + delayed_addresses[0] + " and tcp.SrcPort == " + std::to_string(port);
-
-	std::string address_chain;
-	for (const std::string& addr : delayed_addresses)
-	{
-		if (!address_chain.empty())
-			address_chain += " or ";
-		address_chain += "ip.SrcAddr == " + addr;
-	}
-	return "tcp.Psh and (" + address_chain + ") and tcp.SrcPort == " + std::to_string(port);
+	return backend::filters::region_enforcement(delayed_addresses, port);
 }
 
 void PacketEngine::resolve_region(const std::string& address, bool preserve_name)
@@ -203,16 +194,18 @@ void PacketEngine::resolve_client_region()
 }
 void PacketEngine::region_enforcement_recv()
 {
-	BYTE packet_data[0xFFFF];
+	uint8_t packet_data[0xFFFF];
 	while (!state_->region_enforcement_stopping && !shutdown_)
 	{
-		WINDIVERT_ADDRESS address;
-		UINT			  received_length = 0;
-		if (!WinDivertRecv(state_->region_enforcement_handle, packet_data, sizeof(packet_data), &received_length, &address))
+		backend::PacketMeta address;
+		uint32_t			received_length = 0;
+		std::string			io_error;
+		const backend::IoStatus status =
+			state_->region_enforcement_handle->recv(packet_data, sizeof(packet_data), received_length, address, io_error);
+		if (status != backend::IoStatus::ok)
 		{
-			const DWORD error = GetLastError();
-			if (!state_->region_enforcement_stopping && !shutdown_ && error != ERROR_INVALID_HANDLE && error != ERROR_OPERATION_ABORTED)
-				LOG_ERROR("Region enforcement recv: WinDivertRecv error %lu: %s", error, format_win32_error(error).c_str());
+			if (!state_->region_enforcement_stopping && !shutdown_ && status == backend::IoStatus::error)
+				LOG_ERROR("Region enforcement recv: %s", io_error.c_str());
 			continue;
 		}
 
@@ -231,8 +224,8 @@ void PacketEngine::region_enforcement_recv()
 			std::lock_guard<std::mutex> lock(state_->region_enforcement_mutex);
 			if (state_->region_enforcement_stopping)
 			{
-				UINT sent = 0;
-				WinDivertSend(state_->region_enforcement_handle, packet_data, received_length, &sent, &address);
+				uint32_t sent = 0;
+				state_->region_enforcement_handle->send(packet_data, received_length, address, sent, io_error);
 				continue;
 			}
 			State::DelayedEnforcementPacket delayed_pkt;
@@ -289,16 +282,18 @@ void PacketEngine::region_enforcement_send()
 
 		for (auto& pkt : ready_packets)
 		{
-			UINT sent = 0;
-			if (!WinDivertSend(state_->region_enforcement_handle, pkt.data.data(), static_cast<UINT>(pkt.data.size()), &sent, &pkt.address))
+			uint32_t	sent = 0;
+			std::string io_error;
+			const backend::IoStatus status =
+				state_->region_enforcement_handle->send(pkt.data.data(), static_cast<uint32_t>(pkt.data.size()), pkt.address, sent, io_error);
+			if (status != backend::IoStatus::ok)
 			{
-				const DWORD error = GetLastError();
-				if (!state_->region_enforcement_stopping && !shutdown_ && error != ERROR_INVALID_HANDLE && error != ERROR_OPERATION_ABORTED)
-					LOG_ERROR("Region enforcement delayed send: WinDivertSend failed %lu: %s", error, format_win32_error(error).c_str());
+				if (!state_->region_enforcement_stopping && !shutdown_ && status == backend::IoStatus::error)
+					LOG_ERROR("Region enforcement delayed send: failed: %s", io_error.c_str());
 			}
 			else if (sent != 0)
 			{
-				const PacketAddresses addresses = packet_addresses(pkt.data.data(), static_cast<UINT>(pkt.data.size()));
+				const PacketAddresses addresses = packet_addresses(pkt.data.data(), static_cast<uint32_t>(pkt.data.size()));
 				LOG_DEBUG("Region enforcement send: delayed packet: Length = %zu, Src = %s, Dst = %s, SendLen = %u",
 						  pkt.data.size(),
 						  addresses.source.c_str(),
@@ -316,11 +311,13 @@ void PacketEngine::region_enforcement_send()
 	}
 	for (auto& pkt : pending_packets)
 	{
-		UINT sent = 0;
-		if (WinDivertSend(state_->region_enforcement_handle, pkt.data.data(), static_cast<UINT>(pkt.data.size()), &sent, &pkt.address) &&
+		uint32_t	sent = 0;
+		std::string io_error;
+		if (state_->region_enforcement_handle->send(pkt.data.data(), static_cast<uint32_t>(pkt.data.size()), pkt.address, sent, io_error) ==
+				backend::IoStatus::ok &&
 			sent != 0)
 		{
-			const PacketAddresses addresses = packet_addresses(pkt.data.data(), static_cast<UINT>(pkt.data.size()));
+			const PacketAddresses addresses = packet_addresses(pkt.data.data(), static_cast<uint32_t>(pkt.data.size()));
 			LOG_DEBUG("Region enforcement flush: sent packet: Length = %zu, Src = %s, Dst = %s, SendLen = %u",
 					  pkt.data.size(),
 					  addresses.source.c_str(),

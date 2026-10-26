@@ -9,33 +9,24 @@
 #include <string>
 #include <vector>
 
+#include "packet_backend.h"
 
 
-/// Optional per-profile overrides for WinDivert packet capture and filtering.
-struct WinDivertOptions
+
+/// Optional per-profile overrides for packet capture and filtering.
+struct CaptureOptions
 {
-	/// Optional override for WinDivert sniff mode.
+	/// Optional override for sniff mode (observe without intercepting).
 	std::optional<bool> sniff;
-	/// Optional override for WinDivert forwarding.
+	/// Optional override for capturing forwarded traffic.
 	std::optional<bool> forward;
 	/// Optional override for capturing outbound traffic.
 	std::optional<bool> outbound;
 	/// Which client address fields to enforce when filtering packets.
-	enum class ClientAddressEnforcement
-	{
-		none,        ///< Do not enforce client addresses.
-		source,      ///< Enforce the client source address.
-		destination, ///< Enforce the client destination address.
-		both,        ///< Enforce both client addresses.
-	};
+	using ClientAddressEnforcement = backend::ClientAddressEnforcement;
 	std::optional<ClientAddressEnforcement> client_address_enforcement;
 	/// Which packet endpoint is matched against the selected server.
-	enum class ServerDirection
-	{
-		source,      ///< Match the source address.
-		destination, ///< Match the destination address.
-		both,        ///< Match either endpoint.
-	};
+	using ServerDirection = backend::ServerDirection;
 	std::optional<ServerDirection> server_direction;
 };
 
@@ -158,10 +149,10 @@ struct ProfileOptions
 	bool ratio_configured = false;
 	/// Selection rule for ratio-based packet handling.
 	RatioSelection ratio_selection = RatioSelection::first;
-	/// Optional WinDivert filter expression for this profile.
+	/// Optional filter expression for this profile, in the active backend's filter syntax.
 	std::optional<std::string> filter;
-	/// Optional WinDivert behavior overrides for this profile.
-	WinDivertOptions windivert_options;
+	/// Optional capture behavior overrides for this profile (YAML key: windivert_options).
+	CaptureOptions capture_options;
 };
 
 /// Settings for automatic region enforcement based on network probes.
@@ -346,11 +337,11 @@ private:
 	void region_enforcement_recv();
 	/// Sends packets buffered by region enforcement.
 	void region_enforcement_send();
-	/// Opens the region-enforcement WinDivert handle and starts its workers.
+	/// Opens the region-enforcement capture channel and starts its workers.
 	void start_region_enforcement();
 	/// Stops region-enforcement workers and closes their handle.
 	void stop_region_enforcement();
-	/// Builds the WinDivert filter used for region enforcement.
+	/// Builds the backend filter used for region enforcement.
 	std::string region_enforcement_filter() const;
 	/// Resolves and stores a server region.
 	void resolve_region(const std::string& address, bool preserve_name = false);
@@ -362,8 +353,8 @@ private:
 	std::optional<std::string> effective_client_source_address() const;
 	/// Returns the discovered client destination address or its configured fallback.
 	std::optional<std::string> effective_client_destination_address() const;
-	/// Builds a WinDivert filter for the given profile.
-	std::string server_filter(const ProfileOptions& profile) const;
+	/// Builds a backend filter for the given profile.
+	backend::ProfileFilter server_filter(const ProfileOptions& profile) const;
 
 	PacketEngineOptions options_;
 	std::atomic<bool> running_ = false;

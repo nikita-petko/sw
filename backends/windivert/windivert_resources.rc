@@ -1,0 +1,7 @@
+#include <windows.h>
+
+#define WINDIVERT_DLL 101
+#define WINDIVERT_SYS 102
+
+WINDIVERT_DLL RCDATA "..\\..\\win_divert\\x64\\WinDivert.dll"
+WINDIVERT_SYS RCDATA "..\\..\\win_divert\\x64\\WinDivert64.sys"

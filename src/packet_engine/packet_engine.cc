@@ -227,59 +227,27 @@ uint64_t PacketEngine::next_batch_in_ms() const
 	return next_release > now ? next_release - now : 0;
 }
 
-std::string PacketEngine::server_filter(const ProfileOptions& profile) const
+backend::ProfileFilter PacketEngine::server_filter(const ProfileOptions& profile) const
 {
-	const std::string& filter		   = profile.filter.value_or(options_.global_filter);
-	const size_t	   server_index	   = server_index_.load();
-	std::string		   combined_filter = filter;
-	const auto		   enforcement =
-		profile.windivert_options.client_address_enforcement.value_or(WinDivertOptions::ClientAddressEnforcement::both);
-	std::string client_filter;
-	const std::optional<std::string> client_source		= effective_client_source_address();
-	const std::optional<std::string> client_destination = effective_client_destination_address();
-	if (enforcement == WinDivertOptions::ClientAddressEnforcement::source ||
-		enforcement == WinDivertOptions::ClientAddressEnforcement::both)
-		if (client_source)
-			client_filter = "ip.SrcAddr == " + *client_source;
-	if (enforcement == WinDivertOptions::ClientAddressEnforcement::destination ||
-		enforcement == WinDivertOptions::ClientAddressEnforcement::both)
-		if (client_destination)
-		{
-			if (!client_filter.empty())
-				client_filter += " or ";
-			client_filter += "ip.DstAddr == " + *client_destination;
-		}
-	if (!client_filter.empty())
-		combined_filter = "(" + combined_filter + ") and (" + client_filter + ")";
+	const size_t		  server_index = server_index_.load();
+	backend::ProfileFilter spec;
+	spec.user_filter		= profile.filter.value_or(options_.global_filter);
+	spec.include_bare_acks	= profile.ack_restoration;
+	spec.client_enforcement = profile.capture_options.client_address_enforcement.value_or(CaptureOptions::ClientAddressEnforcement::both);
+	spec.client_source		= effective_client_source_address();
+	spec.client_destination = effective_client_destination_address();
+	spec.outbound			= profile.capture_options.outbound.value_or(false);
 
-	if (server_index == 0 || !profile.windivert_options.server_direction)
-		return combined_filter;
+	if (server_index == 0 || !profile.capture_options.server_direction)
+		return spec;
+	spec.server_direction = profile.capture_options.server_direction;
+
 	const std::string& server_address = options_.servers[server_index - 1].address;
-
-	const char* address_field = "ip.Addr";
-	switch (*profile.windivert_options.server_direction)
-	{
-		case WinDivertOptions::ServerDirection::source:
-			address_field = "ip.SrcAddr";
-			break;
-		case WinDivertOptions::ServerDirection::destination:
-			address_field = "ip.DstAddr";
-			break;
-		case WinDivertOptions::ServerDirection::both:
-			break;
-	}
-	const std::string& server_group = options_.servers[server_index - 1].group;
-	std::string		   address_filter;
+	const std::string& server_group	  = options_.servers[server_index - 1].group;
 	for (const ServerOptions& server : options_.servers)
-	{
 		if (server_group.empty() ? server.address == server_address : server.group == server_group)
-		{
-			if (!address_filter.empty())
-				address_filter += " or ";
-			address_filter += address_field + std::string(" == ") + server.address;
-		}
-	}
-	return "(" + combined_filter + ") and (" + address_filter + ")";
+			spec.server_addresses.push_back(server.address);
+	return spec;
 }
 
 std::string PacketEngine::current_server() const
@@ -408,32 +376,25 @@ void PacketEngine::setup(int profile)
 		return;
 	timeBeginPeriod(1);
 	const ProfileOptions& profile_options = options_.profiles[profile - 1];
-	const bool			  sniff			  = profile_options.windivert_options.sniff.value_or(false);
-	const bool			  outbound		  = profile_options.windivert_options.outbound.value_or(false);
-	const bool			  forward		  = profile_options.windivert_options.forward.value_or(false);
-	ProfileOptions		  capture_profile = profile_options;
-	if (profile_options.ack_restoration)
+	const bool			  sniff			  = profile_options.capture_options.sniff.value_or(false);
+	const bool			  forward		  = profile_options.capture_options.forward.value_or(false);
+	const std::string	  capture_filter  = backend::filters::profile(server_filter(profile_options));
+	backend::OpenOptions  open_options;
+	open_options.filter	 = capture_filter;
+	open_options.forward = forward;
+	open_options.sniff	 = sniff;
+	std::string open_error;
+	std::unique_ptr<backend::PacketChannel> handle = backend::open(open_options, open_error);
+	if (!handle)
 	{
-		const std::string& packet_filter = profile_options.filter.value_or(options_.global_filter);
-		capture_profile.filter			 = "(" + packet_filter + ") or (tcp.Ack and not tcp.Psh)";
-	}
-	const std::string	  filter		 = server_filter(capture_profile);
-	UINT				  flags			 = sniff ? WINDIVERT_FLAG_SNIFF : 0;
-	const std::string	  capture_filter = outbound ? "outbound and (" + filter + ")" : filter;
-	const WINDIVERT_LAYER layer			 = forward ? WINDIVERT_LAYER_NETWORK_FORWARD : WINDIVERT_LAYER_NETWORK;
-	HANDLE				  handle		 = WinDivertOpen(capture_filter.c_str(), layer, 0, flags);
-	if (handle == INVALID_HANDLE_VALUE)
-	{
-		const DWORD error = GetLastError();
-		LOG_ERROR("profile #%d - %s setup: failed to open WinDivert handle %lu: %s",
+		LOG_ERROR("profile #%d - %s setup: failed to open capture channel: %s",
 				  profile,
 				  profile_options.name.c_str(),
-				  error,
-				  format_win32_error(error).c_str());
+				  open_error.c_str());
 		timeEndPeriod(1);
 		return;
 	}
-	std::shared_ptr<Session> session(new Session(profile, handle, packet_modes_[profile - 1].get()));
+	std::shared_ptr<Session> session(new Session(profile, std::move(handle), packet_modes_[profile - 1].get()));
 	if (pcap_files_enabled_for(options_.features.pcap_files, profile_options))
 	{
 		GUID guid = {};
@@ -486,8 +447,6 @@ void PacketEngine::setup(int profile)
 		}
 	}
 	state_->profile_stats[profile - 1].enabled_since = GetTickCount64();
-	WinDivertSetParam(handle, WINDIVERT_PARAM_QUEUE_LENGTH, 4096);
-	WinDivertSetParam(handle, WINDIVERT_PARAM_QUEUE_TIME, 1024);
 	state_->active_sessions[profile - 1] = session;
 	state_->active_profiles[profile - 1] = true;
 	{
@@ -499,10 +458,11 @@ void PacketEngine::setup(int profile)
 	session->receive_thread = std::thread(&PacketEngine::read_packets, this, session);
 	session->send_thread	= std::thread(&PacketEngine::write_packets, this, session);
 	LOG_DEBUG("profile #%d - %s setup: opening handle", profile, profile_options.name.c_str());
-	LOG_DEBUG("profile #%d - %s setup: WinDivert layer = %s, filter = %s",
+	LOG_DEBUG("profile #%d - %s setup: backend = %s, forward = %d, filter = %s",
 			  profile,
 			  profile_options.name.c_str(),
-			  forward ? "NETWORK_FORWARD" : "NETWORK",
+			  backend::name(),
+			  forward ? 1 : 0,
 			  capture_filter.c_str());
 	LOG_ACTIVATE("Lag switch enabled, profile = %s (%s, mode = %s). %s",
 			 profile_options.name.c_str(),
@@ -567,7 +527,7 @@ void PacketEngine::teardown(int profile)
 		state_->active_profiles[profile - 1] = false;
 		running_		  = std::any_of(state_->active_profiles.begin(), state_->active_profiles.end(), [](bool active) { return active; });
 		session->stopping = true;
-		WinDivertShutdown(session->handle, WINDIVERT_SHUTDOWN_RECV);
+		session->handle->shutdown_recv();
 		session->packet_changed.notify_all();
 		state_->cleanup_threads.emplace_back([this, session, enabled_time, profile] {
 			session->receive_thread.join();
@@ -575,7 +535,7 @@ void PacketEngine::teardown(int profile)
 			const bool pcap_captured = session->pcap_file != nullptr;
 			if (pcap_captured)
 				session->pcap_file.reset();
-			WinDivertClose(session->handle);
+			session->handle->close();
 			timeEndPeriod(1);
 			LOG_DEACTIVATE("profile #%d - %s teardown: disabled after %s",
 					 profile,
@@ -603,19 +563,18 @@ void PacketEngine::start_workers()
 	if (options_.discovery_port)
 	{
 		const uint16_t	  port	 = *options_.discovery_port;
-		const std::string filter = "tcp.DstPort == " + std::to_string(port) + " or tcp.SrcPort == " + std::to_string(port) +
-								   " or udp.DstPort == " + std::to_string(port) + " or udp.SrcPort == " + std::to_string(port);
-		state_->discovery_handle = WinDivertOpen(filter.c_str(), WINDIVERT_LAYER_NETWORK, 0, WINDIVERT_FLAG_SNIFF);
-		if (state_->discovery_handle == INVALID_HANDLE_VALUE)
+		const std::string filter = backend::filters::port(port);
+		backend::OpenOptions open_options;
+		open_options.filter = filter;
+		open_options.sniff	= true;
+		std::string open_error;
+		state_->discovery_handle = backend::open(open_options, open_error);
+		if (!state_->discovery_handle)
 		{
-			const DWORD error = GetLastError();
-			LOG_ERROR("Server discovery setup: failed to open WinDivert handle %lu: %s", error, format_win32_error(error).c_str());
+			LOG_ERROR("Server discovery setup: failed to open capture channel: %s", open_error.c_str());
 		}
 		else
-		{
-			WinDivertSetParam(state_->discovery_handle, WINDIVERT_PARAM_QUEUE_LENGTH, 4096);
-			WinDivertSetParam(state_->discovery_handle, WINDIVERT_PARAM_QUEUE_TIME, 1024);
-			LOG_INFO("Server discovery enabled on port %u with a %s window",
+		{			LOG_INFO("Server discovery enabled on port %u with a %s window",
 					 port,
 					 logging::format_duration(options_.discovery_window_ms).c_str());
 			state_->discovery_thread = std::thread(&PacketEngine::discover_packets, this);
@@ -624,20 +583,19 @@ void PacketEngine::start_workers()
 
 	if (options_.features.region_enforcement.enabled && options_.features.region_enforcement.probe_port != 0)
 	{
-		const uint16_t	  port = options_.features.region_enforcement.probe_port;
-		const std::string filter =
-			"tcp.Syn and (tcp.DstPort == " + std::to_string(port) + " or tcp.SrcPort == " + std::to_string(port) + ")";
-		state_->probe_handle = WinDivertOpen(filter.c_str(), WINDIVERT_LAYER_NETWORK, 0, WINDIVERT_FLAG_SNIFF);
-		if (state_->probe_handle == INVALID_HANDLE_VALUE)
+		const uint16_t	  port	 = options_.features.region_enforcement.probe_port;
+		const std::string filter = backend::filters::syn_probe(port);
+		backend::OpenOptions open_options;
+		open_options.filter = filter;
+		open_options.sniff	= true;
+		std::string open_error;
+		state_->probe_handle = backend::open(open_options, open_error);
+		if (!state_->probe_handle)
 		{
-			const DWORD error = GetLastError();
-			LOG_ERROR("Probe detection setup: failed to open WinDivert handle %lu: %s", error, format_win32_error(error).c_str());
+			LOG_ERROR("Probe detection setup: failed to open capture channel: %s", open_error.c_str());
 		}
 		else
-		{
-			WinDivertSetParam(state_->probe_handle, WINDIVERT_PARAM_QUEUE_LENGTH, 4096);
-			WinDivertSetParam(state_->probe_handle, WINDIVERT_PARAM_QUEUE_TIME, 1024);
-			LOG_INFO("Probe detection enabled on port %u", port);
+		{			LOG_INFO("Probe detection enabled on port %u", port);
 			state_->probe_thread = std::thread(&PacketEngine::probe_packets, this);
 		}
 
@@ -646,28 +604,24 @@ void PacketEngine::start_workers()
 
 	if (options_.features.forwarded_address_discovery.enabled)
 	{
-		const uint32_t	   inbound_if_idx  = *options_.features.forwarded_address_discovery.inbound_if_idx;
-		const uint32_t	   outbound_if_idx = *options_.features.forwarded_address_discovery.outbound_if_idx;
-		const uint16_t	   port			   = options_.features.forwarded_address_discovery.port;
-		const std::string  port_filter	   = "tcp.DstPort == " + std::to_string(port) + " or tcp.SrcPort == " + std::to_string(port) +
-										 " or udp.DstPort == " + std::to_string(port) + " or udp.SrcPort == " + std::to_string(port);
-		const std::string filter = "outbound and (ifIdx == " + std::to_string(inbound_if_idx) + " or ifIdx == " +
-								   std::to_string(outbound_if_idx) + ") and (" + port_filter + ")";
+		const uint32_t	  inbound_if_idx  = *options_.features.forwarded_address_discovery.inbound_if_idx;
+		const uint32_t	  outbound_if_idx = *options_.features.forwarded_address_discovery.outbound_if_idx;
+		const uint16_t	  port			  = options_.features.forwarded_address_discovery.port;
+		const std::string filter		  = backend::filters::forwarded_address(inbound_if_idx, outbound_if_idx, port);
 		LOG_DEBUG("Forwarded address discovery setup: opening filter '%s'", filter.c_str());
 		// a dedicated priority avoids losing packets to other priority-0 handles (server discovery, profiles) with overlapping filters
-		state_->fad_handle = WinDivertOpen(filter.c_str(), WINDIVERT_LAYER_NETWORK, 1000, WINDIVERT_FLAG_SNIFF);
-		if (state_->fad_handle == INVALID_HANDLE_VALUE)
+		backend::OpenOptions open_options;
+		open_options.filter	  = filter;
+		open_options.sniff	  = true;
+		open_options.priority = 1000;
+		std::string open_error;
+		state_->fad_handle = backend::open(open_options, open_error);
+		if (!state_->fad_handle)
 		{
-			const DWORD error = GetLastError();
-			LOG_ERROR("Forwarded address discovery setup: failed to open WinDivert handle %lu: %s",
-					  error,
-					  format_win32_error(error).c_str());
+			LOG_ERROR("Forwarded address discovery setup: failed to open capture channel: %s", open_error.c_str());
 		}
 		else
-		{
-			WinDivertSetParam(state_->fad_handle, WINDIVERT_PARAM_QUEUE_LENGTH, 4096);
-			WinDivertSetParam(state_->fad_handle, WINDIVERT_PARAM_QUEUE_TIME, 1024);
-			LOG_INFO("Forwarded address discovery enabled (inbound ifIdx %u, outbound ifIdx %u)", inbound_if_idx, outbound_if_idx);
+		{			LOG_INFO("Forwarded address discovery enabled (inbound ifIdx %u, outbound ifIdx %u)", inbound_if_idx, outbound_if_idx);
 			state_->fad_thread = std::thread(&PacketEngine::forwarded_address_discovery_recv, this);
 		}
 	}
@@ -676,12 +630,12 @@ void PacketEngine::start_workers()
 void PacketEngine::stop_workers()
 {
 	shutdown_ = true;
-	if (state_->discovery_handle != INVALID_HANDLE_VALUE)
-		WinDivertShutdown(state_->discovery_handle, WINDIVERT_SHUTDOWN_RECV);
-	if (state_->probe_handle != INVALID_HANDLE_VALUE)
-		WinDivertShutdown(state_->probe_handle, WINDIVERT_SHUTDOWN_RECV);
-	if (state_->fad_handle != INVALID_HANDLE_VALUE)
-		WinDivertShutdown(state_->fad_handle, WINDIVERT_SHUTDOWN_RECV);
+	if (state_->discovery_handle)
+		state_->discovery_handle->shutdown_recv();
+	if (state_->probe_handle)
+		state_->probe_handle->shutdown_recv();
+	if (state_->fad_handle)
+		state_->fad_handle->shutdown_recv();
 	stop_region_enforcement();
 	teardown();
 	for (std::thread& cleanup_thread : state_->cleanup_threads)
@@ -697,19 +651,10 @@ void PacketEngine::stop_workers()
 		if (region_thread.joinable())
 			region_thread.join();
 	state_->region_threads.clear();
-	if (state_->discovery_handle != INVALID_HANDLE_VALUE)
-	{
-		WinDivertClose(state_->discovery_handle);
-		state_->discovery_handle = INVALID_HANDLE_VALUE;
-	}
-	if (state_->probe_handle != INVALID_HANDLE_VALUE)
-	{
-		WinDivertClose(state_->probe_handle);
-		state_->probe_handle = INVALID_HANDLE_VALUE;
-	}
-	if (state_->fad_handle != INVALID_HANDLE_VALUE)
-	{
-		WinDivertClose(state_->fad_handle);
-		state_->fad_handle = INVALID_HANDLE_VALUE;
-	}
+	for (auto* channel : {&state_->discovery_handle, &state_->probe_handle, &state_->fad_handle})
+		if (*channel)
+		{
+			(*channel)->close();
+			channel->reset();
+		}
 }

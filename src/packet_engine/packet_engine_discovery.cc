@@ -17,12 +17,15 @@ void PacketEngine::discover_packets()
 	};
 	uint64_t window_started = GetTickCount64();
 	bool	 was_running	= false;
-	BYTE	 packet_data[0xFFFF];
+	uint8_t	 packet_data[0xFFFF];
 	while (!shutdown_)
 	{
-		WINDIVERT_ADDRESS address;
-		UINT			  received_length = 0;
-		if (WinDivertRecv(state_->discovery_handle, packet_data, sizeof(packet_data), &received_length, &address))
+		backend::PacketMeta address;
+		uint32_t			received_length = 0;
+		std::string			io_error;
+		const backend::IoStatus recv_status =
+			state_->discovery_handle->recv(packet_data, sizeof(packet_data), received_length, address, io_error);
+		if (recv_status == backend::IoStatus::ok)
 		{
 			if (running_.load())
 			{
@@ -41,27 +44,16 @@ void PacketEngine::discover_packets()
 				was_running	   = false;
 				window_started = GetTickCount64();
 			}
-			PWINDIVERT_IPHDR   ip_header   = nullptr;
-			PWINDIVERT_IPV6HDR ipv6_header = nullptr;
-			if (WinDivertHelperParsePacket(packet_data,
-										   received_length,
-										   &ip_header,
-										   &ipv6_header,
-										   nullptr,
-										   nullptr,
-										   nullptr,
-										   nullptr,
-										   nullptr,
-										   nullptr,
-										   nullptr,
-										   nullptr,
-										   nullptr))
+			ParsedPacket parsed;
+			if (parse_packet(packet_data, received_length, parsed))
 			{
-				std::string address_text;
+				const Ipv4Header* ip_header	  = parsed.ipv4;
+				const Ipv6Header* ipv6_header = parsed.ipv6;
+				std::string		  address_text;
 				if (ip_header)
-					address_text = format_ipv4_address(address.Outbound ? ip_header->DstAddr : ip_header->SrcAddr);
+					address_text = format_ipv4_address(address.outbound ? ip_header->DstAddr : ip_header->SrcAddr);
 				else if (ipv6_header)
-					address_text = format_ipv6_address(address.Outbound ? ipv6_header->DstAddr : ipv6_header->SrcAddr);
+					address_text = format_ipv6_address(address.outbound ? ipv6_header->DstAddr : ipv6_header->SrcAddr);
 				if (!address_text.empty())
 				{
 					std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
@@ -95,11 +87,9 @@ void PacketEngine::discover_packets()
 				}
 			}
 		}
-		else if (!shutdown_)
+		else if (!shutdown_ && recv_status == backend::IoStatus::error)
 		{
-			const DWORD error = GetLastError();
-			if (error != ERROR_INVALID_HANDLE && error != ERROR_OPERATION_ABORTED)
-				LOG_ERROR("Server discovery recv: WinDivertRecv error %lu: %s", error, format_win32_error(error).c_str());
+			LOG_ERROR("Server discovery recv: %s", io_error.c_str());
 		}
 
 		const uint64_t now = GetTickCount64();
@@ -151,37 +141,27 @@ void PacketEngine::discover_packets()
 
 void PacketEngine::probe_packets()
 {
-	BYTE packet_data[0xFFFF];
+	uint8_t packet_data[0xFFFF];
 	while (!shutdown_)
 	{
-		WINDIVERT_ADDRESS address;
-		UINT			  received_length = 0;
-		if (WinDivertRecv(state_->probe_handle, packet_data, sizeof(packet_data), &received_length, &address))
+		backend::PacketMeta address;
+		uint32_t			received_length = 0;
+		std::string			io_error;
+		const backend::IoStatus recv_status =
+			state_->probe_handle->recv(packet_data, sizeof(packet_data), received_length, address, io_error);
+		if (recv_status == backend::IoStatus::ok)
 		{
-			PWINDIVERT_IPHDR   ip_header   = nullptr;
-			PWINDIVERT_IPV6HDR ipv6_header = nullptr;
-			PWINDIVERT_TCPHDR  tcp_header  = nullptr;
-			if (WinDivertHelperParsePacket(packet_data,
-										   received_length,
-										   &ip_header,
-										   &ipv6_header,
-										   nullptr,
-										   nullptr,
-										   nullptr,
-										   &tcp_header,
-										   nullptr,
-										   nullptr,
-										   nullptr,
-										   nullptr,
-										   nullptr) &&
-				tcp_header && tcp_header->Syn)
+			ParsedPacket parsed;
+			if (parse_packet(packet_data, received_length, parsed) && parsed.tcp && parsed.tcp->Syn)
 			{
-				const uint64_t now = GetTickCount64();
-				std::string	   server_address;
+				const Ipv4Header* ip_header	  = parsed.ipv4;
+				const Ipv6Header* ipv6_header = parsed.ipv6;
+				const uint64_t	  now		  = GetTickCount64();
+				std::string		  server_address;
 				if (ip_header)
-					server_address = format_ipv4_address(address.Outbound ? ip_header->DstAddr : ip_header->SrcAddr);
+					server_address = format_ipv4_address(address.outbound ? ip_header->DstAddr : ip_header->SrcAddr);
 				else if (ipv6_header)
-					server_address = format_ipv6_address(address.Outbound ? ipv6_header->DstAddr : ipv6_header->SrcAddr);
+					server_address = format_ipv6_address(address.outbound ? ipv6_header->DstAddr : ipv6_header->SrcAddr);
 
 				bool is_new_window = false;
 				{
@@ -235,11 +215,9 @@ void PacketEngine::probe_packets()
 				}
 			}
 		}
-		else if (!shutdown_)
+		else if (!shutdown_ && recv_status == backend::IoStatus::error)
 		{
-			const DWORD error = GetLastError();
-			if (error != ERROR_INVALID_HANDLE && error != ERROR_OPERATION_ABORTED)
-				LOG_ERROR("Probe detection recv: WinDivertRecv error %lu: %s", error, format_win32_error(error).c_str());
+			LOG_ERROR("Probe detection recv: %s", io_error.c_str());
 		}
 	}
 }
@@ -304,43 +282,35 @@ void PacketEngine::forwarded_address_discovery_recv()
 	};
 
 	uint64_t window_started = GetTickCount64();
-	BYTE	 packet_data[0xFFFF];
+	uint8_t	 packet_data[0xFFFF];
 	while (!shutdown_)
 	{
-		WINDIVERT_ADDRESS address;
-		UINT			  received_length = 0;
-		if (WinDivertRecv(state_->fad_handle, packet_data, sizeof(packet_data), &received_length, &address))
+		backend::PacketMeta address;
+		uint32_t			received_length = 0;
+		std::string			io_error;
+		const backend::IoStatus recv_status =
+			state_->fad_handle->recv(packet_data, sizeof(packet_data), received_length, address, io_error);
+		if (recv_status == backend::IoStatus::ok)
 		{
-			const bool is_inbound_interface  = address.Network.IfIdx == inbound_if_idx;
-			const bool is_outbound_interface = address.Network.IfIdx == outbound_if_idx;
+			const bool is_inbound_interface  = address.if_index == inbound_if_idx;
+			const bool is_outbound_interface = address.if_index == outbound_if_idx;
 			if (!is_inbound_interface && !is_outbound_interface)
 			{
 				LOG_DEBUG("Forwarded address discovery: ignoring packet on unrelated ifIdx %u (outbound=%d)",
-						  address.Network.IfIdx,
-						  address.Outbound);
+						  address.if_index,
+						  address.outbound);
 				continue;
 			}
-			PWINDIVERT_IPHDR   ip_header   = nullptr;
-			PWINDIVERT_IPV6HDR ipv6_header = nullptr;
-			if (!WinDivertHelperParsePacket(packet_data,
-											received_length,
-											&ip_header,
-											&ipv6_header,
-											nullptr,
-											nullptr,
-											nullptr,
-											nullptr,
-											nullptr,
-											nullptr,
-											nullptr,
-											nullptr,
-											nullptr))
+			ParsedPacket parsed;
+			if (!parse_packet(packet_data, received_length, parsed))
 			{
 				LOG_DEBUG("Forwarded address discovery: failed to parse packet on ifIdx %u (%s)",
-						  address.Network.IfIdx,
+						  address.if_index,
 						  is_inbound_interface ? "inbound" : "outbound");
 				continue;
 			}
+			const Ipv4Header* ip_header	  = parsed.ipv4;
+			const Ipv6Header* ipv6_header = parsed.ipv6;
 			std::string address_text;
 			if (ip_header)
 				address_text = format_ipv4_address(is_inbound_interface ? ip_header->DstAddr : ip_header->SrcAddr);
@@ -349,7 +319,7 @@ void PacketEngine::forwarded_address_discovery_recv()
 			if (address_text.empty())
 			{
 				LOG_DEBUG("Forwarded address discovery: packet on ifIdx %u (%s) had no IPv4/IPv6 header",
-						  address.Network.IfIdx,
+						  address.if_index,
 						  is_inbound_interface ? "inbound" : "outbound");
 				continue;
 			}
@@ -358,15 +328,13 @@ void PacketEngine::forwarded_address_discovery_recv()
 			LOG_DEBUG("Forwarded address discovery: observed %s = %s on ifIdx %u (outbound=%d) [count=%llu]",
 					  is_inbound_interface ? "dst" : "src",
 					  address_text.c_str(),
-					  address.Network.IfIdx,
-					  address.Outbound,
+					  address.if_index,
+					  address.outbound,
 					  static_cast<unsigned long long>(counts[address_text]));
 		}
-		else if (!shutdown_)
+		else if (!shutdown_ && recv_status == backend::IoStatus::error)
 		{
-			const DWORD error = GetLastError();
-			if (error != ERROR_INVALID_HANDLE && error != ERROR_OPERATION_ABORTED)
-				LOG_ERROR("Forwarded address discovery recv: WinDivertRecv error %lu: %s", error, format_win32_error(error).c_str());
+			LOG_ERROR("Forwarded address discovery recv: %s", io_error.c_str());
 		}
 
 		const uint64_t now = GetTickCount64();

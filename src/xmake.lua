@@ -1,9 +1,14 @@
 target("lagsw")
     set_version("5")
     set_kind("binary")
-    add_files("*.cc", "modules/*.cc", "packet_engine/*.cc", "*.rc")
+    add_files("*.cc", "modules/*.cc", "packet_engine/*.cc")
 
-    add_includedirs("../include", "../win_divert/include")
+    add_includedirs("../include")
+
+    -- Packet capture backend; WinDivert is the only one and is Windows-only
+    if is_plat("windows") then
+        add_rules("backend.windivert")
+    end
 
     -- Add UAC admin policy
     set_policy("windows.manifest.uac", "admin")

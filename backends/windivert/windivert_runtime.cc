@@ -24,9 +24,6 @@ decltype(&WinDivertShutdown)			WinDivertShutdown_fn			= nullptr;
 decltype(&WinDivertClose)				WinDivertClose_fn				= nullptr;
 decltype(&WinDivertSetParam)			WinDivertSetParam_fn			= nullptr;
 decltype(&WinDivertHelperCompileFilter) WinDivertHelperCompileFilter_fn = nullptr;
-decltype(&WinDivertHelperParsePacket)	WinDivertHelperParsePacket_fn	= nullptr;
-decltype(&WinDivertHelperNtohl)			WinDivertHelperNtohl_fn			= nullptr;
-decltype(&WinDivertHelperHtonl)			WinDivertHelperHtonl_fn			= nullptr;
 decltype(&WinDivertHelperCalcChecksums) WinDivertHelperCalcChecksums_fn = nullptr;
 
 bool extract_resource(int resource_id, const std::filesystem::path& path)
@@ -93,9 +90,6 @@ bool load_functions()
 	LOAD_WINDIVERT_FUNCTION(WinDivertClose);
 	LOAD_WINDIVERT_FUNCTION(WinDivertSetParam);
 	LOAD_WINDIVERT_FUNCTION(WinDivertHelperCompileFilter);
-	LOAD_WINDIVERT_FUNCTION(WinDivertHelperParsePacket);
-	LOAD_WINDIVERT_FUNCTION(WinDivertHelperNtohl);
-	LOAD_WINDIVERT_FUNCTION(WinDivertHelperHtonl);
 	LOAD_WINDIVERT_FUNCTION(WinDivertHelperCalcChecksums);
 #undef LOAD_WINDIVERT_FUNCTION
 	return true;
@@ -190,45 +184,6 @@ extern "C" BOOL WinDivertHelperCompileFilter(const char*	 filter,
 											 UINT*			 error_position)
 {
 	return WinDivertHelperCompileFilter_fn(filter, layer, object, object_len, error, error_position);
-}
-
-extern "C" BOOL WinDivertHelperParsePacket(const VOID*			 packet,
-										   UINT					 packet_len,
-										   PWINDIVERT_IPHDR*	 pp_ip_hdr,
-										   PWINDIVERT_IPV6HDR*	 pp_ipv6_hdr,
-										   UINT8*				 p_protocol,
-										   PWINDIVERT_ICMPHDR*	 pp_icmp_hdr,
-										   PWINDIVERT_ICMPV6HDR* pp_icmpv6_hdr,
-										   PWINDIVERT_TCPHDR*	 pp_tcp_hdr,
-										   PWINDIVERT_UDPHDR*	 pp_udp_hdr,
-										   PVOID*				 pp_data,
-										   UINT*				 p_data_len,
-										   PVOID*				 pp_next,
-										   UINT*				 p_next_len)
-{
-	return WinDivertHelperParsePacket_fn(packet,
-										 packet_len,
-										 pp_ip_hdr,
-										 pp_ipv6_hdr,
-										 p_protocol,
-										 pp_icmp_hdr,
-										 pp_icmpv6_hdr,
-										 pp_tcp_hdr,
-										 pp_udp_hdr,
-										 pp_data,
-										 p_data_len,
-										 pp_next,
-										 p_next_len);
-}
-
-extern "C" UINT32 WinDivertHelperNtohl(UINT32 value)
-{
-	return WinDivertHelperNtohl_fn(value);
-}
-
-extern "C" UINT32 WinDivertHelperHtonl(UINT32 value)
-{
-	return WinDivertHelperHtonl_fn(value);
 }
 
 extern "C" BOOL WinDivertHelperCalcChecksums(VOID* packet, UINT packet_len, WINDIVERT_ADDRESS* address, UINT64 flags)
