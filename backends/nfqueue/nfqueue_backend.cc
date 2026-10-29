@@ -28,7 +28,7 @@ constexpr uint32_t kQueueMaxLength	 = 16384;
 constexpr int	   kSocketBuffer	 = 8 * 1024 * 1024;
 constexpr uint32_t kReceiveBuffer	 = 0x10000 + 4096;
 constexpr uint32_t kMinIpv4Header	 = 20;
-// WinDivert priorities run high-to-low; nftables chain priorities run low-to-high.
+// Capture priorities run high-to-low; nftables chain priorities run low-to-high.
 constexpr int kBasePriority = -150;
 
 std::atomic<uint32_t> next_channel_id{0};

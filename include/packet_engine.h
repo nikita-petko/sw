@@ -151,7 +151,7 @@ struct ProfileOptions
 	RatioSelection ratio_selection = RatioSelection::first;
 	/// Optional filter expression for this profile, in the active backend's filter syntax.
 	std::optional<std::string> filter;
-	/// Optional capture behavior overrides for this profile (YAML key: windivert_options).
+	/// Optional capture behavior overrides for this profile (YAML key: capture_options; legacy alias: windivert_options).
 	CaptureOptions capture_options;
 };
 

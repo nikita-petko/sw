@@ -9,7 +9,7 @@
   "properties": {
     "global_filter": {
       "type": "string",
-      "description": "Fallback WinDivert filter string applied to profiles that do not define a specific filter.",
+      "description": "Fallback capture filter expression applied to profiles that do not define a specific filter.",
       "default": "tcp.DstPort == 55000 or tcp.SrcPort == 55000"
     },
     "servers": {
@@ -418,9 +418,14 @@
         },
         "filter": {
           "type": "string",
-          "description": "Profile-specific WinDivert filter expression. Overrides top-level global_filter."
+          "description": "Profile-specific capture filter expression. Overrides top-level global_filter."
         },
         "windivert_options": {
+          "type": "object",
+          "deprecated": true,
+          "description": "Legacy alias of capture_options."
+        },
+        "capture_options": {
           "type": "object",
           "properties": {
             "sniff": {
@@ -431,7 +436,7 @@
             "forward": {
               "type": "boolean",
               "default": false,
-              "description": "Open WinDivert NETWORK_FORWARD layer instead of normal NETWORK layer."
+              "description": "Capture routed (forwarded) traffic instead of traffic to and from this host."
             },
             "outbound": {
               "type": "boolean",

@@ -54,7 +54,7 @@ profiles:
     delay_mode: from_timestamp
     filter: "tcp.SrcPort == 55000 or tcp.DstPort == 55000"
     delay_ms: 500
-    windivert_options:
+    capture_options:
       forward: true
       client_address_enforcement: both
 
@@ -76,7 +76,7 @@ profiles:
     delay_mode: ratio
     ratio: 10%
     delay_ms: 18000
-    windivert_options:
+    capture_options:
       forward: true
       server_direction: source
       client_address_enforcement: destination
@@ -101,7 +101,7 @@ profiles:
     delay_mode: ratio
     ratio: 10%
     delay_ms: 18000
-    windivert_options:
+    capture_options:
       forward: true
       server_direction: destination
       client_address_enforcement: source
@@ -124,7 +124,7 @@ profiles:
     disable_wait_percent: 15
     ratio: 10%
     delay_ms: 18000
-    windivert_options:
+    capture_options:
       forward: true
       server_direction: destination
       client_address_enforcement: source
@@ -147,7 +147,7 @@ profiles:
     retransmission_mode: none
     delay_mode: from_timestamp
     delay_ms: 0
-    windivert_options:
+    capture_options:
       forward: true
       server_direction: source
       client_address_enforcement: destination

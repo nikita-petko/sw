@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-/// Translates the WinDivert-style boolean filter subset used by profiles into nftables rules.
+/// Translates the boolean capture-filter subset used by profiles into nftables rules.
 ///
 /// nftables has no free-form boolean expressions, so the filter is parsed, converted to disjunctive
 /// normal form and emitted as one rule per conjunction and hook. Nothing from the input text is copied

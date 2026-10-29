@@ -7,5 +7,5 @@ profiles:
     mode: hold
     delay_mode: from_timestamp
     delay_ms: 300
-    windivert_options:
+    capture_options:
       forward: true

@@ -779,9 +779,10 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 			pcap_files_base_indent = -1;
 			continue;
 		}
-		if (key == "windivert_options" && value.empty() && profile)
+		// `windivert_options` is the legacy name of `capture_options`
+		if ((key == "capture_options" || key == "windivert_options") && value.empty() && profile)
 		{
-			subsection		  = "windivert_options";
+			subsection		  = "capture_options";
 			subsection_indent = indent;
 			continue;
 		}
@@ -829,7 +830,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 		}
 		if (!profile || section != "profiles")
 			continue;
-		if (subsection == "windivert_options" && indent > subsection_indent)
+		if (subsection == "capture_options" && indent > subsection_indent)
 		{
 			if (key == "server_direction")
 			{

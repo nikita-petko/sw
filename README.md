@@ -4,15 +4,16 @@
 
 ![](https://share.cdn.vmminfra.dev/petko-new/2026/10/powershell_04MIiHw9Ux.png)
 
-### Linux (Stub - See NFQ docs for more information on the progress)
+### Linux (nftables + NFQUEUE)
 
 ![](https://share.cdn.vmminfra.dev/petko-linux/261026_12h33m37s_screenshot.png)
 
-`lagsw` is a Windows console utility that temporarily delays matching network
+`lagsw` is a console utility that temporarily delays matching network
 packets. On Windows it uses the embedded [WinDivert](win_divert/README) driver
 to capture packets, hold them in memory, and reinject them after the configured
-delay. Non-Windows builds currently use a stub packet backend and do not capture
-or delay network traffic.
+delay. On Linux it uses nftables and NFQUEUE for the same purpose (see
+[Linux](#linux)). Other platforms use a stub backend that does not capture or
+delay traffic.
 
 Profiles define which key or key combination activates packet capture, which
 packets are captured, and how those packets are released. This makes it useful
@@ -59,6 +60,56 @@ To remove generated build output:
 ```powershell
 xmake clean
 ```
+
+## Linux
+
+### Requirements
+
+- Linux with nftables (`nft` binary) and NFQUEUE support (`nft_queue`, `nfnetlink_queue`)
+- A C++20 compiler, [XMake](https://xmake.io/), and the development packages for
+  `libnetfilter_queue`, `libmnl`, `libnfnetlink` and `libcurl`
+  (Debian/Ubuntu: `libnetfilter-queue-dev libmnl-dev libnfnetlink-dev libcurl4-openssl-dev`;
+  Arch: `libnetfilter_queue libmnl libnfnetlink curl`)
+- At runtime: `CAP_NET_ADMIN` (root) and read access to `/dev/input/event*`
+  (root or the `input` group), because hotkeys are read from evdev rather than the terminal
+
+### Build
+
+```sh
+xmake f -m release
+xmake
+```
+
+The binary is `build/linux/x86_64/release/lagsw`.
+
+### Running
+
+Run as root:
+
+```sh
+sudo ./lagsw --config profiles/div1.sw.yml
+```
+
+`setcap cap_net_admin` on the binary is not enough: rules are installed by spawning the `nft`
+binary, which does not inherit file capabilities.
+
+`scripts/bootstrap.sh` re-executes itself with `sudo` and runs `lagsw` with preset arguments.
+
+### How it behaves
+
+- All capture rules live in the `inet lagsw` nftables table and use `queue ... bypass`, so
+  traffic keeps flowing if lagsw crashes or is killed. A stale table is replaced on the next start.
+- The table is removed on `q`/backspace, SIGTERM and SIGHUP. Ctrl+C is ignored, as on Windows.
+  After a SIGKILL run `sudo nft delete table inet lagsw` if you want the leftover (pass-through) rules gone.
+- Only the `inet lagsw` table is ever touched. Queue numbers are `10 + channel id`.
+- `forward: true` profiles capture routed traffic (gateway use). Loopback traffic crosses the
+  output and input hooks, so use `outbound: true` to capture it once.
+- Filter terms outside the supported subset are rejected at startup with the position of the error.
+
+### Testing
+
+`scripts/test_nfqueue_localhost.sh` and `scripts/test_nfqueue_gateway.sh` run end to end in a
+throwaway privileged Docker container (see [Included profiles](#included-profiles)).
 
 ## Usage
 
@@ -161,7 +212,7 @@ profiles:
     delay_mode: from_timestamp
     retransmission_mode: both
     delay_ms: 500
-    windivert_options:
+    capture_options:
       forward: false
       server_direction: destination
 ```
@@ -187,7 +238,7 @@ servers:
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `global_filter` | No | WinDivert filter used by profiles that do not define `filter`. Defaults to `tcp.DstPort == 55000 or tcp.SrcPort == 55000`. |
+| `global_filter` | No | Capture filter used by profiles that do not define `filter`. Defaults to `tcp.DstPort == 55000 or tcp.SrcPort == 55000`. |
 | `servers` | No | A list of server addresses, or a mapping of server groups with optional `addresses`, `discovery_port`, and `interval` fields. |
 | `features` | No | Optional feature configuration, including PCAP capture, desynchronization countdown, forwarded-address discovery, and region enforcement. |
 | `profiles` | Yes | A non-empty list of profile definitions. |
@@ -343,8 +394,8 @@ automatically reconfigured whenever a discovered address changes.
 | `group_count` | For `packet_group_send` mode | Positive number of packet groups to capture. Activation-key presses delimit groups and then send one group per press.|
 | `group_order` | No | `fifo`, `lifo`, or `random`; order in which `packet_group_send` releases captured groups. Defaults to `fifo`.|
 | `ratio_selection` | No | `first`, `last`, or `random`; controls which packets a percentage-based `ratio` releases immediately: the first x, the last x, or a random x of the batch. Defaults to `first`. |
-| `filter` | No | Profile-specific WinDivert filter. Overrides `global_filter`. |
-| `windivert_options` | No | WinDivert capture options described below. |
+| `filter` | No | Profile-specific capture filter. Overrides `global_filter`. |
+| `capture_options` | No | Capture options described below (legacy name: `windivert_options`). |
 
 Keys may be a single printable character or one of `tab`, `space`, `alt`,
 `ctrl`, and `shift`. Printable characters are case-insensitive and are stored
@@ -399,10 +450,10 @@ When `delay_ms` is zero, queued packets wait until the profile is deactivated.
 Deactivation flushes all remaining packets immediately, so this is a packet
 hold rather than a permanent drop.
 
-### WinDivert options
+### Capture options
 
 ```yaml
-windivert_options:
+capture_options:
   sniff: false
   forward: false
   outbound: false
@@ -410,22 +461,25 @@ windivert_options:
   server_direction: destination
 ```
 
+`windivert_options` is still accepted as a legacy alias of `capture_options`.
+
 The `client_address_enforcement` option defaults to `both` and accepts
 `none`, `source`, `destination`, or `both`. It controls which configured
 client address clauses are included in the profile filter.
 
 - `sniff`: Capture packets without diverting them from the normal network path.
   Sniffed packets are observed but are not delayed or reinjected by `lagsw`.
-- `forward`: Open the WinDivert `NETWORK_FORWARD` layer instead of the normal
-  `NETWORK` layer.
+- `forward`: Capture routed (forwarded) traffic instead of traffic to and from
+  this host (the WinDivert `NETWORK_FORWARD` layer on Windows, the netfilter
+  `forward` hook on Linux).
 - `outbound`: Restrict the filter to outbound packets. Internally, the capture
-  filter becomes `outbound and (<filter>)`. This applies only to the normal
-  `NETWORK` layer; do not combine it with `forward: true`.
+  filter becomes `outbound and (<filter>)`. This applies only to local
+  traffic; do not combine it with `forward: true`.
 - `server_direction`: When a server is selected, add an `ip.SrcAddr`,
   `ip.DstAddr`, or `ip.Addr` filter for `source`, `destination`, or `both`.
   If no server is selected, no IP server filter is added.
 
-Filters are compiled with WinDivert before the program starts. Invalid filters,
+Filters are validated by the platform capture backend before the program starts. Invalid filters,
 missing profile names or keys, invalid booleans, and invalid delay modes cause
 startup to fail with an error.
 

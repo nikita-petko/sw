@@ -59,7 +59,7 @@ profiles:
     delay_mode: from_timestamp
     delay_ms: 300
     retransmission_mode: none
-    windivert_options:
+    capture_options:
       outbound: true
       client_address_enforcement: both
 
@@ -68,7 +68,7 @@ profiles:
     key: b
     delay_mode: send_all_after_delay
     delay_ms: 300
-    windivert_options:
+    capture_options:
       outbound: true
 
   # ratio (count): two packets are released per 200 ms interval.
@@ -77,7 +77,7 @@ profiles:
     delay_mode: ratio
     ratio: 2
     delay_ms: 200
-    windivert_options:
+    capture_options:
       outbound: true
 
   # ratio (percent) with random selection of the packets released first.
@@ -87,7 +87,7 @@ profiles:
     ratio: 50%
     ratio_selection: random
     delay_ms: 200
-    windivert_options:
+    capture_options:
       outbound: true
 
   # drop in hold mode: active only while the key is held.
@@ -95,7 +95,7 @@ profiles:
     key: x
     mode: hold
     delay_mode: drop
-    windivert_options:
+    capture_options:
       outbound: true
 
   # drop_and_send: drops one packet of every batch and sends the rest after 300 ms.
@@ -104,7 +104,7 @@ profiles:
     delay_mode: drop_and_send
     ratio: 1
     delay_ms: 300
-    windivert_options:
+    capture_options:
       outbound: true
 
   # hold_and_send: holds the first three packets (and TCP retransmissions of them) until deactivation.
@@ -114,14 +114,14 @@ profiles:
     ratio: 3
     subsequent_packet_hold_mode: seq_ack
     retransmission_mode: both
-    windivert_options:
+    capture_options:
       outbound: true
 
   # drop_until_toggle: drop, then hold on the next toggle, then send everything and deactivate.
   - name: "Drop Until Toggle"
     key: u
     delay_mode: drop_until_toggle
-    windivert_options:
+    capture_options:
       outbound: true
 
   # hold_until_deactivation: hold everything; `s` releases two packets without deactivating.
@@ -130,7 +130,7 @@ profiles:
     send_key: s
     delay_mode: hold_until_deactivation
     amount: 2
-    windivert_options:
+    capture_options:
       outbound: true
 
   # packet_group_send: capture two groups (one activation press each), then send them last-in first-out.
@@ -139,7 +139,7 @@ profiles:
     delay_mode: packet_group_send
     group_count: 2
     group_order: lifo
-    windivert_options:
+    capture_options:
       outbound: true
 
   # period: deactivates itself after 1.5 seconds.
@@ -149,7 +149,7 @@ profiles:
     activation_period: 1500
     delay_mode: from_timestamp
     delay_ms: 100
-    windivert_options:
+    capture_options:
       outbound: true
 
   # ack_restoration: bare ACKs are captured too and sent PSH packets never move the ACK backwards.
@@ -159,7 +159,7 @@ profiles:
     delay_mode: from_timestamp
     delay_ms: 50
     retransmission_mode: only_ack
-    windivert_options:
+    capture_options:
       outbound: true
 
   # key_mode oneof: either key activates the profile.
@@ -171,7 +171,7 @@ profiles:
     delay_mode: from_timestamp
     delay_ms: 100
     filter: "tcp.Psh and (tcp.DstPort == 55000 or tcp.SrcPort == 55000)"
-    windivert_options:
+    capture_options:
       outbound: true
 
   # key_mode combination (the default): all keys must be held.
@@ -179,7 +179,7 @@ profiles:
     keys: [ctrl, shift, m]
     delay_mode: from_timestamp
     delay_ms: 100
-    windivert_options:
+    capture_options:
       outbound: true
 
   # sniff: observe without holding anything.
@@ -187,7 +187,7 @@ profiles:
     key: n
     delay_mode: from_timestamp
     delay_ms: 5000
-    windivert_options:
+    capture_options:
       sniff: true
 
   # forward: the forward hook, which loopback traffic never reaches.
@@ -195,7 +195,7 @@ profiles:
     key: f
     delay_mode: from_timestamp
     delay_ms: 5000
-    windivert_options:
+    capture_options:
       forward: true
       client_address_enforcement: none
 
@@ -204,7 +204,7 @@ profiles:
     key: y
     delay_mode: from_timestamp
     delay_ms: 300
-    windivert_options:
+    capture_options:
       outbound: true
       server_direction: destination
       client_address_enforcement: source
@@ -215,7 +215,7 @@ profiles:
     delay_mode: from_timestamp
     delay_ms: 300
     filter: "udp.DstPort == 55001 and ip and ifIdx == 1 and not tcp"
-    windivert_options:
+    capture_options:
       outbound: true
 
   # disables with a wait: switching to this profile stops Delay and Batch, which linger for 200 ms + 10%.
@@ -229,7 +229,7 @@ profiles:
     respect_disable_wait: false
     delay_mode: from_timestamp
     delay_ms: 400
-    windivert_options:
+    capture_options:
       outbound: true
 
   # disables everything else.
@@ -238,5 +238,5 @@ profiles:
     disables: "*"
     delay_mode: from_timestamp
     delay_ms: 600
-    windivert_options:
+    capture_options:
       outbound: true
