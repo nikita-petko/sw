@@ -1,6 +1,8 @@
 #include "packet_engine_internal.h"
 
+#include <atomic>
 #include <cstdlib>
+#include <thread>
 #include <ctime>
 
 #include "log.h"
@@ -18,6 +20,41 @@ void PacketEngine::discover_packets()
 	uint64_t window_started = platform::tick_ms();
 	bool	 was_running	= false;
 	uint8_t	 packet_data[0xFFFF];
+	// Counters for the debug heartbeat. recv() blocks while the port is silent, so the summary has to come from a
+	// separate thread to report windows in which no packet was hit at all.
+	std::atomic<uint64_t> window_received{0}, window_suppressed{0}, window_unparsed{0};
+	uint64_t			  total_received = 0;
+	std::atomic<bool>	  heartbeat_stop{false};
+	std::thread			  heartbeat([&] {
+		   uint64_t waited = 0;
+		   while (!heartbeat_stop.load())
+		   {
+			   platform::sleep_ms(100);
+			   waited += 100;
+			   if (waited < options_.discovery_window_ms)
+				   continue;
+			   waited = 0;
+			   const uint64_t received = window_received.exchange(0);
+			   LOG_DEBUG("Server discovery: last %s: %llu packets captured (%llu skipped while a profile was active, %llu unparsable)%s",
+						 logging::format_duration(options_.discovery_window_ms).c_str(),
+						 static_cast<unsigned long long>(received),
+						 static_cast<unsigned long long>(window_suppressed.exchange(0)),
+						 static_cast<unsigned long long>(window_unparsed.exchange(0)),
+						 received == 0 ? " - no packets hit the discovery filter" : "");
+		   }
+	});
+	struct HeartbeatJoin
+	{
+		std::atomic<bool>& stop;
+		std::thread&	   thread;
+		~HeartbeatJoin()
+		{
+			stop.store(true);
+			if (thread.joinable())
+				thread.join();
+		}
+	} heartbeat_join{heartbeat_stop, heartbeat};
+	LOG_DEBUG("Server discovery: capture loop started, waiting for packets");
 	while (!shutdown_)
 	{
 		backend::PacketMeta address;
@@ -27,10 +64,14 @@ void PacketEngine::discover_packets()
 			state_->discovery_handle->recv(packet_data, sizeof(packet_data), received_length, address, io_error);
 		if (recv_status == backend::IoStatus::ok)
 		{
+			++window_received;
+			if (++total_received == 1)
+				LOG_DEBUG("Server discovery: first packet captured (%u bytes)", received_length);
 			if (running_.load())
 			{
 				if (!was_running)
 					LOG_DEBUG("Server discovery disabled while a profile is active");
+				++window_suppressed;
 				was_running = true;
 				packet_counts.clear();
 				std::lock_guard<std::mutex> lock(state_->discovery_mutex);
@@ -45,17 +86,49 @@ void PacketEngine::discover_packets()
 				window_started = platform::tick_ms();
 			}
 			ParsedPacket parsed;
-			if (parse_packet(packet_data, received_length, parsed))
+			if (!parse_packet(packet_data, received_length, parsed))
+			{
+				++window_unparsed;
+				LOG_DEBUG("Server discovery: ignoring unparsable packet (%u bytes)", received_length);
+			}
+			else
 			{
 				const Ipv4Header* ip_header	  = parsed.ipv4;
 				const Ipv6Header* ipv6_header = parsed.ipv6;
 				std::string		  address_text;
-				if (ip_header)
-					address_text = format_ipv4_address(address.outbound ? ip_header->DstAddr : ip_header->SrcAddr);
-				else if (ipv6_header)
-					address_text = format_ipv6_address(address.outbound ? ipv6_header->DstAddr : ipv6_header->SrcAddr);
-				if (!address_text.empty())
+				// The server is the endpoint on the discovery port. Forwarded packets are all tagged outbound, so the
+				// direction alone cannot tell the server from the client there.
+				const uint16_t discovery_port = *options_.discovery_port;
+				uint16_t	   source_port = 0, destination_port = 0;
+				if (parsed.tcp)
 				{
+					source_port		 = swap_u16(parsed.tcp->SrcPort);
+					destination_port = swap_u16(parsed.tcp->DstPort);
+				}
+				else if (parsed.udp)
+				{
+					source_port		 = swap_u16(parsed.udp->SrcPort);
+					destination_port = swap_u16(parsed.udp->DstPort);
+				}
+				bool use_destination = address.outbound;
+				if (source_port == discovery_port && destination_port != discovery_port)
+					use_destination = false;
+				else if (destination_port == discovery_port && source_port != discovery_port)
+					use_destination = true;
+				if (ip_header)
+					address_text = format_ipv4_address(use_destination ? ip_header->DstAddr : ip_header->SrcAddr);
+				else if (ipv6_header)
+					address_text = format_ipv6_address(use_destination ? ipv6_header->DstAddr : ipv6_header->SrcAddr);
+				if (address_text.empty())
+					LOG_DEBUG("Server discovery: packet has no usable IP address");
+				else
+				{
+					LOG_DEBUG("Server discovery: %s packet, %u bytes, %s, counted for server %s (if_index = %u)",
+							  address.outbound ? "outbound" : "inbound",
+							  received_length,
+							  parsed.tcp ? format_tcp_flags(*parsed.tcp).c_str() : (parsed.udp ? "UDP" : "-"),
+							  address_text.c_str(),
+							  address.if_index);
 					std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
 					const bool					first_seen = seen_servers.insert(address_text).second;
 					auto existing_server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](const ServerOptions& server) {
@@ -90,6 +163,10 @@ void PacketEngine::discover_packets()
 		else if (!shutdown_ && recv_status == backend::IoStatus::error)
 		{
 			LOG_ERROR("Server discovery recv: %s", io_error.c_str());
+		}
+		else if (!shutdown_)
+		{
+			LOG_DEBUG("Server discovery: recv returned status %d without a packet", static_cast<int>(recv_status));
 		}
 
 		const uint64_t 		now = platform::tick_ms();

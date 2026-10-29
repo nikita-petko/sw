@@ -569,7 +569,7 @@ std::string interface_match(Hook hook, bool use_output_interface, uint32_t index
 	return std::string("meta ") + (use_output_interface ? "oif" : "iif") + (negated ? " != " : " ") + std::to_string(index);
 }
 
-void emit_rules(const Clause& clause, bool forward, std::vector<CompiledRule>& rules)
+void emit_rules(const Clause& clause, bool forward, bool include_forward, std::vector<CompiledRule>& rules)
 {
 	std::string base = "meta nfproto ipv4";
 	if (clause.proto == proto_tcp)
@@ -597,6 +597,8 @@ void emit_rules(const Clause& clause, bool forward, std::vector<CompiledRule>& r
 		hooks = {Hook::input};
 	else
 		hooks = {Hook::input, Hook::output};
+	if (include_forward && !forward && clause.dir != dir_in)
+		hooks.push_back(Hook::forward);
 
 	for (Hook hook : hooks)
 	{
@@ -645,7 +647,12 @@ const char* hook_name(Hook hook)
 	return "input";
 }
 
-bool compile_filter(const std::string& filter, bool forward, std::vector<CompiledRule>& rules, std::string& error, uint32_t& position)
+bool compile_filter(const std::string& filter,
+					bool			 forward,
+					std::vector<CompiledRule>& rules,
+					std::string&	 error,
+					uint32_t&		 position,
+					bool			 include_forward)
 {
 	rules.clear();
 	try
@@ -656,7 +663,7 @@ bool compile_filter(const std::string& filter, bool forward, std::vector<Compile
 		else
 			root = Parser(tokenize(filter)).parse();
 		for (const Clause& clause : to_dnf(root, false))
-			emit_rules(clause, forward, rules);
+			emit_rules(clause, forward, include_forward, rules);
 		return true;
 	}
 	catch (const ParseError& failure)

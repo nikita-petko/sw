@@ -49,9 +49,12 @@ rtt() { ip netns exec cli python /tmp/rtt.py "$1"; }
 r=$(rtt 5); echo "baseline $r"
 python -c "import sys; sys.exit(0 if float(\"$r\")<0.3 else 1)"; check "gateway forwards without lagsw" $?
 
-LAGSW_TEST_KEYS=$KEYS $BIN --config $PROFILE </dev/null >/tmp/lagsw.log 2>&1 & pid=$!
+LAGSW_TEST_KEYS=$KEYS $BIN --config $PROFILE -l debug </dev/null >/tmp/lagsw.log 2>&1 & pid=$!
 sleep 2
 r=$(rtt 5); python -c "import sys; sys.exit(0 if float(\"$r\")<0.3 else 1)"; check "idle profile is transparent ($r)" $?
+sleep 2.5
+grep -q "counted for server 10.2.0.2" /tmp/lagsw.log; check "discovery counts forwarded packets for the server address" $?
+grep -q "counted for server 10.1.0.2" /tmp/lagsw.log; [ $? -ne 0 ]; check "discovery never mistakes the client for the server" $?
 echo d > $KEYS; sleep 0.5
 nft list table inet lagsw | grep -q "hook forward"; check "table has a forward hook chain" $?
 r=$(rtt 10); python -c "import sys; sys.exit(0 if float(\"$r\")>=0.5 else 1)"; check "forwarded traffic is delayed ($r)" $?

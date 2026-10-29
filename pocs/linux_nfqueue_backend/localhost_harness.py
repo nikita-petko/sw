@@ -316,6 +316,10 @@ def main():
     def smoke(app):
         check("FAD logs", app.wait_for("Forwarded address discovery enabled", 5))
         check("traffic flows", tcp_rtt() is not None)
+        time.sleep(2.5)
+        check("discovery debug: filter logged", "Server discovery setup: opening sniff channel" in app.log)
+        check("discovery debug: packets counted", "Server discovery: " in app.log and "counted for server" in app.log)
+        check("discovery debug: window summary", "Server discovery: last " in app.log)
 
     if not only:
         run(PROFILE, "original profile", smoke)

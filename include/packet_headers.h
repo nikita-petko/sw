@@ -94,6 +94,11 @@ bool parse_packet(uint8_t* packet, uint32_t length, ParsedPacket& parsed);
 bool parse_packet(const uint8_t* packet, uint32_t length, ParsedPacket& parsed);
 
 /// Converts a 32-bit value between network and host byte order (all supported targets are little-endian).
+inline uint16_t swap_u16(uint16_t value)
+{
+	return static_cast<uint16_t>((value << 8) | (value >> 8));
+}
+
 inline uint32_t swap_u32(uint32_t value)
 {
 	return ((value & 0x000000FFu) << 24) | ((value & 0x0000FF00u) << 8) | ((value & 0x00FF0000u) >> 8) | ((value & 0xFF000000u) >> 24);

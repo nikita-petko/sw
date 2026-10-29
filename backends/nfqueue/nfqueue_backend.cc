@@ -304,7 +304,7 @@ std::unique_ptr<PacketChannel> open(const OpenOptions& options, std::string& err
 {
 	std::vector<nfq::CompiledRule> rules;
 	uint32_t					   position = 0;
-	if (!nfq::compile_filter(options.filter, options.forward, rules, error, position))
+	if (!nfq::compile_filter(options.filter, options.forward, rules, error, position, options.include_forward))
 	{
 		error += " (at position " + std::to_string(position) + ")";
 		return nullptr;

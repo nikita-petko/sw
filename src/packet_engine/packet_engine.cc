@@ -569,7 +569,9 @@ void PacketEngine::start_workers()
 		backend::OpenOptions open_options;
 		open_options.filter = filter;
 		open_options.sniff	= true;
+		open_options.include_forward = true;
 		std::string open_error;
+		LOG_DEBUG("Server discovery setup: opening sniff channel with filter '%s'", filter.c_str());
 		state_->discovery_handle = backend::open(open_options, open_error);
 		if (!state_->discovery_handle)
 		{
@@ -588,8 +590,9 @@ void PacketEngine::start_workers()
 		const uint16_t	  port	 = options_.features.region_enforcement.probe_port;
 		const std::string filter = backend::filters::syn_probe(port);
 		backend::OpenOptions open_options;
-		open_options.filter = filter;
-		open_options.sniff	= true;
+		open_options.filter			 = filter;
+		open_options.sniff			 = true;
+		open_options.include_forward = true;
 		std::string open_error;
 		state_->probe_handle = backend::open(open_options, open_error);
 		if (!state_->probe_handle)

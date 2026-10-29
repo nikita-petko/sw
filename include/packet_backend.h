@@ -60,6 +60,9 @@ struct OpenOptions
 	std::string filter;
 	/// Capture forwarded traffic instead of locally originated/terminated traffic.
 	bool		forward	 = false;
+	/// Also capture forwarded traffic when `forward` is false, so a sniffer on a gateway sees routed packets too.
+	/// Backends without a separate forwarding path ignore it.
+	bool		include_forward = false;
 	/// Observe packets without removing them from the network path.
 	bool		sniff	 = false;
 	/// Relative priority; lower values are processed first by the backend.
