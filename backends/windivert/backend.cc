@@ -8,7 +8,7 @@
 
 #include <cstring>
 
-#include "windivert_runtime.h"
+#include "runtime.h"
 
 namespace backend {
 namespace {

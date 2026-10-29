@@ -5,7 +5,7 @@
 #include <string>
 
 /// Operating-system services needed by the application, with one implementation per OS
-/// (src/platform/platform_windows.cc and src/platform/platform_posix.cc).
+/// (src/platform/windows/ and src/platform/posix/).
 namespace platform {
 
 /// Key codes used in profile configuration and by the input functions. The values match the

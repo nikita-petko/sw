@@ -25,7 +25,7 @@ The goal is to prove that every behaviour the engine relies on (capture, drop, d
 ## 3. Motivation
 
 - Run on Linux hosts, routers and containers (the forward path is where this tool is most useful as a gateway).
-- Avoid the Windows-only `windivert_runtime` dynamic loader and driver.
+- Avoid the Windows-only WinDivert runtime (`backends/windivert/runtime.*`) dynamic loader and driver.
 
 ## 4. Goals
 
@@ -110,7 +110,7 @@ class PacketBackend {
 };
 ```
 
-`packet_engine_io.cc`, `packet_engine_discovery.cc` and `packet_engine_region.cc` call these instead of `WinDivert*`. `windivert_runtime.*` and `WinDivertOptions` move behind the Windows backend; the options struct is renamed (e.g. `CaptureOptions`) with the YAML keys unchanged.
+`src/packet_engine/io.cc`, `discovery.cc` and `region.cc` call these instead of `WinDivert*`. `backends/windivert/runtime.*` and `WinDivertOptions` move behind the Windows backend; the options struct is renamed (e.g. `CaptureOptions`) with the YAML keys unchanged.
 
 ### 8.2 Receive loop
 
@@ -118,7 +118,7 @@ One thread per queue (or per fanout member). Each opens an `nfq_handle`, binds `
 
 ### 8.3 Reinjection and delay
 
-The kernel holds a packet until a verdict is issued, so **delaying a packet == delaying its verdict**. The existing delayed-send list in `packet_engine_io.cc` maps directly: the "send" at release time becomes `nfq_set_verdict`. Constraints:
+The kernel holds a packet until a verdict is issued, so **delaying a packet == delaying its verdict**. The existing delayed-send list in `src/packet_engine/io.cc` maps directly: the "send" at release time becomes `nfq_set_verdict`. Constraints:
 
 - Set `queue-maxlen` (`NFQNL_CFG_CMD`/`NFQA_CFG_QUEUE_MAXLEN`) high enough for the longest configured delay × packet rate; overflow drops (or accepts with `bypass`/`NFQA_CFG_F_FAIL_OPEN`). Document this limit per profile.
 - Verdicts must be issued from a thread that owns the netlink socket, or serialised with a mutex.

@@ -8,7 +8,7 @@
 #include <string>
 
 #include "log.h"
-#include "windivert_runtime.h"
+#include "runtime.h"
 
 namespace {
 constexpr int kWinDivertDllResource = 101;

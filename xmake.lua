@@ -36,7 +36,7 @@ if is_plat("windows") then
 
     add_cxxflags("/we4668")
 else
-    -- HTTPS for the optional server region lookups (see src/platform/platform_posix.cc)
+    -- HTTPS for the optional server region lookups (see src/platform/posix/http.cc)
     add_requires("libcurl", "zlib")
 end
 

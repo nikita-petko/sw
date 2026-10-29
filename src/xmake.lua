@@ -7,9 +7,9 @@ target("lagsw")
 
     -- Operating-system services (input, timers, HTTPS, ...), one implementation per platform
     if is_plat("windows") then
-        add_files("platform/platform_windows.cc")
+        add_files("platform/windows/*.cc")
     else
-        add_files("platform/platform_posix.cc")
+        add_files("platform/posix/*.cc")
         add_packages("libcurl")
         -- The static libcurl from vcpkg does not propagate its zlib dependency to the link line
         add_packages("zlib")

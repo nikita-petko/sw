@@ -24,37 +24,6 @@ void write_pcap_u16(std::ofstream& file, uint16_t value)
 	file.write(reinterpret_cast<const char*>(&value), sizeof(value));
 }
 
-const char* key_name(int key)
-{
-	if (key == 0x20)
-		return "space";
-	if (key == 0x12)
-		return "alt";
-	if (key == 0x11)
-		return "ctrl";
-	if (key == 0x10)
-		return "shift";
-	return nullptr;
-}
-
-std::string format_keys(const ProfileOptions& profile)
-{
-	std::string result;
-	const char* separator = profile.key_mode == ProfileKeyMode::oneof ? " or " : "+";
-	for (const int key : profile.keys)
-	{
-		if (!result.empty())
-			result += separator;
-		if (const char* name = key_name(key))
-			result += name;
-		else if (key >= 0x20 && key <= 0x7E)
-			result += static_cast<char>(key);
-		else
-			result += std::to_string(key);
-	}
-	return result;
-}
-
 std::string format_state_divider(size_t width, const std::string& label)
 {
 	const size_t inner_width = width - 2;

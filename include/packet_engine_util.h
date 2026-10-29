@@ -14,11 +14,6 @@ void write_pcap_u32(std::ofstream& file, uint32_t value);
 /// Writes a 16-bit value to a PCAP stream in the platform's byte order.
 void write_pcap_u16(std::ofstream& file, uint16_t value);
 
-/// Returns a readable name for a supported virtual key, or nullptr if unknown.
-const char* key_name(int key);
-/// Formats a profile's keys, using " or " for one-of mode and "+" otherwise.
-std::string format_keys(const ProfileOptions& profile);
-
 /// Creates a state-report divider of the requested width, optionally centered around a label.
 std::string format_state_divider(size_t width, const std::string& label = {});
 /// Wraps a value in ANSI color codes for emphasis in state-report output.
