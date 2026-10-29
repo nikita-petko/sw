@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <fstream>
+#include <memory>
 #include <string>
 #include "packet_engine.h"
 #include "packet_headers.h"
@@ -13,6 +14,17 @@ bool pcap_files_enabled_for(const PcapFilesOptions& pcap_files, const ProfileOpt
 void write_pcap_u32(std::ofstream& file, uint32_t value);
 /// Writes a 16-bit value to a PCAP stream in the platform's byte order.
 void write_pcap_u16(std::ofstream& file, uint16_t value);
+
+/// The PCAP file one profile session records its captured packets to. `file` is null while no capture is active.
+struct PcapCapture
+{
+	std::unique_ptr<std::ofstream> file;
+	std::string					   guid;
+	std::string					   path;
+};
+/// Creates the profile's PCAP file (named after a new GUID) in the configured directory and writes the PCAP header.
+/// On failure the reason is logged and `capture.file` stays null.
+void start_pcap_capture(const PcapFilesOptions& pcap_files, int profile, const ProfileOptions& profile_options, PcapCapture& capture);
 
 /// Creates a state-report divider of the requested width, optionally centered around a label.
 std::string format_state_divider(size_t width, const std::string& label = {});

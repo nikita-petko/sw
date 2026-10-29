@@ -19,5 +19,9 @@ const char* format_ratio_selection(RatioSelection selection);
 const char* format_packet_group_order(PacketGroupOrder order);
 /// The explicitly configured capture options as "key=value" pairs, or "default".
 std::string format_capture_options(const ProfileOptions& profile);
+/// Describes what a profile does to packets, e.g. "Delay each by"; read together with format_delay_value().
+std::string format_delay_action(const ProfileOptions& profile);
+/// The duration or condition that goes with format_delay_action(), e.g. "500ms" or "profile is deactivated".
+std::string format_delay_value(const ProfileOptions& profile);
 
 #endif

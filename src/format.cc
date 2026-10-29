@@ -1,6 +1,17 @@
 #include "format.h"
 
+#include "log.h"
 #include "platform.h"
+
+namespace {
+// Without a positive delay these modes hold packets until the profile is deactivated.
+bool has_indefinite_delay(const ProfileOptions& profile)
+{
+	return profile.delay_ms <= 0 && (profile.delay_mode == PacketDelayMode::from_timestamp ||
+									 profile.delay_mode == PacketDelayMode::send_all_after_delay ||
+									 profile.delay_mode == PacketDelayMode::drop_and_send);
+}
+}  // namespace
 
 const char* format_mode(ProfileActivationMode mode)
 {
@@ -141,4 +152,42 @@ std::string format_capture_options(const ProfileOptions& profile)
 		append("server_dir", server_direction[static_cast<int>(profile.capture_options.server_direction.value())]);
 	}
 	return result.empty() ? "default" : result;
+}
+
+std::string format_delay_action(const ProfileOptions& profile)
+{
+	const bool indefinite = has_indefinite_delay(profile);
+	switch (profile.delay_mode)
+	{
+		case PacketDelayMode::send_all_after_delay:
+			return indefinite ? "Send all after" : "after";
+		case PacketDelayMode::drop_and_send:
+			return "Drop, then send after";
+		case PacketDelayMode::ratio:
+			return "Send " + std::to_string(profile.ratio) + (profile.ratio_percent ? "% per" : " packets per");
+		case PacketDelayMode::hold_and_send:
+			return "Hold, then send";
+		case PacketDelayMode::drop_until_toggle:
+			return "Drop, hold, then send after";
+		case PacketDelayMode::hold_until_deactivation:
+			return "Hold, then send on deactivation";
+		case PacketDelayMode::drop:
+			return "Drop packets";
+		case PacketDelayMode::packet_group_send:
+			return "Capture " + std::to_string(profile.group_count) + " packet groups";
+		case PacketDelayMode::from_timestamp:
+			break;
+	}
+	return "Delay each by";
+}
+
+std::string format_delay_value(const ProfileOptions& profile)
+{
+	if (profile.delay_mode == PacketDelayMode::packet_group_send)
+		return "in " + std::string(format_packet_group_order(profile.group_order)) + " order, one group per activation press";
+	if (has_indefinite_delay(profile))
+		return "profile is deactivated";
+	if (profile.delay_mode == PacketDelayMode::drop)
+		return "immediately";
+	return logging::format_duration(static_cast<uint64_t>(profile.delay_ms));
 }

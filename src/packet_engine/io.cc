@@ -24,9 +24,9 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 			continue;
 		}
 		state_->profile_stats[profile - 1].packets_caught.fetch_add(1);
-		if (session->pcap_file)
+		if (session->pcap.file)
 		{
-			std::ofstream& pcap_file	= *session->pcap_file;
+			std::ofstream& pcap_file	= *session->pcap.file;
 			const auto	   now			= std::chrono::system_clock::now().time_since_epoch();
 			const auto	   seconds		= std::chrono::duration_cast<std::chrono::seconds>(now);
 			const auto	   microseconds = std::chrono::duration_cast<std::chrono::microseconds>(now - seconds);
@@ -37,8 +37,8 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 			pcap_file.write(reinterpret_cast<const char*>(packet_data), received_length);
 			if (!pcap_file)
 			{
-				LOG_ERROR("%s PCAP capture: failed to write %s", profile_label.c_str(), session->pcap_path.c_str());
-				session->pcap_file.reset();
+				LOG_ERROR("%s PCAP capture: failed to write %s", profile_label.c_str(), session->pcap.path.c_str());
+				session->pcap.file.reset();
 			}
 		}
 		const bool sniff = profile_options.capture_options.sniff.value_or(false);

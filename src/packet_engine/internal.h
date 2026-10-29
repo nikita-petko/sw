@@ -43,9 +43,7 @@ struct PacketEngine::Session
 	uint64_t					   next_receive_order = 0;
 	PacketQueue					   delayed_packets;
 	PacketMode*					   mode;
-	std::unique_ptr<std::ofstream> pcap_file;
-	std::string					   pcap_guid;
-	std::string					   pcap_path;
+	PcapCapture					   pcap;
 	std::thread					   receive_thread;
 	std::thread					   send_thread;
 };

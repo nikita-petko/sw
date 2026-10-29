@@ -2,9 +2,12 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <filesystem>
 #include <string>
+#include <system_error>
 
 #include "log.h"
+#include "platform.h"
 
 bool pcap_files_enabled_for(const PcapFilesOptions& pcap_files, const ProfileOptions& profile)
 {
@@ -22,6 +25,49 @@ void write_pcap_u32(std::ofstream& file, uint32_t value)
 void write_pcap_u16(std::ofstream& file, uint16_t value)
 {
 	file.write(reinterpret_cast<const char*>(&value), sizeof(value));
+}
+
+void start_pcap_capture(const PcapFilesOptions& pcap_files, int profile, const ProfileOptions& profile_options, PcapCapture& capture)
+{
+	const std::string guid = platform::generate_guid();
+	if (guid.empty())
+	{
+		LOG_ERROR("profile #%d - %s PCAP capture: failed to generate a GUID", profile, profile_options.name.c_str());
+		return;
+	}
+	capture.guid = guid;
+	std::error_code error;
+	std::filesystem::create_directories(pcap_files.output_dir, error);
+	if (error)
+	{
+		LOG_ERROR("profile #%d - %s PCAP capture: failed to create directory %s: %s",
+				  profile,
+				  profile_options.name.c_str(),
+				  pcap_files.output_dir.c_str(),
+				  error.message().c_str());
+		return;
+	}
+	capture.path = (std::filesystem::path(pcap_files.output_dir) / (capture.guid + ".pcap")).string();
+	capture.file = std::make_unique<std::ofstream>(capture.path, std::ios::binary | std::ios::trunc);
+	if (!*capture.file)
+	{
+		LOG_ERROR("profile #%d - %s PCAP capture: failed to open %s", profile, profile_options.name.c_str(), capture.path.c_str());
+		capture.file.reset();
+		return;
+	}
+	std::ofstream& file = *capture.file;
+	write_pcap_u32(file, 0xa1b2c3d4);
+	write_pcap_u16(file, 2);
+	write_pcap_u16(file, 4);
+	write_pcap_u32(file, 0);
+	write_pcap_u32(file, 0);
+	write_pcap_u32(file, 0xFFFF);
+	write_pcap_u32(file, 101);
+	if (!file)
+	{
+		LOG_ERROR("profile #%d - %s PCAP capture: failed to write header to %s", profile, profile_options.name.c_str(), capture.path.c_str());
+		capture.file.reset();
+	}
 }
 
 std::string format_state_divider(size_t width, const std::string& label)

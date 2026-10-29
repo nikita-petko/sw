@@ -8,6 +8,24 @@
 #include "format.h"
 #include "log.h"
 
+namespace {
+void log_profile_enabled(int profile, const ProfileOptions& profile_options, const std::string& capture_filter, bool forward)
+{
+	LOG_DEBUG("profile #%d - %s setup: opening handle", profile, profile_options.name.c_str());
+	LOG_DEBUG("profile #%d - %s setup: backend = %s, forward = %d, filter = %s",
+			  profile,
+			  profile_options.name.c_str(),
+			  backend::name(),
+			  forward ? 1 : 0,
+			  capture_filter.c_str());
+	LOG_ACTIVATE("Lag switch enabled, profile = %s (%s, mode = %s). %s",
+				 profile_options.name.c_str(),
+				 format_keys(profile_options).c_str(),
+				 format_mode(profile_options.mode),
+				 profile_options.mode == ProfileActivationMode::hold ? "Release key(s) to turn off" : "Press key(s) again to turn off");
+}
+}  // namespace
+
 PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(options)), state_(new State(options_.profiles.size()))
 {
 	std::srand(static_cast<unsigned int>(std::time(nullptr)));
@@ -119,56 +137,7 @@ void PacketEngine::setup(int profile)
 			locked->handle->discard(meta);
 	});
 	if (pcap_files_enabled_for(options_.features.pcap_files, profile_options))
-	{
-		const std::string guid = platform::generate_guid();
-		if (guid.empty())
-			LOG_ERROR("profile #%d - %s PCAP capture: failed to generate a GUID", profile, profile_options.name.c_str());
-		else
-		{
-			session->pcap_guid = guid;
-			std::error_code error;
-			std::filesystem::create_directories(options_.features.pcap_files.output_dir, error);
-			if (error)
-				LOG_ERROR("profile #%d - %s PCAP capture: failed to create directory %s: %s",
-						  profile,
-						  profile_options.name.c_str(),
-						  options_.features.pcap_files.output_dir.c_str(),
-						  error.message().c_str());
-			else
-			{
-				session->pcap_path =
-					(std::filesystem::path(options_.features.pcap_files.output_dir) / (session->pcap_guid + ".pcap")).string();
-				session->pcap_file = std::make_unique<std::ofstream>(session->pcap_path, std::ios::binary | std::ios::trunc);
-				if (!*session->pcap_file)
-				{
-					LOG_ERROR("profile #%d - %s PCAP capture: failed to open %s",
-							  profile,
-							  profile_options.name.c_str(),
-							  session->pcap_path.c_str());
-					session->pcap_file.reset();
-				}
-				else
-				{
-					std::ofstream& pcap_file = *session->pcap_file;
-					write_pcap_u32(pcap_file, 0xa1b2c3d4);
-					write_pcap_u16(pcap_file, 2);
-					write_pcap_u16(pcap_file, 4);
-					write_pcap_u32(pcap_file, 0);
-					write_pcap_u32(pcap_file, 0);
-					write_pcap_u32(pcap_file, 0xFFFF);
-					write_pcap_u32(pcap_file, 101);
-					if (!pcap_file)
-					{
-						LOG_ERROR("profile #%d - %s PCAP capture: failed to write header to %s",
-								  profile,
-								  profile_options.name.c_str(),
-								  session->pcap_path.c_str());
-						session->pcap_file.reset();
-					}
-				}
-			}
-		}
-	}
+		start_pcap_capture(options_.features.pcap_files, profile, profile_options, session->pcap);
 	state_->profile_stats[profile - 1].enabled_since = platform::tick_ms();
 	state_->active_sessions[profile - 1] = session;
 	state_->active_profiles[profile - 1] = true;
@@ -180,18 +149,7 @@ void PacketEngine::setup(int profile)
 	running_				= true;
 	session->receive_thread = std::thread(&PacketEngine::read_packets, this, session);
 	session->send_thread	= std::thread(&PacketEngine::write_packets, this, session);
-	LOG_DEBUG("profile #%d - %s setup: opening handle", profile, profile_options.name.c_str());
-	LOG_DEBUG("profile #%d - %s setup: backend = %s, forward = %d, filter = %s",
-			  profile,
-			  profile_options.name.c_str(),
-			  backend::name(),
-			  forward ? 1 : 0,
-			  capture_filter.c_str());
-	LOG_ACTIVATE("Lag switch enabled, profile = %s (%s, mode = %s). %s",
-				 profile_options.name.c_str(),
-				 format_keys(profile_options).c_str(),
-				 format_mode(profile_options.mode),
-				 profile_options.mode == ProfileActivationMode::hold ? "Release key(s) to turn off" : "Press key(s) again to turn off");
+	log_profile_enabled(profile, profile_options, capture_filter, forward);
 }
 
 bool PacketEngine::toggle(int profile)
@@ -253,9 +211,9 @@ void PacketEngine::teardown(int profile)
 		state_->cleanup_threads.emplace_back([this, session, enabled_time, profile] {
 			session->receive_thread.join();
 			session->send_thread.join();
-			const bool pcap_captured = session->pcap_file != nullptr;
+			const bool pcap_captured = session->pcap.file != nullptr;
 			if (pcap_captured)
-				session->pcap_file.reset();
+				session->pcap.file.reset();
 			session->handle->close();
 			platform::end_timer_resolution();
 			LOG_DEACTIVATE("profile #%d - %s teardown: disabled after %s",
@@ -266,8 +224,8 @@ void PacketEngine::teardown(int profile)
 				LOG_INFO("profile #%d - %s PCAP capture: %s (GUID: %s)",
 						 profile,
 						 options_.profiles[profile - 1].name.c_str(),
-						 session->pcap_path.c_str(),
-						 session->pcap_guid.c_str());
+						 session->pcap.path.c_str(),
+						 session->pcap.guid.c_str());
 		});
 	}
 }
