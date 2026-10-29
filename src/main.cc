@@ -207,6 +207,11 @@ std::string format_capture_options(const ProfileOptions& profile)
 int main(int argc, char* argv[])
 {
 	platform::enable_terminal_colors();
+	if (!platform::acquire_single_instance())
+	{
+		LOG_ERROR("Another instance of lagsw is already running. Only one instance is allowed at a time.");
+		return 1;
+	}
 	if (!backend::initialize())
 	{
 		LOG_ERROR("Failed to initialize the %s capture backend", backend::name());

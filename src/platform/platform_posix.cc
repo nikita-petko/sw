@@ -8,6 +8,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <linux/input.h>
+#include <sys/file.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -319,6 +320,15 @@ int console_width()
 	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) != 0)
 		return 0;
 	return size.ws_col;
+}
+
+bool acquire_single_instance()
+{
+	// the lock is released by the kernel when the process exits, so it never goes stale
+	static int lock_fd = open("/tmp/lagsw.lock", O_RDWR | O_CREAT | O_CLOEXEC, 0666);
+	if (lock_fd < 0)
+		return true;
+	return flock(lock_fd, LOCK_EX | LOCK_NB) == 0;
 }
 
 std::string data_directory()

@@ -42,6 +42,9 @@ void enable_terminal_colors();
 /// Makes Ctrl+C a no-op so the tool can only be closed via its own quit key. On POSIX, SIGTERM and SIGHUP
 /// request a normal quit (read_key() then returns 'q').
 void ignore_interrupt();
+/// Claims the machine-wide single-instance lock, held until the process exits. Returns false when another
+/// instance already holds it.
+bool acquire_single_instance();
 /// Width of the console in columns, or 0 when unknown.
 int	 console_width();
 

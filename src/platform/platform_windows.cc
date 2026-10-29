@@ -83,6 +83,15 @@ int console_width()
 	return console_info.srWindow.Right - console_info.srWindow.Left + 1;
 }
 
+bool acquire_single_instance()
+{
+	// the handle is intentionally never closed; the mutex lives until the process exits
+	static const HANDLE mutex = CreateMutexA(nullptr, TRUE, "Global\\lagsw_single_instance");
+	if (!mutex)
+		return true;
+	return GetLastError() != ERROR_ALREADY_EXISTS;
+}
+
 std::string data_directory()
 {
 	const char* local_app_data = std::getenv("LOCALAPPDATA");
