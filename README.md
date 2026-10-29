@@ -6,7 +6,7 @@
 
 ### Linux (nftables + NFQUEUE)
 
-![](https://share.cdn.vmminfra.dev/petko-linux/261026_12h33m37s_screenshot.png)
+![](https://share.cdn.vmminfra.dev/petko-linux/261029_01h56m38s_screenshot.png)
 
 `lagsw` is a console utility that temporarily delays matching network
 packets. On Windows it uses the embedded [WinDivert](win_divert/README) driver

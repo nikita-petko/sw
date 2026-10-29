@@ -34,7 +34,7 @@ void PacketEngine::discover_packets()
 			   if (waited < options_.discovery_window_ms)
 				   continue;
 			   waited = 0;
-			   const uint64_t received = window_received.exchange(0);
+			   [[maybe_unused]] const uint64_t received = window_received.exchange(0);
 			   LOG_DEBUG("Server discovery: last %s: %llu packets captured (%llu skipped while a profile was active, %llu unparsable)%s",
 						 logging::format_duration(options_.discovery_window_ms).c_str(),
 						 static_cast<unsigned long long>(received),
