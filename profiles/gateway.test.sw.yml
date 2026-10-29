@@ -1,0 +1,11 @@
+# Gateway test profile for the forward hook (see scripts/test_nfqueue_gateway.sh).
+global_filter: "tcp.DstPort == 8080 or tcp.SrcPort == 8080"
+
+profiles:
+  - name: "Gateway Delay"
+    key: d
+    mode: hold
+    delay_mode: from_timestamp
+    delay_ms: 300
+    windivert_options:
+      forward: true

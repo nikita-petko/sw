@@ -445,7 +445,9 @@ against the Linux backend inside a throwaway privileged Docker container
 (`pocs/linux_nfqueue_backend/localhost_harness.py` drives it). Setting the
 `LAGSW_TEST_KEYS` environment variable to a file path makes the Linux build read
 held keys (whitespace-separated names such as `d`, `ctrl`, `space`) from that
-file instead of `/dev/input`; this exists for the harness.
+file instead of `/dev/input`; this exists for the harness. `scripts/test_nfqueue_gateway.sh` additionally tests the forward hook
+between two network namespaces ([`profiles/gateway.test.sw.yml`](profiles/gateway.test.sw.yml)),
+SIGTERM cleanup and fail-open after SIGKILL.
 
 ## Troubleshooting
 

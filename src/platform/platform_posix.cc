@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <array>
 #include <chrono>
+#include <atomic>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -297,9 +298,19 @@ std::string generate_guid()
 // terminals interpret ANSI escape sequences by default
 void enable_terminal_colors() {}
 
+std::atomic<bool> g_terminate_requested{false};
+
+extern "C" void on_terminate_signal(int)
+{
+	g_terminate_requested.store(true);
+}
+
+// SIGTERM/SIGHUP are treated like the quit key so the capture backend can remove its rules on a normal exit.
 void ignore_interrupt()
 {
 	std::signal(SIGINT, SIG_IGN);
+	std::signal(SIGTERM, on_terminate_signal);
+	std::signal(SIGHUP, on_terminate_signal);
 }
 
 int console_width()
@@ -338,6 +349,8 @@ bool replace_file(const std::string& source, const std::string& destination)
 
 int read_key()
 {
+	if (g_terminate_requested.load())
+		return 'q';
 	enter_raw_terminal();
 	const int value = read_byte();
 	if (value < 0)

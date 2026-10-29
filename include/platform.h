@@ -39,7 +39,8 @@ std::string generate_guid();
 
 /// Prepares the console so ANSI escape sequences are interpreted.
 void enable_terminal_colors();
-/// Makes Ctrl+C a no-op so the tool can only be closed via its own quit key.
+/// Makes Ctrl+C a no-op so the tool can only be closed via its own quit key. On POSIX, SIGTERM and SIGHUP
+/// request a normal quit (read_key() then returns 'q').
 void ignore_interrupt();
 /// Width of the console in columns, or 0 when unknown.
 int	 console_width();
