@@ -33,6 +33,8 @@ target("lagsw")
 
         -- Link ole32 for per-capture PCAP GUID generation
         add_links("ole32")
+    elseif is_plat("linux") then
+        add_rules("backend.nfqueue")
     else
         add_rules("backend.stub")
     end

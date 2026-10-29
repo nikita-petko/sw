@@ -48,6 +48,7 @@ set_symbols("debug")
 
 includes("backends/windivert")
 includes("backends/stub")
+includes("backends/nfqueue")
 includes("src/")
 if is_plat("windows") then
     includes("pocs/tcp_tls_proxy")

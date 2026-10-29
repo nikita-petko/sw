@@ -1,5 +1,11 @@
 # PoC: Linux Packet Backend via nftables + NFQUEUE
 
+## 0. Implementation status
+
+- Phase 1 (interface extraction): done. `include/packet_backend.h` is the seam; `PacketChannel::discard()` maps engine drops to `NF_DROP`.
+- Phase 2 (pass-through): done in `backends/nfqueue/`. The engine keeps passing WinDivert-style filter strings; `filter_compiler.cc` parses that subset, converts it to DNF and renders one nft rule per clause/hook (instead of the `CaptureSpec` in §7). Verified in a privileged container: pass-through, drop, payload rewrite with checksums, `kill -9` fail-open and stale-table replacement.
+- Payload rewrites require the init user namespace (the kernel refuses them from user namespaces), so rootless testing covers only pass-through/drop.
+
 ## 1. Summary
 
 The packet engine currently depends on WinDivert (`WinDivertOpen/Recv/Send`, `WinDivertHelperCalcChecksums`, WinDivert filter strings). This PoC defines a Linux backend that provides the same capabilities using **nftables** to select traffic and **NFQUEUE** (via `libnetfilter_queue`) to hand packets to user space, which then returns a verdict (accept / drop / accept-with-modified-payload).

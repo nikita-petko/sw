@@ -129,8 +129,14 @@ is active and resumes with a fresh window after all profiles are deactivated.
 Profiles with `server_direction` use the selected server when they are next
 activated.
 
-Non-Windows builds use the stub backend, so packet capture, server discovery,
-and packet delay are available only with the Windows WinDivert backend.
+Linux builds use the nftables + NFQUEUE backend (`backends/nfqueue/`, see
+[`pocs/linux_nfqueue_backend.md`](pocs/linux_nfqueue_backend.md)). It needs the
+`nft` binary, `libnetfilter_queue`/`libmnl` at build time and `CAP_NET_ADMIN` at
+runtime (it cannot modify packets from a rootless user namespace). Capture rules
+live in a dedicated `inet lagsw` table that is removed on exit; they use `bypass`,
+so traffic keeps flowing if the process dies. Profile filters are translated from
+the WinDivert subset (`tcp.*` flags, `ip.*Addr`, `tcp|udp.*Port`, `ifIdx`,
+`inbound`/`outbound`, `and`/`or`/`not`). Other platforms use the stub backend.
 
 ## Configuration
 
