@@ -522,8 +522,9 @@ SIGTERM cleanup and fail-open after SIGKILL.
 
 | Path | Purpose |
 | --- | --- |
-| `src/` | Application, configuration parser, packet engine, logging, and resource files |
+| `src/` | Application, configuration parser (`src/options/`), packet engine, logging, and resource files |
 | `include/` | Public project headers |
+| `tests/` | Unit tests; the profile loader tests run with `xmake build options_test && xmake run options_test` |
 | `profiles/` | Example YAML configurations |
 | `win_divert/` | Embedded WinDivert headers, libraries, drivers, and documentation |
 | `xmake.lua` | Project-wide compiler and linker settings |

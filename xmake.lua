@@ -50,6 +50,7 @@ includes("backends/windivert")
 includes("backends/stub")
 includes("backends/nfqueue")
 includes("src/")
+includes("tests/options")
 if is_plat("windows") then
     includes("pocs/tcp_tls_proxy")
     includes("pocs/tls_segment_removal")
