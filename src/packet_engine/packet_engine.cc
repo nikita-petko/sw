@@ -393,6 +393,10 @@ void PacketEngine::setup(int profile)
 		return;
 	}
 	std::shared_ptr<Session> session(new Session(profile, std::move(handle), packet_modes_[profile - 1].get()));
+	packet_modes_[profile - 1]->set_discard_sink([weak_session = std::weak_ptr<Session>(session)](const backend::PacketMeta& meta) {
+		if (const std::shared_ptr<Session> locked = weak_session.lock())
+			locked->handle->discard(meta);
+	});
 	if (pcap_files_enabled_for(options_.features.pcap_files, profile_options))
 	{
 		const std::string guid = platform::generate_guid();

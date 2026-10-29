@@ -56,6 +56,7 @@ private:
 					  source,
 					  node->length,
 					  static_cast<unsigned long long>(node->address->timestamp));
+			discard(*node->address);
 			destroy_packet_node(node);
 		}
 		packets.erase(packets.begin(), packets.begin() + drop_count);

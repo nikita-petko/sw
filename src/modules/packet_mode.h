@@ -6,6 +6,7 @@
 #include "packet_headers.h"
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <queue>
 #include <string>
@@ -89,6 +90,10 @@ public:
 		has_last_sent_ack_[0] = false;
 		has_last_sent_ack_[1] = false;
 	}
+	/// Callback invoked for each packet the mode drops instead of sending.
+	using DiscardSink = std::function<void(const backend::PacketMeta&)>;
+	/// Installs the sink that tells the capture backend about dropped packets; call before packets are captured.
+	void		 set_discard_sink(DiscardSink sink) { discard_sink_ = std::move(sink); }
 	/// Applies configured TCP acknowledgment restoration before sending a packet.
 	void		 prepare_packet_for_send(uint8_t* packet, uint32_t length, const backend::PacketMeta* address);
 	/// Toggles mode-specific behavior when supported; returns whether it changed state.
@@ -112,6 +117,14 @@ public:
 								PacketQueue&			   packets) = 0;
 
 protected:
+	/// Reports a packet that will never be sent so the backend can release it as dropped.
+	void discard(const backend::PacketMeta& address) const
+	{
+		if (discard_sink_)
+			discard_sink_(address);
+	}
+
+	DiscardSink	   discard_sink_;
 	ProfileOptions options_;
 	const char*	   mode_name_;
 	uint32_t	   last_sent_ack_[2]	 = {};

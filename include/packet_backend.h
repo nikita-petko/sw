@@ -77,6 +77,9 @@ public:
 	virtual IoStatus recv(uint8_t* buffer, uint32_t capacity, uint32_t& length, PacketMeta& meta, std::string& error) = 0;
 	/// Reinjects a packet. `sent` receives the number of bytes sent.
 	virtual IoStatus send(const uint8_t* packet, uint32_t length, const PacketMeta& meta, uint32_t& sent, std::string& error) = 0;
+	/// Tells the backend a received packet is intentionally never sent. Backends that hold packets until a
+	/// verdict (for example NFQUEUE) must release it as dropped; capture-and-reinject backends need nothing.
+	virtual void	 discard(const PacketMeta& meta) { (void)meta; }
 	/// Unblocks pending and future recv() calls.
 	virtual void	 shutdown_recv() = 0;
 	/// Releases the channel. Safe to call more than once.

@@ -23,7 +23,10 @@ public:
 						PacketQueue& packets) override
 	{
 		if (phase_ != Phase::holding)
+		{
+			discard(address);
 			return;
+		}
 		packets.push(make_packet_node(packet, length, address, profile, (std::numeric_limits<uint64_t>::max)(), receive_order));
 	}
 

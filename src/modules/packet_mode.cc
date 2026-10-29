@@ -108,6 +108,7 @@ void PacketMode::capture(const uint8_t*				 packet,
 							  retransmission_mode_name(options_.retransmission_mode),
 							  sequence,
 							  acknowledgment);
+					discard(address);
 					return;
 				}
 			}
