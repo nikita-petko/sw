@@ -18,7 +18,9 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <cctype>
 #include <cstring>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -90,6 +92,33 @@ int to_input_code(int code)
 	return -1;
 }
 
+/// Test hook: when LAGSW_TEST_KEYS names a file, the whitespace-separated key names in it (a, x, 1, space, shift, ctrl, alt)
+/// are reported as held instead of reading the keyboards. This lets automated tests drive activation without input devices.
+bool test_key_held(const char* path, int code)
+{
+	std::ifstream file(path);
+	std::string	  name;
+	while (file >> name)
+	{
+		int held = -1;
+		if (name == "space")
+			held = key::space;
+		else if (name == "shift")
+			held = key::shift;
+		else if (name == "ctrl")
+			held = key::ctrl;
+		else if (name == "alt")
+			held = key::alt;
+		else if (name == "tab")
+			held = key::tab;
+		else if (name.size() == 1)
+			held = std::toupper(static_cast<unsigned char>(name[0]));
+		if (held == code)
+			return true;
+	}
+	return false;
+}
+
 /// Reads key state straight from the evdev keyboards, so keys are seen regardless of terminal focus.
 class KeyboardState
 {
@@ -102,6 +131,8 @@ public:
 
 	bool held(int code)
 	{
+		if (const char* test_keys = std::getenv("LAGSW_TEST_KEYS"))
+			return test_key_held(test_keys, code);
 		std::lock_guard<std::mutex> lock(mutex_);
 		refresh();
 		bool result = false;

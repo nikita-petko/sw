@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <queue>
 #include <string>
@@ -85,10 +86,7 @@ public:
 	/// Resets packet-mode tracking state.
 	virtual void reset()
 	{
-		last_sent_ack_[0]	  = 0;
-		last_sent_ack_[1]	  = 0;
-		has_last_sent_ack_[0] = false;
-		has_last_sent_ack_[1] = false;
+		last_sent_ack_.clear();
 	}
 	/// Callback invoked for each packet the mode drops instead of sending.
 	using DiscardSink = std::function<void(const backend::PacketMeta&)>;
@@ -127,8 +125,8 @@ protected:
 	DiscardSink	   discard_sink_;
 	ProfileOptions options_;
 	const char*	   mode_name_;
-	uint32_t	   last_sent_ack_[2]	 = {};
-	bool		   has_last_sent_ack_[2] = {};
+	// Keyed per TCP flow: on loopback both directions of a connection share the same capture direction.
+	std::map<std::string, uint32_t> last_sent_ack_;
 };
 
 /// Constructs the concrete packet mode selected by the profile options.

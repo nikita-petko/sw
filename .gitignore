@@ -10,6 +10,8 @@ build/
 
 compile_commands.json
 
+__pycache__/
+
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json

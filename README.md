@@ -438,6 +438,15 @@ deactivation waits, timed activation, and packet holding with a zero delay.
 Its filters and addresses are tailored to its example game and network setup;
 review and adapt them before using the configuration elsewhere.
 
+[`profiles/localhost.test.sw.yml`](profiles/localhost.test.sw.yml) exercises every
+delay mode, activation mode and feature against loopback traffic only (TCP
+55000/55002, UDP 55001). `scripts/test_nfqueue_localhost.sh` runs it end to end
+against the Linux backend inside a throwaway privileged Docker container
+(`pocs/linux_nfqueue_backend/localhost_harness.py` drives it). Setting the
+`LAGSW_TEST_KEYS` environment variable to a file path makes the Linux build read
+held keys (whitespace-separated names such as `d`, `ctrl`, `space`) from that
+file instead of `/dev/input`; this exists for the harness.
+
 ## Troubleshooting
 
 - **The program exits with an initialization or handle error:** Run the console

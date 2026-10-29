@@ -3,6 +3,7 @@
 ## 0. Implementation status
 
 - Phase 1 (interface extraction): done. `include/packet_backend.h` is the seam; `PacketChannel::discard()` maps engine drops to `NF_DROP`.
+- Phase 3 (full verbs): done. `scripts/test_nfqueue_localhost.sh` runs `profiles/localhost.test.sw.yml` through the real engine in a privileged container (96 checks: delay, batch, drop, hold, UDP, period, ack restoration, exclusivity, pcap, every other profile, clean table removal). It found that `ack_restoration` tracked one ACK per capture direction, which on loopback mixes both directions of a connection; it is now tracked per TCP flow.
 - Phase 2 (pass-through): done in `backends/nfqueue/`. The engine keeps passing WinDivert-style filter strings; `filter_compiler.cc` parses that subset, converts it to DNF and renders one nft rule per clause/hook (instead of the `CaptureSpec` in §7). Verified in a privileged container: pass-through, drop, payload rewrite with checksums, `kill -9` fail-open and stale-table replacement.
 - Payload rewrites require the init user namespace (the kernel refuses them from user namespaces), so rootless testing covers only pass-through/drop.
 

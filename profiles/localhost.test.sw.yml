@@ -1,0 +1,242 @@
+# Feature test profile for the localhost.
+#
+# Every configuration field, delay mode and feature is used at least once, and every capture targets
+# loopback test traffic (TCP 55000/55002, UDP 55001), so the profile is safe to run on a development machine.
+# Drive it with scripts/test_nfqueue_localhost.sh, or by hand: start the echo servers in
+# pocs/linux_nfqueue_backend/localhost_harness.py and hold the profile keys.
+#
+# Notes for loopback:
+#  - A loopback packet crosses the output hook and then the input hook, so an unrestricted capture holds
+#    it twice. Most profiles use `outbound: true` so a packet is captured once, on the way out.
+#  - The forward hook never sees loopback traffic; the `Forward` profile only proves the rules load.
+
+global_filter: "tcp"
+
+servers:
+  discovery_port: 55000
+  interval: 2000
+  addresses:
+    - "127.0.0.3:extra"
+
+  # Two region groups for region enforcement and server_direction. 127.0.0.2 answers on 55002.
+  ALPHA:
+    - "127.0.0.1:alpha"
+  BETA:
+    - "127.0.0.2:beta"
+
+features:
+  pcap_files:
+    enabled: true
+    output_dir: pcap_files
+    enabled_for: "*"
+
+  desync_countdown:
+    enabled: true
+    display: alongside
+    duration_percent: 50
+    enabled_for:
+      - "Delay"
+      - "Period"
+
+  region_enforcement:
+    enabled: true
+    probe_port: 55002
+
+  # Loopback is interface 1; interface 2 is whatever the host has next. Disable this block (the test script does)
+  # when profile filters must stay fixed, because discovered client addresses are added to every profile filter.
+  forwarded_address_discovery:
+    enabled: true
+    port: 55000
+    interval: 2000
+    inbound: 1
+    outbound: 2
+
+profiles:
+  # from_timestamp: every packet is released 300 ms after it was captured.
+  - name: "Delay"
+    key: d
+    mode: toggle
+    delay_mode: from_timestamp
+    delay_ms: 300
+    retransmission_mode: none
+    windivert_options:
+      outbound: true
+      client_address_enforcement: both
+
+  # send_all_after_delay: the first packet starts a 300 ms batch timer, the batch is released together.
+  - name: "Batch"
+    key: b
+    delay_mode: send_all_after_delay
+    delay_ms: 300
+    windivert_options:
+      outbound: true
+
+  # ratio (count): two packets are released per 200 ms interval.
+  - name: "Ratio Count"
+    key: r
+    delay_mode: ratio
+    ratio: 2
+    delay_ms: 200
+    windivert_options:
+      outbound: true
+
+  # ratio (percent) with random selection of the packets released first.
+  - name: "Ratio Percent"
+    key: p
+    delay_mode: ratio
+    ratio: 50%
+    ratio_selection: random
+    delay_ms: 200
+    windivert_options:
+      outbound: true
+
+  # drop in hold mode: active only while the key is held.
+  - name: "Drop"
+    key: x
+    mode: hold
+    delay_mode: drop
+    windivert_options:
+      outbound: true
+
+  # drop_and_send: drops one packet of every batch and sends the rest after 300 ms.
+  - name: "Drop And Send"
+    key: a
+    delay_mode: drop_and_send
+    ratio: 1
+    delay_ms: 300
+    windivert_options:
+      outbound: true
+
+  # hold_and_send: holds the first three packets (and TCP retransmissions of them) until deactivation.
+  - name: "Hold And Send"
+    key: h
+    delay_mode: hold_and_send
+    ratio: 3
+    subsequent_packet_hold_mode: seq_ack
+    retransmission_mode: both
+    windivert_options:
+      outbound: true
+
+  # drop_until_toggle: drop, then hold on the next toggle, then send everything and deactivate.
+  - name: "Drop Until Toggle"
+    key: u
+    delay_mode: drop_until_toggle
+    windivert_options:
+      outbound: true
+
+  # hold_until_deactivation: hold everything; `s` releases two packets without deactivating.
+  - name: "Hold Until Deactivation"
+    key: w
+    send_key: s
+    delay_mode: hold_until_deactivation
+    amount: 2
+    windivert_options:
+      outbound: true
+
+  # packet_group_send: capture two groups (one activation press each), then send them last-in first-out.
+  - name: "Group Send"
+    key: g
+    delay_mode: packet_group_send
+    group_count: 2
+    group_order: lifo
+    windivert_options:
+      outbound: true
+
+  # period: deactivates itself after 1.5 seconds.
+  - name: "Period"
+    key: e
+    mode: period
+    activation_period: 1500
+    delay_mode: from_timestamp
+    delay_ms: 100
+    windivert_options:
+      outbound: true
+
+  # ack_restoration: bare ACKs are captured too and sent PSH packets never move the ACK backwards.
+  - name: "Ack Restoration"
+    key: k
+    ack_restoration: true
+    delay_mode: from_timestamp
+    delay_ms: 50
+    retransmission_mode: only_ack
+    windivert_options:
+      outbound: true
+
+  # key_mode oneof: either key activates the profile.
+  - name: "Either Key"
+    keys:
+      - c
+      - v
+    key_mode: oneof
+    delay_mode: from_timestamp
+    delay_ms: 100
+    filter: "tcp.Psh and (tcp.DstPort == 55000 or tcp.SrcPort == 55000)"
+    windivert_options:
+      outbound: true
+
+  # key_mode combination (the default): all keys must be held.
+  - name: "Chord"
+    keys: [ctrl, shift, m]
+    delay_mode: from_timestamp
+    delay_ms: 100
+    windivert_options:
+      outbound: true
+
+  # sniff: observe without holding anything.
+  - name: "Sniff"
+    key: n
+    delay_mode: from_timestamp
+    delay_ms: 5000
+    windivert_options:
+      sniff: true
+
+  # forward: the forward hook, which loopback traffic never reaches.
+  - name: "Forward"
+    key: f
+    delay_mode: from_timestamp
+    delay_ms: 5000
+    windivert_options:
+      forward: true
+      client_address_enforcement: none
+
+  # server_direction: with a selected server (--server alpha) only packets to that server's group are captured.
+  - name: "Server Direction"
+    key: y
+    delay_mode: from_timestamp
+    delay_ms: 300
+    windivert_options:
+      outbound: true
+      server_direction: destination
+      client_address_enforcement: source
+
+  # UDP and interface filters, which the global filter does not cover.
+  - name: "UDP"
+    key: t
+    delay_mode: from_timestamp
+    delay_ms: 300
+    filter: "udp.DstPort == 55001 and ip and ifIdx == 1 and not tcp"
+    windivert_options:
+      outbound: true
+
+  # disables with a wait: switching to this profile stops Delay and Batch, which linger for 200 ms + 10%.
+  - name: "Exclusive"
+    key: z
+    disables:
+      - "Delay"
+      - "Batch"
+    disable_wait_ms: 200
+    disable_wait_percent: 10
+    respect_disable_wait: false
+    delay_mode: from_timestamp
+    delay_ms: 400
+    windivert_options:
+      outbound: true
+
+  # disables everything else.
+  - name: "Solo"
+    key: o
+    disables: "*"
+    delay_mode: from_timestamp
+    delay_ms: 600
+    windivert_options:
+      outbound: true

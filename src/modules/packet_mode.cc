@@ -50,25 +50,38 @@ void PacketMode::prepare_packet_for_send(uint8_t* packet, uint32_t length, const
 {
 	if (!options_.ack_restoration)
 		return;
-	const size_t direction = address != nullptr && address->outbound ? 1 : 0;
+	(void)address;
 
 	ParsedPacket parsed;
 	if (!parse_packet(packet, length, parsed) || !parsed.tcp || !parsed.tcp->Ack)
 		return;
 	TcpHeader* tcp_header = parsed.tcp;
 
-	uint32_t acknowledgment = swap_u32(tcp_header->AckNum);
-	if (tcp_header->Psh && has_last_sent_ack_[direction] && acknowledgment < last_sent_ack_[direction])
+	std::string flow;
+	if (parsed.ipv4)
 	{
-		acknowledgment	   = last_sent_ack_[direction];
+		flow.append(reinterpret_cast<const char*>(&parsed.ipv4->SrcAddr), sizeof(parsed.ipv4->SrcAddr));
+		flow.append(reinterpret_cast<const char*>(&parsed.ipv4->DstAddr), sizeof(parsed.ipv4->DstAddr));
+	}
+	else if (parsed.ipv6)
+	{
+		flow.append(reinterpret_cast<const char*>(parsed.ipv6->SrcAddr), sizeof(parsed.ipv6->SrcAddr));
+		flow.append(reinterpret_cast<const char*>(parsed.ipv6->DstAddr), sizeof(parsed.ipv6->DstAddr));
+	}
+	flow.append(reinterpret_cast<const char*>(&tcp_header->SrcPort), sizeof(tcp_header->SrcPort));
+	flow.append(reinterpret_cast<const char*>(&tcp_header->DstPort), sizeof(tcp_header->DstPort));
+	const auto last_sent = last_sent_ack_.find(flow);
+	const bool has_last	 = last_sent != last_sent_ack_.end();
+
+	uint32_t acknowledgment = swap_u32(tcp_header->AckNum);
+	if (tcp_header->Psh && has_last && acknowledgment < last_sent->second)
+	{
+		acknowledgment	   = last_sent->second;
 		tcp_header->AckNum = swap_u32(acknowledgment);
 		backend::calc_checksums(packet, length);
 	}
-	if (!has_last_sent_ack_[direction] || acknowledgment > last_sent_ack_[direction])
-	{
-		last_sent_ack_[direction]	  = acknowledgment;
-		has_last_sent_ack_[direction] = true;
-	}
+	if (!has_last || acknowledgment > last_sent->second)
+		last_sent_ack_[flow] = acknowledgment;
 }
 
 void PacketMode::capture(const uint8_t*				 packet,
