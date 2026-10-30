@@ -82,6 +82,25 @@ xmake
 Each feature defines `LAGSW_FEATURE_<NAME>` (for example `LAGSW_FEATURE_PCAP_FILES`)
 while it is enabled.
 
+### Unit tests
+
+```sh
+xmake test                    # builds and runs every suite
+xmake test packet_test        # one suite
+xmake build packet_test && xmake run packet_test visible   # only cases whose name contains "visible"
+```
+
+| Suite | Covers |
+| --- | --- |
+| `options_test` | profiles YAML loader and validation (`src/options/`) |
+| `packet_test` | IPv4/IPv6/TCP/UDP header parsing and packet formatting helpers |
+| `format_test` | text formatting of profile options |
+| `nfqueue_filter_test` | capture-filter to nftables compiler (not built on Windows) |
+
+Suites are plain executables without external dependencies; the shared helpers are in
+[`tests/support/`](tests/support). The tests honour the compile-time feature flags above, so run them
+with different `xmake f` feature settings too.
+
 ## Linux
 
 ### Requirements
@@ -549,7 +568,7 @@ SIGTERM cleanup and fail-open after SIGKILL.
 | --- | --- |
 | `src/` | Application, configuration parser (`src/options/`), packet engine, logging, and resource files |
 | `include/` | Public project headers |
-| `tests/` | Unit tests; the profile loader tests run with `xmake build options_test && xmake run options_test` |
+| `tests/` | Unit tests (`xmake test`, see [Unit tests](#unit-tests)) |
 | `profiles/` | Example YAML configurations |
 | `win_divert/` | Embedded WinDivert headers, libraries, drivers, and documentation |
 | `xmake.lua` | Project-wide compiler and linker settings |

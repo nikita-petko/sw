@@ -1,92 +1,16 @@
-// Regression tests for the profiles YAML loader (src/options/). Run from the project root: `xmake build options_test && xmake run options_test`.
+// Regression tests for the profiles YAML loader (src/options/). Run from the project root: `xmake test options_test`.
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
-#include <functional>
-#include <iterator>
 #include <string>
 #include <vector>
 
-#ifdef _WIN32
-#include <io.h>
-#else
-#include <unistd.h>
-#endif
-
-#include "log.h"
 #include "options/internal.h"
-#include "platform.h"
-
-// log.cc asks the platform for the console width; the tests have no console.
-namespace platform {
-int console_width()
-{
-	return 0;
-}
-}  // namespace platform
+#include "support/capture.h"
+#include "support/test.h"
 
 namespace {
-int failures = 0;
-
-#define CHECK(condition)                                                                       \
-	do                                                                                         \
-	{                                                                                          \
-		if (!(condition))                                                                      \
-		{                                                                                      \
-			std::fprintf(stderr, "%s:%d: CHECK failed: %s\n", __FILE__, __LINE__, #condition); \
-			++failures;                                                                        \
-		}                                                                                      \
-	} while (false)
-
-int duplicate(int descriptor)
-{
-#ifdef _WIN32
-	return _dup(descriptor);
-#else
-	return dup(descriptor);
-#endif
-}
-
-void redirect(int from, int to)
-{
-#ifdef _WIN32
-	_dup2(from, to);
-	_close(from);
-#else
-	dup2(from, to);
-	close(from);
-#endif
-}
-
-int descriptor_of(std::FILE* file)
-{
-#ifdef _WIN32
-	return _fileno(file);
-#else
-	return fileno(file);
-#endif
-}
-
-/// Runs `body` and returns everything it wrote to stdout (the logger writes there).
-std::string capture_stdout(const std::function<void()>& body)
-{
-	const std::filesystem::path path = std::filesystem::temp_directory_path() / "lagsw_options_test_stdout.txt";
-	std::fflush(stdout);
-	const int  saved  = duplicate(descriptor_of(stdout));
-	std::FILE* target = std::fopen(path.string().c_str(), "wb");
-	redirect(duplicate(descriptor_of(target)), descriptor_of(stdout));
-	body();
-	std::fflush(stdout);
-	redirect(saved, descriptor_of(stdout));
-	std::fclose(target);
-	std::string text;
-	{
-		std::ifstream file(path, std::ios::binary);
-		text.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
-	}
-	std::filesystem::remove(path);
-	return text;
-}
+using test::capture_stdout;
 
 struct LoadResult
 {
@@ -343,7 +267,7 @@ void test_rejected_files()
 		if (result.ok || result.log.find(test.message) == std::string::npos)
 		{
 			std::fprintf(stderr, "case '%s': expected failure containing '%s', got ok=%d log=%s\n", test.name, test.message, result.ok ? 1 : 0, result.log.c_str());
-			++failures;
+			++test::failure_count();
 		}
 	}
 }
@@ -413,14 +337,15 @@ void test_helpers()
 }
 }  // namespace
 
-int main()
+int main(int argc, char** argv)
 {
-	test_helpers();
-	test_shipped_profiles();
-	test_every_setting();
-	test_rejected_files();
-	test_disabled_features_are_ignored();
-	test_error_reports_line();
-	std::printf(failures == 0 ? "all options tests passed\n" : "%d options check(s) failed\n", failures);
-	return failures == 0 ? 0 : 1;
+	static const test::TestCase cases[] = {
+		{"helpers", test_helpers},
+		{"shipped_profiles", test_shipped_profiles},
+		{"every_setting", test_every_setting},
+		{"rejected_files", test_rejected_files},
+		{"disabled_features_are_ignored", test_disabled_features_are_ignored},
+		{"error_reports_line", test_error_reports_line},
+	};
+	return test::run_tests("options", cases, argc, argv);
 }
