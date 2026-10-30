@@ -547,6 +547,8 @@ private:
 			return assign_number<uint16_t>(context_, parse_ulong(unquote(value), 1, kMaxPort), options_.discovery_port, "discovery_port");
 		if (key == "interval")
 			return assign_number<uint64_t>(context_, parse_ullong(unquote(value), 1), options_.discovery_window_ms, "interval");
+		if (key == "disconnect_drop_percent")
+			return assign_number<uint32_t>(context_, parse_ulong(unquote(value), 0, 100), options_.disconnect_drop_percent, "disconnect_drop_percent");
 		if (key == "addresses")
 		{
 			if (value.empty())
@@ -697,6 +699,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 	options.servers.clear();
 	options.discovery_port.reset();
 	options.discovery_window_ms = 5000;
+	options.disconnect_drop_percent = 80;
 	options.features			= {};
 	return ProfilesParser(path, options).parse(file) && validate_profiles(path, options);
 }

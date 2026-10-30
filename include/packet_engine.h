@@ -279,6 +279,8 @@ struct PacketEngineOptions
 	std::optional<uint16_t> discovery_port;
 	/// Server discovery observation window, in milliseconds.
 	uint64_t discovery_window_ms = 5000;
+	/// Percentage a discovery window's packet count must fall below the recent average to report a disconnect. 0 disables detection.
+	uint32_t disconnect_drop_percent = 80;
 	/// Whether to resolve server and client regions.
 	bool resolve_region = false;
 	/// Optional feature settings.

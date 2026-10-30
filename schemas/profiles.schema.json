@@ -28,6 +28,13 @@
           "default": 5000,
           "description": "Length of discovery window in milliseconds."
         },
+        "disconnect_drop_percent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 80,
+          "description": "A discovery window whose packet count falls this many percent below the recent average is reported as a disconnect. 0 disables disconnect detection."
+        },
         "addresses": {
           "type": "array",
           "description": "List of pre-known server addresses, optionally formatted as 'address:name' or IP/hostname strings.",

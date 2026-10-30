@@ -284,6 +284,12 @@ is active and resumes with a fresh window after all profiles are deactivated.
 Profiles with `server_direction` use the selected server when they are next
 activated.
 
+Alongside discovery, lagsw detects disconnects. It averages the packets counted
+in the last six windows and warns when a window drops by `disconnect_drop_percent`
+(default 80%) or more below that average, then logs when the traffic recovers.
+It needs three prior windows averaging at least 10 packets, so quiet links do
+not trigger it, and windows in which a profile paused discovery reset its history.
+
 Linux builds use the nftables + NFQUEUE backend (`backends/nfqueue/`, see
 [`pocs/linux_nfqueue_backend.md`](pocs/linux_nfqueue_backend.md)). It needs the
 `nft` binary, `libnetfilter_queue`/`libmnl` at build time and `CAP_NET_ADMIN` at
@@ -343,7 +349,7 @@ servers:
 | Field | Required | Description |
 | --- | --- | --- |
 | `global_filter` | No | Capture filter used by profiles that do not define `filter`. Defaults to `tcp.DstPort == 55000 or tcp.SrcPort == 55000`. |
-| `servers` | No | A list of server addresses, or a mapping of server groups with optional `addresses`, `discovery_port`, and `interval` fields. |
+| `servers` | No | A list of server addresses, or a mapping of server groups with optional `addresses`, `discovery_port`, `interval`, and `disconnect_drop_percent` fields. |
 | `features` | No | Optional feature configuration, including PCAP capture, desynchronization countdown, forwarded-address discovery, and region enforcement. |
 | `profiles` | Yes | A non-empty list of profile definitions. |
 
@@ -369,6 +375,7 @@ servers:
 | --- | --- | --- |
 | `discovery_port` | Yes | Port (1-65535) to observe TCP and UDP traffic on; the remote address receiving the most packets in each discovery window is selected. |
 | `interval` | No | Discovery window length in milliseconds. Defaults to `5000`. |
+| `disconnect_drop_percent` | No | Reports a disconnect when a window's packet count falls this many percent below the average of the last windows. Defaults to `80`; `0` disables. |
 
 ### Features
 

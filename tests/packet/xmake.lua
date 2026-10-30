@@ -1,4 +1,4 @@
--- Unit tests for packet parsing and formatting. Run with `xmake test packet_test` / `xmake test format_test`.
+-- Unit tests for packet parsing and formatting. Run with `xmake test packet_test` / `xmake test format_test` / `xmake test disconnect_detector_test`.
 local function unit_test(name, sources)
     target(name)
         set_kind("binary")
@@ -14,3 +14,4 @@ end
 
 unit_test("packet_test", {"../../src/packet_headers.cc", "../../src/packet_engine/util.cc"})
 unit_test("format_test", {"../../src/format.cc"})
+unit_test("disconnect_detector_test", {})

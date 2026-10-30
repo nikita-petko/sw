@@ -5,6 +5,7 @@
 #include <ctime>
 #include <thread>
 
+#include "disconnect_detector.h"
 #include "log.h"
 
 namespace {
@@ -58,7 +59,10 @@ namespace {
 class DiscoveryHeartbeat
 {
 public:
-	DiscoveryHeartbeat(DiscoveryCounters& counters, const uint64_t& window_ms) : thread_([this, &counters, &window_ms] { run(counters, window_ms); }) {}
+	DiscoveryHeartbeat(DiscoveryCounters& counters, const uint64_t& window_ms, uint32_t disconnect_drop_percent)
+		: detector_(disconnect_drop_percent), thread_([this, &counters, &window_ms] { run(counters, window_ms); })
+	{
+	}
 
 	~DiscoveryHeartbeat()
 	{
@@ -91,10 +95,38 @@ private:
 							static_cast<unsigned long long>(suppressed),
 							static_cast<unsigned long long>(unparsed),
 							received == 0 ? " - no packets hit the discovery filter" : "");
+			detect_disconnect(received - suppressed, suppressed, window_ms);
+		}
+	}
+
+	/// Compares the packets counted in a window with the recent average. Windows in which a profile paused discovery
+	/// are not comparable, so they reset the history.
+	void detect_disconnect(uint64_t counted, uint64_t suppressed, uint64_t window_ms)
+	{
+		if (suppressed > 0)
+		{
+			detector_.reset();
+			return;
+		}
+		const double avg = detector_.average();
+		switch (detector_.observe(counted))
+		{
+		case DisconnectDetector::Event::disconnected:
+			LOG_WARN("Disconnect detected: %llu packets in the last %s, down from an average of %.1f per window",
+					 static_cast<unsigned long long>(counted),
+					 logging::format_duration(window_ms).c_str(),
+					 avg);
+			break;
+		case DisconnectDetector::Event::reconnected:
+			LOG_INFO("Connection recovered: %llu packets in the last %s", static_cast<unsigned long long>(counted), logging::format_duration(window_ms).c_str());
+			break;
+		case DisconnectDetector::Event::none:
+			break;
 		}
 	}
 
 	std::atomic<bool> stop_{false};
+	DisconnectDetector detector_;
 	std::thread		  thread_;
 };
 }  // namespace
@@ -110,7 +142,7 @@ std::string PacketEngine::server_label(const std::string& address) const
 void PacketEngine::discover_packets()
 {
 	DiscoveryScan	   scan(platform::tick_ms());
-	DiscoveryHeartbeat heartbeat(scan.counters, options_.discovery_window_ms);
+	DiscoveryHeartbeat heartbeat(scan.counters, options_.discovery_window_ms, options_.disconnect_drop_percent);
 	uint8_t			   packet_data[0xFFFF];
 	LOG_DEBUG_GROUP(logging::group::discovery, "Server discovery: capture loop started, waiting for packets");
 	while (!shutdown_)
