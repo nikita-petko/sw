@@ -20,7 +20,8 @@ bool is_toggle_release_mode(PacketDelayMode mode)
 		   mode == PacketDelayMode::packet_group_send;
 }
 
-const char* toggle_release_mode_name(PacketDelayMode mode)
+// Only referenced by LOG_DEBUG, which compiles to nothing when NDEBUG is defined
+[[maybe_unused]] const char* toggle_release_mode_name(PacketDelayMode mode)
 {
 	return mode == PacketDelayMode::drop_until_toggle		  ? "drop_until_toggle"
 		   : mode == PacketDelayMode::hold_until_deactivation ? "hold_until_deactivation"
