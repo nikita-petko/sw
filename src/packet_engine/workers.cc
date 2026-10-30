@@ -7,76 +7,77 @@ void PacketEngine::start_workers()
 	if (options_.resolve_region)
 		resolve_client_region();
 	if (options_.discovery_port)
-	{
-		const uint16_t	  port	 = *options_.discovery_port;
-		const std::string filter = backend::filters::port(port);
-		backend::OpenOptions open_options;
-		open_options.filter = filter;
-		open_options.sniff	= true;
-		open_options.include_forward = true;
-		std::string open_error;
-		LOG_DEBUG("Server discovery setup: opening sniff channel with filter '%s'", filter.c_str());
-		state_->discovery_handle = backend::open(open_options, open_error);
-		if (!state_->discovery_handle)
-		{
-			LOG_ERROR("Server discovery setup: failed to open capture channel: %s", open_error.c_str());
-		}
-		else
-		{
-			LOG_INFO("Server discovery enabled on port %u with a %s window",
-					 port,
-					 logging::format_duration(options_.discovery_window_ms).c_str());
-			state_->discovery_thread = std::thread(&PacketEngine::discover_packets, this);
-		}
-	}
-
+		start_discovery_worker();
 	if (options_.features.region_enforcement.enabled && options_.features.region_enforcement.probe_port != 0)
-	{
-		const uint16_t	  port	 = options_.features.region_enforcement.probe_port;
-		const std::string filter = backend::filters::syn_probe(port);
-		backend::OpenOptions open_options;
-		open_options.filter			 = filter;
-		open_options.sniff			 = true;
-		open_options.include_forward = true;
-		std::string open_error;
-		state_->probe_handle = backend::open(open_options, open_error);
-		if (!state_->probe_handle)
-		{
-			LOG_ERROR("Probe detection setup: failed to open capture channel: %s", open_error.c_str());
-		}
-		else
-		{
-			LOG_INFO("Probe detection enabled on port %u", port);
-			state_->probe_thread = std::thread(&PacketEngine::probe_packets, this);
-		}
-
-		start_region_enforcement();
-	}
-
+		start_probe_worker();
 	if (options_.features.forwarded_address_discovery.enabled)
+		start_forwarded_address_worker();
+}
+
+void PacketEngine::start_discovery_worker()
+{
+	const uint16_t	  port	 = *options_.discovery_port;
+	const std::string filter = backend::filters::port(port);
+	backend::OpenOptions open_options;
+	open_options.filter = filter;
+	open_options.sniff	= true;
+	open_options.include_forward = true;
+	std::string open_error;
+	LOG_DEBUG("Server discovery setup: opening sniff channel with filter '%s'", filter.c_str());
+	state_->discovery_handle = backend::open(open_options, open_error);
+	if (!state_->discovery_handle)
 	{
-		const uint32_t	  inbound_if_idx  = *options_.features.forwarded_address_discovery.inbound_if_idx;
-		const uint32_t	  outbound_if_idx = *options_.features.forwarded_address_discovery.outbound_if_idx;
-		const uint16_t	  port			  = options_.features.forwarded_address_discovery.port;
-		const std::string filter		  = backend::filters::forwarded_address(inbound_if_idx, outbound_if_idx, port);
-		LOG_DEBUG("Forwarded address discovery setup: opening filter '%s'", filter.c_str());
-		// a dedicated priority avoids losing packets to other priority-0 handles (server discovery, profiles) with overlapping filters
-		backend::OpenOptions open_options;
-		open_options.filter	  = filter;
-		open_options.sniff	  = true;
-		open_options.priority = 1000;
-		std::string open_error;
-		state_->fad_handle = backend::open(open_options, open_error);
-		if (!state_->fad_handle)
-		{
-			LOG_ERROR("Forwarded address discovery setup: failed to open capture channel: %s", open_error.c_str());
-		}
-		else
-		{
-			LOG_INFO("Forwarded address discovery enabled (inbound ifIdx %u, outbound ifIdx %u)", inbound_if_idx, outbound_if_idx);
-			state_->fad_thread = std::thread(&PacketEngine::forwarded_address_discovery_recv, this);
-		}
+		LOG_ERROR("Server discovery setup: failed to open capture channel: %s", open_error.c_str());
+		return;
 	}
+	LOG_INFO("Server discovery enabled on port %u with a %s window",
+			 port,
+			 logging::format_duration(options_.discovery_window_ms).c_str());
+	state_->discovery_thread = std::thread(&PacketEngine::discover_packets, this);
+}
+
+void PacketEngine::start_probe_worker()
+{
+	const uint16_t	  port	 = options_.features.region_enforcement.probe_port;
+	const std::string filter = backend::filters::syn_probe(port);
+	backend::OpenOptions open_options;
+	open_options.filter			 = filter;
+	open_options.sniff			 = true;
+	open_options.include_forward = true;
+	std::string open_error;
+	state_->probe_handle = backend::open(open_options, open_error);
+	if (!state_->probe_handle)
+		LOG_ERROR("Probe detection setup: failed to open capture channel: %s", open_error.c_str());
+	else
+	{
+		LOG_INFO("Probe detection enabled on port %u", port);
+		state_->probe_thread = std::thread(&PacketEngine::probe_packets, this);
+	}
+
+	start_region_enforcement();
+}
+
+void PacketEngine::start_forwarded_address_worker()
+{
+	const uint32_t	  inbound_if_idx  = *options_.features.forwarded_address_discovery.inbound_if_idx;
+	const uint32_t	  outbound_if_idx = *options_.features.forwarded_address_discovery.outbound_if_idx;
+	const uint16_t	  port			  = options_.features.forwarded_address_discovery.port;
+	const std::string filter		  = backend::filters::forwarded_address(inbound_if_idx, outbound_if_idx, port);
+	LOG_DEBUG("Forwarded address discovery setup: opening filter '%s'", filter.c_str());
+	// a dedicated priority avoids losing packets to other priority-0 handles (server discovery, profiles) with overlapping filters
+	backend::OpenOptions open_options;
+	open_options.filter	  = filter;
+	open_options.sniff	  = true;
+	open_options.priority = 1000;
+	std::string open_error;
+	state_->fad_handle = backend::open(open_options, open_error);
+	if (!state_->fad_handle)
+	{
+		LOG_ERROR("Forwarded address discovery setup: failed to open capture channel: %s", open_error.c_str());
+		return;
+	}
+	LOG_INFO("Forwarded address discovery enabled (inbound ifIdx %u, outbound ifIdx %u)", inbound_if_idx, outbound_if_idx);
+	state_->fad_thread = std::thread(&PacketEngine::forwarded_address_discovery_recv, this);
 }
 
 void PacketEngine::stop_workers()

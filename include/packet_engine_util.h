@@ -25,6 +25,9 @@ struct PcapCapture
 /// Creates the profile's PCAP file (named after a new GUID) in the configured directory and writes the PCAP header.
 /// On failure the reason is logged and `capture.file` stays null.
 void start_pcap_capture(const PcapFilesOptions& pcap_files, int profile, const ProfileOptions& profile_options, PcapCapture& capture);
+/// Appends a received packet (with a PCAP record header and the current time) to the capture. On a write failure the
+/// error is logged under `profile_label` and `capture.file` is reset.
+void record_pcap_packet(PcapCapture& capture, const uint8_t* packet_data, uint32_t length, const std::string& profile_label);
 
 /// Creates a state-report divider of the requested width, optionally centered around a label.
 std::string format_state_divider(size_t width, const std::string& label = {});

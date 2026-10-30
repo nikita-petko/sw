@@ -250,7 +250,7 @@ void ProfileController::apply_switches()
 
 void ProfileController::update_hold_profile(size_t index)
 {
-	const int profile = static_cast<int>(index + 1);
+	[[maybe_unused]] const int profile = static_cast<int>(index + 1);
 	if (active_profiles_[index] && !running(index))
 	{
 		LOG_DEBUG("Setting up profile %d", profile);

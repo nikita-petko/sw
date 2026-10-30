@@ -9,7 +9,10 @@
 #include "log.h"
 
 namespace {
-void log_profile_enabled(int profile, const ProfileOptions& profile_options, const std::string& capture_filter, bool forward)
+void log_profile_enabled([[maybe_unused]] int profile,
+						const ProfileOptions& profile_options,
+						[[maybe_unused]] const std::string& capture_filter,
+						[[maybe_unused]] bool forward)
 {
 	LOG_DEBUG("profile #%d - %s setup: opening handle", profile, profile_options.name.c_str());
 	LOG_DEBUG("profile #%d - %s setup: backend = %s, forward = %d, filter = %s",

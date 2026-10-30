@@ -5,8 +5,9 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <thread>
 #include <string>
+#include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include "packet_backend.h"
@@ -345,6 +346,24 @@ private:
 	std::string region_enforcement_filter() const;
 	/// Resolves and stores a server region.
 	void resolve_region(const std::string& address, bool preserve_name = false);
+	/// Applies a cached region of the server; returns false when there is no usable cache entry.
+	bool use_cached_region(const std::string& address, bool preserve_name);
+	/// Looks up a server's region online (runs on its own thread) and stores the result.
+	void lookup_region(const std::string& address, bool preserve_name);
+	/// Gives the server its resolved name, unless it is no longer tracked.
+	void rename_server(const std::string& address, const std::string& name);
+	/// Looks up the client's own region online (runs on its own thread) and stores the result.
+	void lookup_client_region();
+	/// Waits until region-enforcement packets are due and sends them. Returns false when the worker should stop.
+	bool send_due_enforcement_packets();
+	/// Sends every packet still held by region enforcement.
+	void flush_enforcement_queue();
+	/// Opens the server-discovery capture and starts its thread.
+	void start_discovery_worker();
+	/// Opens the probe-detection capture and starts its thread, then starts region enforcement.
+	void start_probe_worker();
+	/// Opens the forwarded-address-discovery capture and starts its thread.
+	void start_forwarded_address_worker();
 	/// Resolves the configured or discovered client region.
 	void resolve_client_region();
 	/// Receives forwarded packets used to discover client addresses.
@@ -355,6 +374,22 @@ private:
 	std::optional<std::string> effective_client_destination_address() const;
 	/// Builds a backend filter for the given profile.
 	backend::ProfileFilter server_filter(const ProfileOptions& profile) const;
+
+	struct DiscoveryScan;
+	/// Counts one packet captured by server discovery. Returns false when discovery is paused because a profile is active.
+	bool scan_discovery_packet(DiscoveryScan& scan, const uint8_t* packet_data, uint32_t length, const backend::PacketMeta& meta);
+	/// Records a packet seen from `address` and announces servers that were not seen before.
+	void count_discovered_server(DiscoveryScan& scan, const std::string& address);
+	/// Ends a discovery window: adopts the busiest address as the authoritative server and starts a new window.
+	void finish_discovery_window(DiscoveryScan& scan);
+	/// Display name of a server address, with the address in brackets when the server has a different configured name.
+	std::string server_label(const std::string& address) const;
+	/// Handles a packet captured by probe detection: starts a new probe window and logs the probed server.
+	void handle_probe_packet(const uint8_t* packet_data, uint32_t length, const backend::PacketMeta& meta);
+	/// Logs a server that was probed for the first time in the current window.
+	void log_probed_server(const std::string& server_address);
+	/// Adopts the busiest address in `counts` as the client's destination (or source) address and restarts active profiles.
+	void apply_forwarded_address_winner(std::unordered_map<std::string, uint64_t>& counts, bool is_destination);
 
 	PacketEngineOptions options_;
 	std::atomic<bool> running_ = false;

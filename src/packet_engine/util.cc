@@ -1,6 +1,7 @@
 #include "packet_engine_util.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -66,6 +67,24 @@ void start_pcap_capture(const PcapFilesOptions& pcap_files, int profile, const P
 	if (!file)
 	{
 		LOG_ERROR("profile #%d - %s PCAP capture: failed to write header to %s", profile, profile_options.name.c_str(), capture.path.c_str());
+		capture.file.reset();
+	}
+}
+
+void record_pcap_packet(PcapCapture& capture, const uint8_t* packet_data, uint32_t length, const std::string& profile_label)
+{
+	std::ofstream& file			= *capture.file;
+	const auto	   now			= std::chrono::system_clock::now().time_since_epoch();
+	const auto	   seconds		= std::chrono::duration_cast<std::chrono::seconds>(now);
+	const auto	   microseconds = std::chrono::duration_cast<std::chrono::microseconds>(now - seconds);
+	write_pcap_u32(file, static_cast<uint32_t>(seconds.count()));
+	write_pcap_u32(file, static_cast<uint32_t>(microseconds.count()));
+	write_pcap_u32(file, length);
+	write_pcap_u32(file, length);
+	file.write(reinterpret_cast<const char*>(packet_data), length);
+	if (!file)
+	{
+		LOG_ERROR("%s PCAP capture: failed to write %s", profile_label.c_str(), capture.path.c_str());
 		capture.file.reset();
 	}
 }
