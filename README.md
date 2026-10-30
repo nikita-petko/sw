@@ -239,6 +239,7 @@ Options:
 | `--config <file>` | Load profiles from a YAML file. Required. |
 | `--log-level <level>`, `-l <level>` | Set the minimum log level: `error`, `warn`, `info`, or `debug`. |
 | `--log-group <rules>`, `-g <rules>` | Mute or unmute log groups, a comma-separated list such as `-discovery.packet,-packet.recv`. A bare or `+` name enables a group, a `-` prefix disables it, and `all` matches every group and discards earlier rules. The most specific rule wins and a parent such as `discovery` covers its children. Only debug and info messages are muted; warnings and errors always show. Every group is on by default. |
+| `--show-log-groups` | Prefix each log line with its group, e.g. `[DEBUG] [discovery.packet] ...`. Off by default. |
 | `--print-log-groups` | List every log group with a description and exit. |
 | `--server <server>`, `-s <server>` | Select the initial configured server by name or address. Unknown values warn and use `none`. |
 | `--client-address <address>` | Set both the client source and destination addresses. |

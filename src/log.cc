@@ -18,6 +18,7 @@ constexpr size_t max_log_message = 1024;
 logging::level	 minimum_level	 = logging::level::info;
 std::mutex		 log_mutex;
 std::mutex		 group_mutex;
+std::atomic<bool> show_groups{false};
 std::vector<std::pair<std::string, bool>> group_rules;	// An empty name is the "all" rule
 std::atomic<bool>						  groups_configured{false};
 
@@ -318,7 +319,7 @@ bool group_accepts(const char* group_name, level message_level)
 	return enabled;
 }
 
-static void write_impl(level message_level, const char* color, const char* format, va_list arguments)
+static void write_impl(const char* group_name, level message_level, const char* color, const char* format, va_list arguments)
 {
 	std::lock_guard lock(log_mutex);
 	if (static_cast<int>(message_level) > static_cast<int>(minimum_level))
@@ -328,7 +329,10 @@ static void write_impl(level message_level, const char* color, const char* forma
 	std::vsnprintf(message, sizeof(message), format, arguments);
 
 	clear_status_line();
-	std::printf("%s[%s] %s\033[0m\n", color, level_name(message_level), message);
+	if (group_name != nullptr && show_groups.load())
+		std::printf("%s[%s] [%s] %s\033[0m\n", color, level_name(message_level), group_name, message);
+	else
+		std::printf("%s[%s] %s\033[0m\n", color, level_name(message_level), message);
 	if (!status_line.empty())
 		print_status_block(status_line, status_right_line);
 	std::fflush(stdout);
@@ -338,15 +342,36 @@ void write(level message_level, const char* format, ...)
 {
 	va_list arguments;
 	va_start(arguments, format);
-	write_impl(message_level, level_color(message_level), format, arguments);
+	write_impl(nullptr, message_level, level_color(message_level), format, arguments);
 	va_end(arguments);
+}
+
+void write_group(const char* group_name, level message_level, const char* format, ...)
+{
+	va_list arguments;
+	va_start(arguments, format);
+	write_impl(group_name, message_level, level_color(message_level), format, arguments);
+	va_end(arguments);
+}
+
+void write_styled_group(const char* group_name, style message_style, const char* format, ...)
+{
+	va_list arguments;
+	va_start(arguments, format);
+	write_impl(group_name, level::info, style_color(message_style), format, arguments);
+	va_end(arguments);
+}
+
+void set_show_groups(bool show)
+{
+	show_groups.store(show);
 }
 
 void write_styled(style message_style, const char* format, ...)
 {
 	va_list arguments;
 	va_start(arguments, format);
-	write_impl(level::info, style_color(message_style), format, arguments);
+	write_impl(nullptr, level::info, style_color(message_style), format, arguments);
 	va_end(arguments);
 }
 

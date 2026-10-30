@@ -35,6 +35,12 @@ void set_level(level minimum_level);
 void write(level message_level, const char* format, ...);
 /// Writes a printf-style info message using the given visual style.
 void write_styled(style message_style, const char* format, ...);
+/// Like write(), but names the group so the line can be prefixed with it when set_show_groups(true).
+void write_group(const char* group_name, level message_level, const char* format, ...);
+/// Like write_styled(), but names the group so the line can be prefixed with it when set_show_groups(true).
+void write_styled_group(const char* group_name, style message_style, const char* format, ...);
+/// Shows the log group in front of every grouped message, e.g. "[DEBUG] [discovery.packet] ...". Off by default.
+void set_show_groups(bool show);
 /// Displays a persistent status line, clearing any right-aligned status text.
 void set_status(const std::string& status);
 /// Displays a persistent status line with optional right-aligned text.
@@ -125,13 +131,13 @@ bool group_accepts(const char* group_name, level message_level);
 	do                                                                                             \
 	{                                                                                              \
 		if (logging::group_accepts(group_name, message_level))                                     \
-			logging::write(message_level, message, ##__VA_ARGS__);                                 \
+			logging::write_group(group_name, message_level, message, ##__VA_ARGS__);                                 \
 	} while (0)
 #define LOG_STYLED_GROUP_IMPL(group_name, message_style, message, ...)                             \
 	do                                                                                             \
 	{                                                                                              \
 		if (logging::group_accepts(group_name, logging::level::info))                              \
-			logging::write_styled(message_style, message, ##__VA_ARGS__);                          \
+			logging::write_styled_group(group_name, message_style, message, ##__VA_ARGS__);                          \
 	} while (0)
 
 #define LOG_ERROR_GROUP(group_name, message, ...) LOG_GROUP_IMPL(group_name, logging::level::error, message, ##__VA_ARGS__)

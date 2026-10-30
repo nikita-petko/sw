@@ -86,6 +86,8 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 				return false;
 			}
 		}
+		else if (std::strcmp(argv[index], "--show-log-groups") == 0)
+			logging::set_show_groups(true);
 		else if (std::strcmp(argv[index], "--print-log-groups") == 0)
 		{
 			size_t name_width = 0;
@@ -135,6 +137,7 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 			std::printf("  --log-level, -l <level> Set log level: error, warn, info, or debug\n");
 			std::printf("  --log-group, -g <rules> Toggle log groups, e.g. -discovery.packet,-packet.recv or all,+region\n");
 			std::printf("                          A name enables a group, a '-' prefix disables it, and the most specific rule wins\n");
+			std::printf("  --show-log-groups       Prefix each log line with its log group\n");
 			std::printf("  --print-log-groups      List every log group and exit\n");
 			std::printf("  --server, -s <server> Select the initial configured server\n");
 			std::printf("  --client-address <address> Set both client source and destination addresses\n");
