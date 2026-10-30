@@ -329,7 +329,7 @@ session, to a different, europe-west1 address), this indicates:
   both embedded in the client and probed over `55002`.
 
 This matters directly for this repository's own tooling: `lagsw`'s
-`servers.discovery_port` mechanism (see [`README.md`](../README.md))
+`features.server_discovery` mechanism (see [`README.md`](../README.md))
 identifies the "authoritative server" as whichever configured address
 receives the most packets on a given port during a discovery window. Because
 the candidate pool in [`profiles/div1.sw.yml`](../profiles/div1.sw.yml) is drawn
@@ -400,7 +400,7 @@ made in the companion exploit documents and encoded in
   repository's [`profiles/div1.sw.yml`](../profiles/div1.sw.yml) is the game's real,
   dynamically-served topology rather than a static snapshot that could go
   stale, which matters for keeping `lagsw`'s `servers` groupings and
-  `discovery_port` behavior aligned with the live environment.
+  `server_discovery` behavior aligned with the live environment.
 - The TLS encryption observed on the matchmaking/voice/game connections
   (Section 4) means a network-layer interceptor cannot read or selectively
   target packets *by application-level content* (e.g. "the packet that says

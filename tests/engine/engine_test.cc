@@ -21,8 +21,8 @@ using namespace packets;
 using fakes::wait_until;
 
 constexpr uint16_t kDiscoveryPort  = 55000;
-constexpr uint64_t kDiscoveryWindowMs = 100;
-const std::chrono::milliseconds kWindowPause(kDiscoveryWindowMs + 60);
+[[maybe_unused]] constexpr uint64_t kDiscoveryWindowMs = 100;
+[[maybe_unused]] const std::chrono::milliseconds kWindowPause(kDiscoveryWindowMs + 60);
 
 ProfileOptions profile(const char* name, PacketDelayMode mode = PacketDelayMode::from_timestamp, int32_t delay_ms = 0)
 {
@@ -46,11 +46,13 @@ PacketEngineOptions engine_options(std::vector<ProfileOptions> profiles, std::ve
 	return options;
 }
 
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 PacketEngineOptions discovery_options(std::vector<ProfileOptions> profiles = {profile("A")}, std::vector<ServerOptions> servers = {})
 {
 	PacketEngineOptions options = engine_options(std::move(profiles), std::move(servers));
-	options.discovery_port		= kDiscoveryPort;
-	options.discovery_window_ms = kDiscoveryWindowMs;
+	options.features.server_discovery.enabled	= true;
+	options.features.server_discovery.port		= kDiscoveryPort;
+	options.features.server_discovery.window_ms = kDiscoveryWindowMs;
 	return options;
 }
 
@@ -59,6 +61,7 @@ Bytes to_server(std::array<uint8_t, 4> server_address, uint16_t port = kDiscover
 {
 	return ipv4_packet(kTcp, tcp_segment(40000, port, 1, 1, kAck), {10, 0, 0, 5}, server_address);
 }
+#endif
 
 /// Runs `body` with INFO logging on and returns what was logged, then restores the quiet level the tests normally run at.
 std::string logged(const std::function<void()>& body, logging::level level = logging::level::info)
@@ -79,6 +82,7 @@ bool report_contains(const PacketEngine& engine, const std::string& text)
 	return state_report(engine).find(text) != std::string::npos;
 }
 
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 /// Feeds the discovery channel `counts` packets per server, lets the discovery window run out and closes it with one more packet to
 /// the first server (so list the expected winner first).
 void run_discovery_window(const std::shared_ptr<fakes::ChannelState>& channel, const std::vector<std::pair<std::array<uint8_t, 4>, int>>& counts)
@@ -96,6 +100,7 @@ void run_discovery_window(const std::shared_ptr<fakes::ChannelState>& channel, c
 	++expected;
 	wait_until([&] { return channel->consumed() >= expected; });
 }
+#endif
 
 void test_initial_server_selection()
 {
@@ -523,6 +528,7 @@ void test_desync_countdown_can_hide_while_active()
 }
 #endif
 
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 void test_discovery_selects_the_busiest_server()
 {
 	fakes::reset();
@@ -679,6 +685,17 @@ void test_regions_of_configured_servers_keep_their_names()
 	CHECK(engine.current_server() == "mine [34.1.2.19]");
 }
 
+void test_server_discovery_is_off_unless_enabled()
+{
+	fakes::reset();
+	PacketEngineOptions options = discovery_options();
+	options.features.server_discovery.enabled = false;
+	PacketEngine engine(options);
+	engine.start_workers();
+	CHECK(fakes::channels().empty());
+	CHECK(!engine.is_authoritative_server() && engine.current_server() == "none");
+}
+#endif
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 PacketEngineOptions forwarding_options()
 {
@@ -797,6 +814,7 @@ int main(int argc, char** argv)
 		{"desync_countdown_expires", test_desync_countdown_expires},
 		{"desync_countdown_can_hide_while_active", test_desync_countdown_can_hide_while_active},
 #endif
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 		{"discovery_selects_the_busiest_server", test_discovery_selects_the_busiest_server},
 		{"discovery_understands_which_endpoint_is_the_server", test_discovery_understands_which_endpoint_is_the_server},
 		{"discovery_does_not_override_an_initial_server", test_discovery_does_not_override_an_initial_server},
@@ -805,6 +823,8 @@ int main(int argc, char** argv)
 		{"stopping_the_workers_closes_the_discovery_channel", test_stopping_the_workers_closes_the_discovery_channel},
 		{"regions_are_resolved_and_servers_renamed", test_regions_are_resolved_and_servers_renamed},
 		{"regions_of_configured_servers_keep_their_names", test_regions_of_configured_servers_keep_their_names},
+		{"server_discovery_is_off_unless_enabled", test_server_discovery_is_off_unless_enabled},
+#endif
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 		{"forwarded_address_discovery_learns_the_client_addresses", test_forwarded_address_discovery_learns_the_client_addresses},
 		{"forwarded_address_discovery_is_off_unless_enabled", test_forwarded_address_discovery_is_off_unless_enabled},

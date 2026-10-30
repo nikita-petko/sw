@@ -53,7 +53,10 @@ PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(opt
 			LOG_SERVER_GROUP(logging::group::server, "  %s", label.c_str());
 		}
 	}
-	state_->select_authoritative_server = !options_.initial_server || *options_.initial_server == "none";
+	const bool no_initial_server = !options_.initial_server || *options_.initial_server == "none";
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+	state_->select_authoritative_server = no_initial_server;
+#endif
 	if (options_.initial_server)
 	{
 		for (size_t index = 0; index < options_.servers.size(); ++index)
@@ -65,7 +68,7 @@ PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(opt
 				break;
 			}
 		}
-		if (server_index_ == 0 && !state_->select_authoritative_server)
+		if (server_index_ == 0 && !no_initial_server)
 			LOG_WARN_GROUP(logging::group::server, "Server '%s' does not exist; using none", options_.initial_server->c_str());
 	}
 	LOG_SERVER_GROUP(logging::group::server, "Initial server: %s", current_server().c_str());
@@ -90,11 +93,13 @@ bool PacketEngine::is_running(int profile) const
 	return state_->active_profiles[profile - 1];
 }
 
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 bool PacketEngine::is_authoritative_server() const
 {
 	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
 	return state_->authoritative_server;
 }
+#endif
 
 void PacketEngine::setup(int profile)
 {
@@ -138,10 +143,12 @@ void PacketEngine::setup(int profile)
 	state_->profile_stats[profile - 1].enabled_since = platform::tick_ms();
 	state_->active_sessions[profile - 1] = session;
 	state_->active_profiles[profile - 1] = true;
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 	{
 		std::lock_guard<std::mutex> discovery_lock(state_->discovery_mutex);
 		state_->discovery_counts.clear();
 	}
+#endif
 	packet_modes_[profile - 1]->reset();
 	running_				= true;
 	session->receive_thread = std::thread(&PacketEngine::read_packets, this, session);

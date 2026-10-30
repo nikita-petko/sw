@@ -73,9 +73,11 @@ void PacketEngine::cycle_server(int direction)
 		current = (current + 1) % option_count;
 	else
 		current = current == 0 ? option_count - 1 : current - 1;
-	server_index_						= current;
+	server_index_ = current;
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 	state_->authoritative_server		= false;
 	state_->select_authoritative_server = false;
+#endif
 	LOG_SERVER("Server changed to: %s", current_server().c_str());
 
 	std::vector<int> active_profiles;

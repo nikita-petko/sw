@@ -50,6 +50,7 @@ set_symbols("debug")
 -- `xmake f --pcap_files=y --desync_countdown=n`. A disabled feature's code is left out of the binary entirely and
 -- its configuration block is ignored with a warning. Targets opt in with add_options(), see src/xmake.lua.
 local features = {
+    {name = "server_discovery",            default = true,  description = "Discover the authoritative server from observed traffic"},
     {name = "region_enforcement",          default = true,  description = "Delay packets from servers outside the enforced region"},
     {name = "pcap_files",                  default = false, description = "Write per-activation PCAP capture files (debugging aid)"},
     {name = "desync_countdown",            default = true,  description = "Show the estimated post-deactivation desync countdown"},

@@ -1,5 +1,4 @@
 servers:
-  discovery_port: 55000
   addresses:
     # Matchmaking and voice servers (EU West - Brussels)
     - "104.155.45.25:BRU-EUC-25"
@@ -28,6 +27,10 @@ servers:
     - "34.151.127.98:NSW-OCE-98"
 
 features:
+  server_discovery:
+    enabled: true
+    port: 55000
+
   desync_countdown:
     enabled: true
     display: override

@@ -387,6 +387,11 @@ private:
 	{
 		[[maybe_unused]] static const Feature disabled{&ProfilesParser::ignore_feature, false};
 		static const std::unordered_map<std::string, Feature> table = {
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+			{"server_discovery", {&ProfilesParser::parse_server_discovery, true}},
+#else
+			{"server_discovery", disabled},
+#endif
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 			{"region_enforcement", {&ProfilesParser::parse_region_enforcement, true}},
 #else
@@ -453,6 +458,23 @@ private:
 			return begin_enabled_for(value, indent, nullptr, "");
 		return Status::ok;
 	}
+
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+	Status parse_server_discovery(const std::string& key, const std::string& value, int)
+	{
+		ServerDiscoveryOptions& discovery = options_.features.server_discovery;
+		if (key == "enabled")
+			return to_status(assign_bool(context_, value, discovery.enabled));
+		if (key == "port")
+			return to_status(assign_number<uint16_t>(context_, parse_ulong(unquote(value), 1, kMaxPort), discovery.port, "server_discovery port"));
+		if (key == "interval")
+			return to_status(assign_number<uint64_t>(context_, parse_ullong(unquote(value), 1), discovery.window_ms, "server_discovery interval"));
+		if (key == "disconnect_drop_percent")
+			return to_status(assign_number<uint32_t>(
+				context_, parse_ulong(unquote(value), 0, 100), discovery.disconnect_drop_percent, "server_discovery disconnect_drop_percent"));
+		return Status::unhandled;
+	}
+#endif
 
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	Status parse_forwarded_address_discovery(const std::string& key, const std::string& value, int)
@@ -542,15 +564,9 @@ private:
 	}
 #endif
 
-	/// Handles a setting inside the `servers:` block: discovery settings, address lists and named server groups.
+	/// Handles a setting inside the `servers:` block: address lists and named server groups.
 	bool parse_server_setting(const std::string& key, const std::string& value, int indent)
 	{
-		if (key == "discovery_port")
-			return assign_number<uint16_t>(context_, parse_ulong(unquote(value), 1, kMaxPort), options_.discovery_port, "discovery_port");
-		if (key == "interval")
-			return assign_number<uint64_t>(context_, parse_ullong(unquote(value), 1), options_.discovery_window_ms, "interval");
-		if (key == "disconnect_drop_percent")
-			return assign_number<uint32_t>(context_, parse_ulong(unquote(value), 0, 100), options_.disconnect_drop_percent, "disconnect_drop_percent");
 		if (key == "addresses")
 		{
 			if (value.empty())
@@ -699,10 +715,7 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 
 	options.profiles.clear();
 	options.servers.clear();
-	options.discovery_port.reset();
-	options.discovery_window_ms = 5000;
-	options.disconnect_drop_percent = 80;
-	options.features			= {};
+	options.features = {};
 	return ProfilesParser(path, options).parse(file) && validate_profiles(path, options);
 }
 

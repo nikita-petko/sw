@@ -24,6 +24,7 @@ struct ProfileReport
 	uint64_t teardown_packets_sent = 0;
 };
 
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 /// A snapshot of the server discovery results for the state report.
 struct DiscoveryReport
 {
@@ -32,6 +33,7 @@ struct DiscoveryReport
 	bool										  authoritative = false;
 	std::unordered_map<std::string, std::string>  regions;
 };
+#endif
 
 /// One state line per log group that has logged or muted anything, e.g. "discovery.packet  err 0, warn 0, info 0, debug 12 (muted 3)".
 std::vector<std::string> log_group_lines()
@@ -118,6 +120,7 @@ void log_queue_report(size_t width, size_t queued_packets, uint64_t next_release
 		log_state_line(width, "next release:    in " + highlight(logging::format_duration(next_release_in)));
 }
 
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 void log_discovery_report(size_t width, const PacketEngineOptions& options, const DiscoveryReport& report)
 {
 	LOG_DEBUG("print_state: snapshotted %zu resolved region(s)", report.regions.size());
@@ -144,6 +147,7 @@ void log_discovery_report(size_t width, const PacketEngineOptions& options, cons
 	}
 	LOG_INFO("%s", format_state_divider(width).c_str());
 }
+#endif
 }  // namespace
 
 void PacketEngine::print_state() const
@@ -156,6 +160,7 @@ void PacketEngine::print_state() const
 
 	const size_t	queued_packets	= pending_packets();
 	const uint64_t	next_release_in = next_batch_in_ms();
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 	DiscoveryReport discovery;
 	{
 		std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
@@ -169,6 +174,7 @@ void PacketEngine::print_state() const
 			return left.second > right.second;
 		return left.first < right.first;
 	});
+#endif
 
 	const std::vector<std::string> group_lines = log_group_lines();
 	const size_t				   state_width = report_width(options_, group_lines);
@@ -195,7 +201,8 @@ void PacketEngine::print_state() const
 		log_profile_report(state_width, index + 1, options_.profiles[index], report);
 	}
 	log_queue_report(state_width, queued_packets, next_release_in);
-	if (options_.discovery_port)
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+	if (options_.features.server_discovery.enabled)
 	{
 		{
 			std::lock_guard<std::mutex> lock(state_->region_mutex);
@@ -203,6 +210,7 @@ void PacketEngine::print_state() const
 		}
 		log_discovery_report(state_width, options_, discovery);
 	}
+#endif
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	if (options_.features.region_enforcement.enabled)
 	{

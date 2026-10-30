@@ -136,6 +136,18 @@ bool validate_enabled_for(const PacketEngineOptions& options, const char* featur
 }
 #endif
 
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+bool validate_server_discovery(const char* path, const ServerDiscoveryOptions& discovery)
+{
+	if (discovery.enabled && discovery.port == 0)
+	{
+		LOG_ERROR("Feature server_discovery is enabled but port is missing or invalid in %s", path);
+		return false;
+	}
+	return true;
+}
+#endif
+
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 bool validate_region_enforcement(const char* path, const RegionEnforcementOptions& region)
 {
@@ -203,6 +215,10 @@ bool validate_desync_countdown(const char* path, const PacketEngineOptions& opti
 
 bool validate_features([[maybe_unused]] const char* path, [[maybe_unused]] const PacketEngineOptions& options)
 {
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+	if (!validate_server_discovery(path, options.features.server_discovery))
+		return false;
+#endif
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	if (!validate_region_enforcement(path, options.features.region_enforcement))
 		return false;

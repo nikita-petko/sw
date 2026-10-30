@@ -8,7 +8,7 @@ if has_config("region_enforcement") then
         add_files("region_enforcement_test.cc", "../engine/fakes.cc", "../support/platform_stub.cc")
         add_files("../../src/log.cc", "../../src/format.cc", "../../src/packet_headers.cc", "../../src/modules/*.cc", "../../src/packet_engine/*.cc")
         add_includedirs("../../include", "../../src", "..", "../engine")
-        add_options("region_enforcement", "pcap_files", "desync_countdown", "forwarded_address_discovery", "netfilter_monitor")
+        add_options("server_discovery", "region_enforcement", "pcap_files", "desync_countdown", "forwarded_address_discovery", "netfilter_monitor")
         if not is_plat("windows") then
             add_syslinks("pthread")
         end

@@ -158,6 +158,21 @@ struct ProfileOptions
 
 // Each optional feature is compiled in only when its LAGSW_FEATURE_* definition is set (see the root xmake.lua).
 
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+/// Settings for discovering the authoritative server from the traffic observed on a port.
+struct ServerDiscoveryOptions
+{
+	/// Enables server discovery.
+	bool enabled = false;
+	/// Port whose traffic is observed; the remote address receiving the most packets in a window is the authoritative server.
+	uint16_t port = 0;
+	/// Discovery observation window, in milliseconds.
+	uint64_t window_ms = 5000;
+	/// Percentage a discovery window's packet count must fall below the recent average to report a disconnect. 0 disables detection.
+	uint32_t disconnect_drop_percent = 80;
+};
+#endif
+
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 /// Settings for automatic region enforcement based on network probes.
 struct RegionEnforcementOptions
@@ -238,6 +253,10 @@ struct NetfilterMonitorOptions
 /// Optional packet-engine features and their configuration. Only the features compiled into the build are present.
 struct FeaturesOptions
 {
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+	/// Server-discovery feature settings.
+	ServerDiscoveryOptions server_discovery;
+#endif
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	/// Region-enforcement feature settings.
 	RegionEnforcementOptions region_enforcement;
@@ -275,12 +294,6 @@ struct PacketEngineOptions
 	std::optional<std::string> client_source_address;
 	/// Optional configured client destination address.
 	std::optional<std::string> client_destination_address;
-	/// Optional port used for server discovery.
-	std::optional<uint16_t> discovery_port;
-	/// Server discovery observation window, in milliseconds.
-	uint64_t discovery_window_ms = 5000;
-	/// Percentage a discovery window's packet count must fall below the recent average to report a disconnect. 0 disables detection.
-	uint32_t disconnect_drop_percent = 80;
 	/// Whether to resolve server and client regions.
 	bool resolve_region = false;
 	/// Optional feature settings.
@@ -304,7 +317,7 @@ public:
 	/// Copy assignment is disabled because the engine owns worker threads and handles.
 	PacketEngine& operator=(const PacketEngine&) = delete;
 
-	/// Starts background workers used for discovery and supporting features.
+	/// Starts the background workers of the region lookups and the enabled features.
 	void start_workers();
 	/// Stops background workers started by start_workers().
 	void stop_workers();
@@ -326,8 +339,10 @@ public:
 	/// Returns the remaining estimated desynchronization countdown, if available.
 	std::optional<uint64_t> profile_desync_countdown_ms(int profile) const;
 #endif
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 	/// Returns whether the selected server has been identified as authoritative.
 	bool is_authoritative_server() const;
+#endif
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	/// Returns whether region enforcement is configured as enabled.
 	bool is_region_enforcement_enabled() const;
@@ -377,8 +392,10 @@ private:
 	void read_packets(const std::shared_ptr<Session>& session);
 	/// Releases scheduled packets for an active profile.
 	void write_packets(const std::shared_ptr<Session>& session);
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 	/// Runs server discovery.
 	void discover_packets();
+#endif
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	/// Monitors packets used by region enforcement.
 	void probe_packets();
@@ -403,6 +420,7 @@ private:
 	/// Logs a server that was probed for the first time in the current window.
 	void log_probed_server(const std::string& server_address);
 #endif
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 	/// Resolves and stores a server region.
 	void resolve_region(const std::string& address, bool preserve_name = false);
 	/// Applies a cached region of the server; returns false when there is no usable cache entry.
@@ -411,10 +429,13 @@ private:
 	void lookup_region(const std::string& address, bool preserve_name);
 	/// Gives the server its resolved name, unless it is no longer tracked.
 	void rename_server(const std::string& address, const std::string& name);
+#endif
 	/// Looks up the client's own region online (runs on its own thread) and stores the result.
 	void lookup_client_region();
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 	/// Opens the server-discovery capture and starts its thread.
 	void start_discovery_worker();
+#endif
 	/// Resolves the configured or discovered client region.
 	void resolve_client_region();
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
@@ -432,6 +453,7 @@ private:
 	/// Builds a backend filter for the given profile.
 	backend::ProfileFilter server_filter(const ProfileOptions& profile) const;
 
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 	struct DiscoveryScan;
 	/// Counts one packet captured by server discovery. Returns false when discovery is paused because a profile is active.
 	bool scan_discovery_packet(DiscoveryScan& scan, const uint8_t* packet_data, uint32_t length, const backend::PacketMeta& meta);
@@ -441,6 +463,7 @@ private:
 	void finish_discovery_window(DiscoveryScan& scan);
 	/// Display name of a server address, with the address in brackets when the server has a different configured name.
 	std::string server_label(const std::string& address) const;
+#endif
 
 	PacketEngineOptions options_;
 	std::atomic<bool> running_ = false;

@@ -164,7 +164,7 @@ and [`README.md`](../README.md)):
 | Let the weapon-swap packet go out immediately, unaffected | A narrower `filter` (e.g. matching payload size/opcode patterns typical of fire events) that excludes the swap packet, or a second concurrently-active profile with `disables` used to hand off between "hold fire events" and "pass everything else" |
 | Release the held burst on demand | `mode: hold` or `mode: toggle` deactivation, which flushes the queue immediately (per README: "Deactivation flushes all remaining packets immediately") |
 | Avoid the server discarding stale/duplicate retransmissions | `retransmission_mode` set to `none` so TCP retransmissions of the same held segment are not deduplicated away, i.e. exactly reproducing "what a lossy real connection would also deliver" |
-| Selectively affect only the game/session traffic | `global_filter` / per-profile `filter` scoped to the game server's `discovery_port`/known server IPs, and `client_address_enforcement` to avoid affecting unrelated local traffic |
+| Selectively affect only the game/session traffic | `global_filter` / per-profile `filter` scoped to the game server's `server_discovery` port/known server IPs, and `client_address_enforcement` to avoid affecting unrelated local traffic |
 
 This mapping illustrates the general point: **the exploit does not require any
 packet forgery.** Every primitive listed only reorders or delays *legitimate,

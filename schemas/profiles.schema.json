@@ -14,27 +14,8 @@
     },
     "servers": {
       "type": "object",
-      "description": "Configured target servers, combining pre-known addresses with automatic server discovery settings.",
+      "description": "Configured target servers: pre-known addresses and named server groups. Automatic discovery is configured by features.server_discovery.",
       "properties": {
-        "discovery_port": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 65535,
-          "description": "Port to observe network traffic on for server discovery."
-        },
-        "interval": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 5000,
-          "description": "Length of discovery window in milliseconds."
-        },
-        "disconnect_drop_percent": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 100,
-          "default": 80,
-          "description": "A discovery window whose packet count falls this many percent below the recent average is reported as a disconnect. 0 disables disconnect detection."
-        },
         "addresses": {
           "type": "array",
           "description": "List of pre-known server addresses, optionally formatted as 'address:name' or IP/hostname strings.",
@@ -57,6 +38,41 @@
       "type": "object",
       "description": "Optional feature configurations.",
       "properties": {
+        "server_discovery": {
+          "type": "object",
+          "description": "Discovers the authoritative server from the traffic observed on a port: the remote address receiving the most packets in each window is selected.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false,
+              "description": "Whether server discovery is enabled."
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "description": "Port to observe TCP and UDP traffic on."
+            },
+            "interval": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 5000,
+              "description": "Length of the discovery window in milliseconds."
+            },
+            "disconnect_drop_percent": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100,
+              "default": 80,
+              "description": "A discovery window whose packet count falls this many percent below the recent average is reported as a disconnect. 0 disables disconnect detection."
+            }
+          },
+          "required": [
+            "enabled",
+            "port"
+          ],
+          "additionalProperties": false
+        },
         "region_enforcement": {
           "type": "object",
           "description": "Region enforcement settings.",
@@ -176,7 +192,7 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 65535,
-              "description": "Port to observe traffic on, the same way servers.discovery_port scopes server discovery. Excludes unrelated interface traffic such as broadcasts."
+              "description": "Port to observe traffic on, the same way server_discovery.port scopes server discovery. Excludes unrelated interface traffic such as broadcasts."
             },
             "interval": {
               "type": "integer",

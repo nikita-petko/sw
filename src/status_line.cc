@@ -91,7 +91,7 @@ std::string describe_desync_countdowns(const PacketEngine& engine, const PacketE
 }
 #endif
 
-/// The selected server with its regions and the state of the region-enforcement and forwarded-address-discovery features.
+/// The selected server with its regions and the state of the server-discovery, region-enforcement and forwarded-address-discovery features.
 std::string describe_server(const PacketEngine& engine)
 {
 	const std::string server_region = engine.current_server_region();
@@ -99,8 +99,13 @@ std::string describe_server(const PacketEngine& engine)
 	std::string		  region;
 	if (!server_region.empty() || !client_region.empty())
 		region = (server_region.empty() ? "unknown" : server_region) + "/" + (client_region.empty() ? "unknown" : client_region);
-	std::string server_status =
-		engine.current_server() + (engine.is_authoritative_server() ? " (authoritative)" : "") + (region.empty() ? "" : " | " + region);
+	std::string server_status = engine.current_server();
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+	if (engine.is_authoritative_server())
+		server_status += " (authoritative)";
+#endif
+	if (!region.empty())
+		server_status += " | " + region;
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	if (engine.is_region_enforcement_enabled())
 	{

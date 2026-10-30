@@ -7,7 +7,7 @@ local function unit_test(name, sources)
         add_files(name .. ".cc", "../support/platform_stub.cc", "../../src/log.cc")
         add_files(sources)
         add_includedirs("../../include", "../../src", "..")
-        add_options("region_enforcement", "pcap_files", "desync_countdown", "forwarded_address_discovery", "netfilter_monitor")
+        add_options("server_discovery", "region_enforcement", "pcap_files", "desync_countdown", "forwarded_address_discovery", "netfilter_monitor")
         add_tests("default")
     target_end()
 end

@@ -6,6 +6,7 @@
 
 LOG_DEFAULT_GROUP(logging::group::region)
 
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 bool PacketEngine::use_cached_region(const std::string& address, bool preserve_name)
 {
 	RegionCacheEntry cached;
@@ -97,6 +98,7 @@ void PacketEngine::rename_server(const std::string& address, const std::string& 
 	else
 		LOG_DEBUG_GROUP(logging::group::region, "Region lookup for '%s': server no longer tracked, skipping rename", address.c_str());
 }
+#endif  // LAGSW_FEATURE_SERVER_DISCOVERY
 
 void PacketEngine::resolve_client_region()
 {

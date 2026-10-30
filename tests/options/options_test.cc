@@ -48,7 +48,9 @@ void test_shipped_profiles()
 	CHECK(options.profiles.size() == 5);
 	CHECK(options.servers.size() == 10);
 	CHECK(options.servers[2].address == "34.13.202.203" && options.servers[2].name == "GR-EUC-203" && options.servers[2].group == "EU");
-	CHECK(options.discovery_port == 55000);
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+	CHECK(options.features.server_discovery.enabled && options.features.server_discovery.port == 55000);
+#endif
 #ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
 	CHECK(options.features.desync_countdown.enabled);
 	CHECK(options.features.desync_countdown.display == DesyncCountdownDisplay::override_activation);
@@ -82,7 +84,10 @@ void test_shipped_profiles()
 	const LoadResult gateway = load_file("profiles/gateway.test.sw.yml");
 	CHECK(gateway.ok);
 	CHECK(gateway.options.global_filter == "tcp.DstPort == 8080 or tcp.SrcPort == 8080");
-	CHECK(gateway.options.discovery_port == 8080 && gateway.options.discovery_window_ms == 2000);
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+	CHECK(gateway.options.features.server_discovery.enabled && gateway.options.features.server_discovery.port == 8080 &&
+		  gateway.options.features.server_discovery.window_ms == 2000);
+#endif
 
 	CHECK(load_file("profiles/localhost.test.sw.yml").ok);
 }
@@ -91,13 +96,16 @@ void test_every_setting()
 {
 	const LoadResult result = load_text(R"(global_filter: "tcp"
 servers:
-  discovery_port: 1234
-  interval: 3000
   addresses: ["1.1.1.1:one", '2.2.2.2', 3.3.3.3:three]
   GROUP:
     - "4.4.4.4:four"
     - 1.1.1.1:duplicate
 features:
+  server_discovery:
+    enabled: true
+    port: 1234
+    interval: 3000
+    disconnect_drop_percent: 60
   region_enforcement:
     enabled: true
     probe_port: 8080
@@ -164,7 +172,10 @@ profiles:
 	CHECK(o.servers.size() == 4);  // the repeated address is ignored
 	CHECK(o.servers[3].group == "GROUP" && o.servers[3].name == "four");
 	CHECK(o.servers[1].name == "2.2.2.2");
-	CHECK(o.discovery_port == 1234 && o.discovery_window_ms == 3000);
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+	CHECK(o.features.server_discovery.enabled && o.features.server_discovery.port == 1234 &&
+		  o.features.server_discovery.window_ms == 3000 && o.features.server_discovery.disconnect_drop_percent == 60);
+#endif
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	CHECK(o.features.region_enforcement.enabled && o.features.region_enforcement.probe_port == 8080);
 #endif
@@ -217,7 +228,7 @@ struct ErrorCase
 void test_rejected_files()
 {
 	const std::vector<ErrorCase> cases = {
-		{"no profiles", "servers:\n  discovery_port: 1\n", "No profiles found"},
+		{"no profiles", "servers:\n  addresses: [\"1.1.1.1\"]\n", "No profiles found"},
 		{"missing key", "profiles:\n  - name: A\n", "requires a name and key(s)"},
 		{"line without colon", "profiles:\n  - name: A\n    nonsense\n", "Invalid YAML in"},
 		{"bad key", "profiles:\n  - name: A\n    key: nonsense\n", "Invalid profile key in"},
@@ -247,8 +258,14 @@ void test_rejected_files()
 		{"server without name", "servers:\n  addresses: [\"1.1.1.1:\"]\n" + kProfile, "Invalid server '1.1.1.1:' in"},
 		{"addresses not a list", "servers:\n  addresses: 1.1.1.1\n" + kProfile, "Invalid servers addresses list in"},
 		{"unknown servers key", "servers:\n  nonsense: 1\n" + kProfile, "Invalid servers configuration key 'nonsense' in"},
-		{"zero discovery port", "servers:\n  discovery_port: 0\n" + kProfile, "Invalid discovery_port in"},
 		{"unknown features key", "features:\n  nonsense: 1\n" + kProfile, "Invalid features configuration key 'nonsense' in"},
+		{"discovery setting in servers", "servers:\n  discovery_port: 55000\n" + kProfile, "Invalid servers configuration key 'discovery_port' in"},
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+		{"server discovery without port", "features:\n  server_discovery:\n    enabled: true\n" + kProfile, "port is missing or invalid"},
+		{"zero server discovery port", "features:\n  server_discovery:\n    port: 0\n" + kProfile, "Invalid server_discovery port in"},
+		{"server discovery drop percentage", "features:\n  server_discovery:\n    disconnect_drop_percent: 101\n" + kProfile,
+		 "Invalid server_discovery disconnect_drop_percent in"},
+#endif
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 		{"region enforcement without port", "features:\n  region_enforcement:\n    enabled: true\n" + kProfile, "probe_port is missing or invalid"},
 #endif
@@ -290,6 +307,11 @@ void test_disabled_features_are_ignored()
 		bool		compiled;
 	};
 	const Section sections[] = {
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+		{"server_discovery", true},
+#else
+		{"server_discovery", false},
+#endif
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 		{"region_enforcement", true},
 #else

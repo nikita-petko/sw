@@ -13,8 +13,6 @@
 global_filter: "tcp"
 
 servers:
-  discovery_port: 55000
-  interval: 2000
   addresses:
     - "127.0.0.3:extra"
 
@@ -25,6 +23,11 @@ servers:
     - "127.0.0.2:beta"
 
 features:
+  server_discovery:
+    enabled: true
+    port: 55000
+    interval: 2000
+
   pcap_files:
     enabled: true
     output_dir: pcap_files

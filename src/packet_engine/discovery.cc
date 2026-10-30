@@ -1,5 +1,7 @@
 #include "internal.h"
 
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+
 #include <atomic>
 #include <cstdlib>
 #include <ctime>
@@ -141,10 +143,31 @@ std::string PacketEngine::server_label(const std::string& address) const
 	return server == options_.servers.end() ? address : server->name + " [" + address + "]";
 }
 
+void PacketEngine::start_discovery_worker()
+{
+	const ServerDiscoveryOptions& discovery = options_.features.server_discovery;
+	const std::string			  filter	= backend::filters::port(discovery.port);
+	backend::OpenOptions		  open_options;
+	open_options.filter			 = filter;
+	open_options.sniff			 = true;
+	open_options.include_forward = true;
+	std::string open_error;
+	LOG_DEBUG_GROUP(logging::group::discovery, "Server discovery setup: opening sniff channel with filter '%s'", filter.c_str());
+	state_->discovery_handle = backend::open(open_options, open_error);
+	if (!state_->discovery_handle)
+	{
+		LOG_ERROR("Server discovery setup: failed to open capture channel: %s", open_error.c_str());
+		return;
+	}
+	LOG_INFO("Server discovery enabled on port %u with a %s window", discovery.port, logging::format_duration(discovery.window_ms).c_str());
+	state_->discovery_thread = std::thread(&PacketEngine::discover_packets, this);
+}
+
 void PacketEngine::discover_packets()
 {
-	DiscoveryScan	   scan(platform::tick_ms());
-	DiscoveryHeartbeat heartbeat(scan.counters, options_.discovery_window_ms, options_.disconnect_drop_percent);
+	const ServerDiscoveryOptions& discovery = options_.features.server_discovery;
+	DiscoveryScan				  scan(platform::tick_ms());
+	DiscoveryHeartbeat			  heartbeat(scan.counters, discovery.window_ms, discovery.disconnect_drop_percent);
 	uint8_t			   packet_data[0xFFFF];
 	LOG_DEBUG_GROUP(logging::group::discovery, "Server discovery: capture loop started, waiting for packets");
 	while (!shutdown_)
@@ -169,7 +192,7 @@ void PacketEngine::discover_packets()
 		}
 
 		const uint64_t now = platform::tick_ms();
-		if (now - scan.window_started < options_.discovery_window_ms)
+		if (now - scan.window_started < discovery.window_ms)
 			continue;
 		finish_discovery_window(scan);
 		scan.window_started = now;
@@ -208,7 +231,7 @@ bool PacketEngine::scan_discovery_packet(DiscoveryScan& scan, const uint8_t* pac
 		LOG_DEBUG_GROUP(logging::group::discovery_packet, "Server discovery: ignoring unparsable packet (%u bytes)", length);
 		return true;
 	}
-	const std::string address_text = endpoint_address(parsed, server_is_destination(parsed, meta, *options_.discovery_port));
+	const std::string address_text = endpoint_address(parsed, server_is_destination(parsed, meta, options_.features.server_discovery.port));
 	if (address_text.empty())
 	{
 		LOG_DEBUG_GROUP(logging::group::discovery_packet, "Server discovery: packet has no usable IP address");
@@ -282,7 +305,7 @@ void PacketEngine::finish_discovery_window(DiscoveryScan& scan)
 			LOG_SERVER("Server '%s' is the authoritative server (%llu packets in %s)",
 					   label.c_str(),
 					   static_cast<unsigned long long>(winner->second),
-					   logging::format_duration(options_.discovery_window_ms).c_str());
+					   logging::format_duration(options_.features.server_discovery.window_ms).c_str());
 			if (state_->select_authoritative_server || state_->authoritative_server)
 			{
 				state_->authoritative_server		= true;
@@ -295,3 +318,5 @@ void PacketEngine::finish_discovery_window(DiscoveryScan& scan)
 	std::lock_guard<std::mutex> lock(state_->discovery_mutex);
 	state_->discovery_counts.clear();
 }
+
+#endif  // LAGSW_FEATURE_SERVER_DISCOVERY

@@ -31,7 +31,7 @@ jobs:
           - features: default
             flags: ""
           - features: minimal
-            flags: "--region_enforcement=n --desync_countdown=n --forwarded_address_discovery=n"
+            flags: "--server_discovery=n --region_enforcement=n --desync_countdown=n --forwarded_address_discovery=n"
           - features: pcap
             flags: "--pcap_files=y"
     steps:

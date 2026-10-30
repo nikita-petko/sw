@@ -73,6 +73,7 @@ profiles file is skipped with a warning. Toggle them when configuring:
 
 | Feature | xmake flag | Default |
 | --- | --- | --- |
+| `server_discovery` | `--server_discovery=y\|n` | `y` |
 | `region_enforcement` | `--region_enforcement=y\|n` | `y` |
 | `pcap_files` | `--pcap_files=y\|n` | `n` |
 | `desync_countdown` | `--desync_countdown=y\|n` | `y` |
@@ -219,13 +220,15 @@ The configuration file must be supplied explicitly:
 lagsw.exe --config profiles/div1.sw.yml
 ```
 
-To discover the busiest server on a port while the program runs, configure
-`servers` as an object with `discovery_port` (see [Configuration](#configuration)):
+To discover the busiest server on a port while the program runs, enable the
+`server_discovery` feature (see [Features](#features)):
 
 ```yaml
-servers:
-  discovery_port: 55000
-  interval: 5000
+features:
+  server_discovery:
+    enabled: true
+    port: 55000
+    interval: 5000
 ```
 
 ```powershell
@@ -272,7 +275,7 @@ Hold profiles follow the key state independently. Each active profile has its
 own capture handle and packet queue. `Tab` is reserved for displaying state
 and cannot be used as a profile key.
 
-When discovery is enabled (via `servers.discovery_port` in the configuration),
+When discovery is enabled (`features.server_discovery` in the configuration),
 lagsw opens a sniff-only handle and counts packets to and from the selected
 port without delaying them. At the end of each window, the remote address with
 the highest packet count is logged as authoritative and added to the server
@@ -330,13 +333,10 @@ profiles:
 
 Servers can be grouped by region or another label. Selecting any server in a
 group applies the profile filter to every server in that group. A server
-configuration can combine named groups, an `addresses` list, and automatic
-discovery:
+configuration can combine named groups and an `addresses` list:
 
 ```yaml
 servers:
-  discovery_port: 55000
-  interval: 5000
   addresses:
     - "104.155.45.25:BRU-EUC-25"
     - "34.76.248.132:BRU-EUC-132"
@@ -350,8 +350,8 @@ servers:
 | Field | Required | Description |
 | --- | --- | --- |
 | `global_filter` | No | Capture filter used by profiles that do not define `filter`. Defaults to `tcp.DstPort == 55000 or tcp.SrcPort == 55000`. |
-| `servers` | No | A list of server addresses, or a mapping of server groups with optional `addresses`, `discovery_port`, `interval`, and `disconnect_drop_percent` fields. |
-| `features` | No | Optional feature configuration, including PCAP capture, desynchronization countdown, forwarded-address discovery, and region enforcement. |
+| `servers` | No | A list of server addresses, or a mapping of server groups with an optional `addresses` list. |
+| `features` | No | Optional feature configuration, including server discovery, PCAP capture, desynchronization countdown, forwarded-address discovery, and region enforcement. |
 | `profiles` | Yes | A non-empty list of profile definitions. |
 
 `servers` as a list is a set of known server addresses. An entry may use
@@ -363,25 +363,33 @@ servers:
   - "203.0.113.10:backup server"
 ```
 
-Server discovery can be enabled alongside the configured address list and
-groups:
-
-```yaml
-servers:
-  discovery_port: 55000
-  interval: 5000
-```
-
-| Field | Required | Description |
-| --- | --- | --- |
-| `discovery_port` | Yes | Port (1-65535) to observe TCP and UDP traffic on; the remote address receiving the most packets in each discovery window is selected. |
-| `interval` | No | Discovery window length in milliseconds. Defaults to `5000`. |
-| `disconnect_drop_percent` | No | Reports a disconnect when a window's packet count falls this many percent below the average of the last windows. Defaults to `80`; `0` disables. |
+Server discovery is configured in the `features` block, not in `servers` (see
+[Features](#features)).
 
 ### Features
 
 Every feature is optional at build time (see [Optional features](#optional-features));
 settings for a feature that was left out of the build are ignored with a warning.
+
+The `server_discovery` feature observes the traffic on a port and selects the
+remote address that receives the most packets in each window as the
+authoritative server (see [Usage](#usage) for how it interacts with `--server`).
+Without it, servers come only from the `servers` block.
+
+```yaml
+features:
+  server_discovery:
+    enabled: true
+    port: 55000
+    interval: 5000
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `enabled` | No | Enables server discovery. Defaults to `false`. |
+| `port` | Yes when enabled | Port (1-65535) to observe TCP and UDP traffic on. |
+| `interval` | No | Discovery window length in milliseconds. Defaults to `5000`. |
+| `disconnect_drop_percent` | No | Reports a disconnect when a window's packet count falls this many percent below the average of the last windows. Defaults to `80`; `0` disables. |
 
 PCAP output is a debugging feature and is disabled by default, both in the
 build (`--pcap_files=n`) and in the profiles file. When enabled,

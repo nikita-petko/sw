@@ -77,13 +77,6 @@ struct PacketEngine::State
 	std::vector<ProfileStats>						  profile_stats;
 	std::vector<std::shared_ptr<Session>>			  active_sessions;
 	std::vector<std::thread>						  cleanup_threads;
-	std::unique_ptr<backend::PacketChannel>			  discovery_handle;
-	std::thread										  discovery_thread;
-	std::mutex										  discovery_mutex;
-	std::string										  discovered_server;
-	std::unordered_map<std::string, uint64_t>		  discovery_counts;
-	bool											  authoritative_server		  = false;
-	bool											  select_authoritative_server = false;
 	std::mutex										  region_mutex;
 	std::unordered_map<std::string, std::string>	  server_regions;
 	std::unordered_map<std::string, RegionCacheEntry> region_cache;
@@ -91,6 +84,15 @@ struct PacketEngine::State
 	std::vector<std::thread>						  region_threads;
 	std::string										  client_region;
 
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+	std::unique_ptr<backend::PacketChannel>	  discovery_handle;
+	std::thread								  discovery_thread;
+	std::mutex								  discovery_mutex;
+	std::string								  discovered_server;
+	std::unordered_map<std::string, uint64_t> discovery_counts;
+	bool									  authoritative_server		  = false;
+	bool									  select_authoritative_server = false;
+#endif
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	std::unique_ptr<backend::PacketChannel> probe_handle;
 	std::thread						probe_thread;
