@@ -1,0 +1,92 @@
+name: tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Packages the Linux build links against; the unit tests need only libcurl and zlib, which the root xmake.lua requires.
+  LINUX_PACKAGES: libnetfilter-queue-dev libmnl-dev libnfnetlink-dev libcurl4-openssl-dev zlib1g-dev
+
+jobs:
+  # Every optional feature is compiled in or out, so the tests run against each combination that changes the code paths.
+  unit-tests:
+    name: ${{ matrix.os }} / ${{ matrix.features }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        features: [default, minimal, pcap]
+        include:
+          - features: default
+            flags: ""
+          - features: minimal
+            flags: "--region_enforcement=n --desync_countdown=n --forwarded_address_discovery=n"
+          - features: pcap
+            flags: "--pcap_files=y"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+
+      - name: Install Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $LINUX_PACKAGES
+
+      - name: Configure
+        run: xmake f -m debug ${{ matrix.flags }} -y
+
+      - name: Test
+        run: xmake test -v
+
+  # Sanitizer builds are the only place memory errors and data races in the packet engine's worker threads show up.
+  # They start out informational: fix what they report, then drop continue-on-error to make them gate merges.
+  sanitizers:
+    name: linux / ${{ matrix.sanitizer }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [address-undefined, thread]
+        include:
+          - sanitizer: address-undefined
+            policies: build.sanitizer.address,build.sanitizer.undefined
+          - sanitizer: thread
+            policies: build.sanitizer.thread
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+
+      - name: Install Linux packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $LINUX_PACKAGES
+
+      - name: Configure
+        run: xmake f -m debug --policies=${{ matrix.policies }} -y
+
+      - name: Test
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=0
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          TSAN_OPTIONS: second_deadlock_stack=1
+        run: xmake test -v

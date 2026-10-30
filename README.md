@@ -103,7 +103,14 @@ xmake build packet_test && xmake run packet_test visible   # only cases whose na
 
 Suites are plain executables without external dependencies; the shared helpers are in
 [`tests/support/`](tests/support). The tests honour the compile-time feature flags above, so run them
-with different `xmake f` feature settings too.
+with different `xmake f` feature settings too. CI ([`.github/workflows/tests.yml`](.github/workflows/tests.yml))
+does exactly that on Windows and Linux (default features, all optional features off, PCAP files on), and
+also runs the suites under AddressSanitizer/UndefinedBehaviorSanitizer and ThreadSanitizer on Linux:
+
+```sh
+xmake f -m debug --policies=build.sanitizer.address,build.sanitizer.undefined
+xmake test -v
+```
 
 ## Linux
 
