@@ -6,6 +6,7 @@
 #include <string>
 
 #include "log.h"
+#include "packet_backend.h"
 
 namespace {
 #ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
@@ -140,6 +141,14 @@ void StatusLine::run()
 {
 	while (!shutdown_.load())
 	{
+#ifdef LAGSW_FEATURE_NETFILTER_MONITOR
+		if (options_.features.netfilter_monitor.enabled)
+		{
+			const std::string health = backend::monitor_status(options_.features.netfilter_monitor.interval_ms,
+															   options_.features.netfilter_monitor.backlog_threshold);
+			logging::set_extra_status(health.empty() ? std::vector<std::string>{} : std::vector<std::string>{health});
+		}
+#endif
 		const std::string status			= describe_run_state(engine_);
 		const std::string active_profiles	= describe_active_profiles(engine_, options_);
 		const std::string server_status		= describe_server(engine_);

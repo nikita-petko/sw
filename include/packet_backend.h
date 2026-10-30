@@ -139,6 +139,13 @@ std::string forwarded_address(uint32_t inbound_if_index, uint32_t outbound_if_in
 #endif
 }  // namespace filters
 
+#ifdef LAGSW_FEATURE_NETFILTER_MONITOR
+/// One-line health summary of the capture backend's kernel-side plumbing, or an empty string when the backend has none.
+/// `backlog_threshold` is the number of packets waiting in the kernel at which the summary is flagged. Called from a
+/// single thread; implementations may rate-limit their own sampling to `interval_ms`.
+std::string monitor_status(uint64_t interval_ms, uint32_t backlog_threshold);
+#endif
+
 }  // namespace backend
 
 #endif

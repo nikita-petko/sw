@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include "platform.h"
 
@@ -14,11 +15,18 @@ logging::level	 minimum_level	 = logging::level::info;
 std::mutex		 log_mutex;
 std::string		 status_line;
 std::string		 status_right_line;
+std::vector<std::string> extra_status_lines;
 
 void clear_status_line()
 {
-	if (!status_line.empty())
-		std::printf("\r\033[2K");
+	if (status_line.empty())
+		return;
+	std::printf("\r\033[2K");
+	// The extra lines sit below the cursor; wipe them and return to the main line.
+	for (size_t i = 0; i < extra_status_lines.size(); ++i)
+		std::printf("\033[B\033[2K");
+	if (!extra_status_lines.empty())
+		std::printf("\033[%zuA\r", extra_status_lines.size());
 }
 
 int console_width()
@@ -37,6 +45,21 @@ void print_status_line(const std::string& status, const std::string& right_statu
 	}
 	const size_t padding = width > 0 && status.size() < static_cast<size_t>(width) ? static_cast<size_t>(width) - status.size() : 0;
 	std::printf("\r\033[30;47m%s%*s\033[0m", status.c_str(), static_cast<int>(padding), "");
+}
+
+void print_status_block(const std::string& status, const std::string& right_status)
+{
+	print_status_line(status, right_status);
+	if (extra_status_lines.empty())
+		return;
+	const int width = console_width();
+	for (const std::string& line : extra_status_lines)
+	{
+		const std::string shown = width > 0 && line.size() > static_cast<size_t>(width) ? line.substr(0, static_cast<size_t>(width)) : line;
+		const size_t	  pad	= width > 0 && shown.size() < static_cast<size_t>(width) ? static_cast<size_t>(width) - shown.size() : 0;
+		std::printf("\n\r\033[30;47m%s%*s\033[0m", shown.c_str(), static_cast<int>(pad), "");
+	}
+	std::printf("\033[%zuA\r", extra_status_lines.size());
 }
 
 const char* level_name(logging::level message_level)
@@ -138,7 +161,7 @@ static void write_impl(level message_level, const char* color, const char* forma
 	clear_status_line();
 	std::printf("%s[%s] %s\033[0m\n", color, level_name(message_level), message);
 	if (!status_line.empty())
-		print_status_line(status_line, status_right_line);
+		print_status_block(status_line, status_right_line);
 	std::fflush(stdout);
 }
 
@@ -166,9 +189,21 @@ void set_status(const std::string& status)
 void set_status(const std::string& status, const std::string& right_status)
 {
 	std::lock_guard lock(log_mutex);
-	print_status_line(status, right_status);
+	print_status_block(status, right_status);
 	status_line		  = status;
 	status_right_line = right_status;
+	std::fflush(stdout);
+}
+
+void set_extra_status(const std::vector<std::string>& lines)
+{
+	std::lock_guard lock(log_mutex);
+	if (lines == extra_status_lines)
+		return;
+	// The block is redrawn by the next set_status(); wipe it first so a changed line count leaves nothing behind.
+	if (lines.size() != extra_status_lines.size())
+		clear_status_line();
+	extra_status_lines = lines;
 	std::fflush(stdout);
 }
 
@@ -176,6 +211,7 @@ void clear_status()
 {
 	std::lock_guard lock(log_mutex);
 	clear_status_line();
+	extra_status_lines.clear();
 	status_line.clear();
 	status_right_line.clear();
 	std::printf("\r\033[2K");

@@ -18,6 +18,7 @@
 
 #include "filter_compiler.h"
 #include "log.h"
+#include "monitor.h"
 #include "nft_table.h"
 #include "packet_backend.h"
 #include "privileges.h"
@@ -455,4 +456,11 @@ std::string forwarded_address(uint32_t inbound_if_index, uint32_t outbound_if_in
 }
 #endif
 }  // namespace filters
+#ifdef LAGSW_FEATURE_NETFILTER_MONITOR
+std::string monitor_status(uint64_t interval_ms, uint32_t backlog_threshold)
+{
+	return nfq::monitor_status(kFirstQueueNumber, next_channel_id.load(), interval_ms, backlog_threshold);
+}
+#endif
+
 }  // namespace backend

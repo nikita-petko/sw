@@ -17,6 +17,9 @@ bool run_nft(const std::string& script, std::string& error);
 /// The table is deleted again when the process exits normally.
 bool ensure_table(std::string& error);
 
+/// Whether the table that ensure_table() created is still present. Reports true when this process has not created it.
+bool table_present();
+
 /// Deletes the table now (idempotent).
 void remove_table();
 

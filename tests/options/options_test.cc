@@ -117,6 +117,10 @@ features:
     interval: 1500
     inbound: 4
     outbound: 5
+  netfilter_monitor:
+    enabled: true
+    interval: 500
+    backlog_threshold: 42
 profiles:
   - name: "A"
     keys: [x, ctrl, 0x41]
@@ -174,6 +178,10 @@ profiles:
 #endif
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	CHECK(o.features.forwarded_address_discovery.port == 55001 && o.features.forwarded_address_discovery.window_ms == 1500);
+#endif
+#ifdef LAGSW_FEATURE_NETFILTER_MONITOR
+	CHECK(o.features.netfilter_monitor.enabled && o.features.netfilter_monitor.interval_ms == 500 &&
+		  o.features.netfilter_monitor.backlog_threshold == 42);
 #endif
 
 	const ProfileOptions& a = o.profiles[0];

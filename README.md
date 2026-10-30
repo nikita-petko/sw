@@ -77,6 +77,7 @@ profiles file is skipped with a warning. Toggle them when configuring:
 | `pcap_files` | `--pcap_files=y\|n` | `n` |
 | `desync_countdown` | `--desync_countdown=y\|n` | `y` |
 | `forwarded_address_discovery` | `--forwarded_address_discovery=y\|n` | `y` |
+| `netfilter_monitor` | `--netfilter_monitor=y\|n` | `y` |
 
 ```powershell
 xmake f -m release --pcap_files=y --region_enforcement=n
@@ -371,6 +372,29 @@ features:
 | `display` | No | `alongside` (default) shows the countdown next to profile activations; `override` shows it instead of the profile's activation status; `until_reactivated` hides it once the profile is reactivated. |
 | `duration_percent` | No | Estimated desync duration as a percentage of the selected profile's active duration. Defaults to `80`; valid values are `1`-`100`. |
 | `enabled_for` | Yes when enabled | `"*"` for every profile, or a non-empty list of configured profile names. |
+
+The optional `netfilter_monitor` feature shows an extra status line, below the
+main one, with the health of the Linux nfqueue backend: for each bound queue the
+packets waiting in the kernel, the kernel-queue and netlink-socket drop counters
+(from `/proc/net/netfilter/nfnetlink_queue`), and whether the `inet lagsw`
+nftables table is still installed. The line ends with `[!]` when a queue is
+backlogged, drops increased since the last sample, or the table disappeared
+(for example after a firewall reload; capture rules use `bypass`, so traffic
+then flows unmanaged). Other backends show nothing. It is disabled by default.
+
+```yaml
+features:
+  netfilter_monitor:
+    enabled: true
+    interval: 1000
+    backlog_threshold: 1000
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `enabled` | No | Shows the extra status line. Defaults to `false`. |
+| `interval` | No | Minimum time between samples in milliseconds. Defaults to `1000`; minimum `100`. |
+| `backlog_threshold` | No | Waiting packets in the kernel queue at which the line is flagged. Defaults to `1000`. |
 
 Region enforcement delays TCP PSH packets from configured servers outside the
 currently selected server group. Use the Left and Right arrow keys to change

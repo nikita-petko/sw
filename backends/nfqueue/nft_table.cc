@@ -135,6 +135,17 @@ bool ensure_table(std::string& error)
 	return true;
 }
 
+bool table_present()
+{
+	{
+		std::lock_guard<std::mutex> lock(table_mutex);
+		if (!table_created)
+			return true;
+	}
+	std::string error;
+	return run_nft_impl(std::string("list table ") + kTable + "\n", error);
+}
+
 void remove_table()
 {
 	std::lock_guard<std::mutex> lock(table_mutex);

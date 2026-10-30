@@ -185,6 +185,30 @@
             "port"
           ],
           "additionalProperties": false
+        },
+        "netfilter_monitor": {
+          "type": "object",
+          "description": "Extra status line with NFQUEUE/nftables health (kernel queue depth and drops, table presence). Only reported by the Linux nfqueue backend.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false,
+              "description": "Whether the extra status line is shown."
+            },
+            "interval": {
+              "type": "integer",
+              "minimum": 100,
+              "default": 1000,
+              "description": "Minimum time between samples, in milliseconds."
+            },
+            "backlog_threshold": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1000,
+              "description": "Number of packets waiting in the kernel queue at which the line is flagged as backlogged."
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

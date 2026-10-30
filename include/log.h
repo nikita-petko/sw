@@ -2,6 +2,7 @@
 #define LOG_H_
 
 #include <string>
+#include <vector>
 #include <cstdint>
 
 namespace logging {
@@ -38,6 +39,8 @@ void write_styled(style message_style, const char* format, ...);
 void set_status(const std::string& status);
 /// Displays a persistent status line with optional right-aligned text.
 void set_status(const std::string& status, const std::string& right_status);
+/// Sets the lines shown below the persistent status line; an empty list removes them. Takes effect on the next set_status().
+void set_extra_status(const std::vector<std::string>& lines);
 /// Clears the persistent status line.
 void clear_status();
 

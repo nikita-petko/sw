@@ -87,4 +87,11 @@ std::string forwarded_address(uint32_t inbound_if_index, uint32_t outbound_if_in
 }
 #endif
 }  // namespace filters
+#ifdef LAGSW_FEATURE_NETFILTER_MONITOR
+std::string monitor_status(uint64_t, uint32_t)
+{
+	return {};
+}
+#endif
+
 }  // namespace backend

@@ -6,7 +6,7 @@ target("lagsw")
     add_includedirs("../include")
 
     -- Compile-time feature toggles, defined in the root xmake.lua
-    add_options("region_enforcement", "pcap_files", "desync_countdown", "forwarded_address_discovery")
+    add_options("region_enforcement", "pcap_files", "desync_countdown", "forwarded_address_discovery", "netfilter_monitor")
 
     -- Operating-system services (input, timers, HTTPS, ...), one implementation per platform
     if is_plat("windows") then

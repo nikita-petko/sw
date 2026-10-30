@@ -405,6 +405,11 @@ private:
 #else
 			{"forwarded_address_discovery", disabled},
 #endif
+#ifdef LAGSW_FEATURE_NETFILTER_MONITOR
+			{"netfilter_monitor", {&ProfilesParser::parse_netfilter_monitor, true}},
+#else
+			{"netfilter_monitor", disabled},
+#endif
 		};
 		return table;
 	}
@@ -517,6 +522,20 @@ private:
 				context_, parse_ulong(unquote(value), 1, 100), countdown.duration_percent, "desync_countdown duration_percent"));
 		if (key == "enabled_for")
 			return begin_enabled_for(value, indent, &countdown.enabled_for, "desync_countdown enabled_for value");
+		return Status::unhandled;
+	}
+#endif
+
+#ifdef LAGSW_FEATURE_NETFILTER_MONITOR
+	Status parse_netfilter_monitor(const std::string& key, const std::string& value, int)
+	{
+		NetfilterMonitorOptions& monitor = options_.features.netfilter_monitor;
+		if (key == "enabled")
+			return to_status(assign_bool(context_, value, monitor.enabled));
+		if (key == "interval")
+			return to_status(assign_number<uint64_t>(context_, parse_ullong(unquote(value), 100), monitor.interval_ms, "netfilter_monitor interval"));
+		if (key == "backlog_threshold")
+			return to_status(assign_number<uint32_t>(context_, parse_ulong(unquote(value), 1, 1000000), monitor.backlog_threshold, "netfilter_monitor backlog_threshold"));
 		return Status::unhandled;
 	}
 #endif

@@ -35,6 +35,9 @@ features:
       - "Long (Send - Instant Release)"
       - "Long (Send - Release Delay)"
 
+  netfilter_monitor:
+    enabled: true
+
   forwarded_address_discovery:
     enabled: false
     port: 55000
