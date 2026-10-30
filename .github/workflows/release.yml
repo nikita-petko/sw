@@ -1,0 +1,97 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (defaults to v<version> from src/xmake.lua)
+        required: false
+        type: string
+      prerelease:
+        description: Mark the release as a pre-release
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  LINUX_PACKAGES: libnetfilter-queue-dev libmnl-dev libnfnetlink-dev libcurl4-openssl-dev zlib1g-dev
+
+jobs:
+  build:
+    name: build / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+
+      - name: Install Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $LINUX_PACKAGES
+
+      - name: Configure
+        run: xmake f -m release -y
+
+      - name: Build
+        run: xmake build -v lagsw
+
+      - name: Package
+        run: xmake package -o dist lagsw
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lagsw-${{ runner.os }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: lagsw-*
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          tag="$INPUT_TAG"
+          if [ -z "$tag" ]; then
+            version=$(grep -oP 'set_version\("\K[^"]+' src/xmake.lua | head -n1)
+            tag="v$version"
+          fi
+          args=()
+          if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease); fi
+          ls -l dist
+          gh release create "$tag" dist/* \
+            --target "$GITHUB_SHA" \
+            --title "$tag" \
+            --generate-notes \
+            "${args[@]}"

@@ -1,0 +1,55 @@
+name: build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LINUX_PACKAGES: libnetfilter-queue-dev libmnl-dev libnfnetlink-dev libcurl4-openssl-dev zlib1g-dev
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+
+      - name: Install Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $LINUX_PACKAGES
+
+      - name: Configure
+        run: xmake f -m release -y
+
+      - name: Build
+        run: xmake build -v lagsw
+
+      - name: Package
+        run: xmake package -o dist lagsw
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lagsw-${{ runner.os }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error

@@ -1,5 +1,9 @@
 # lagsw
 
+[![tests](https://github.com/nikita-petko/sw/actions/workflows/tests.yml/badge.svg)](https://github.com/nikita-petko/sw/actions/workflows/tests.yml)
+[![build](https://github.com/nikita-petko/sw/actions/workflows/build.yml/badge.svg)](https://github.com/nikita-petko/sw/actions/workflows/build.yml)
+[![release](https://github.com/nikita-petko/sw/actions/workflows/release.yml/badge.svg)](https://github.com/nikita-petko/sw/actions/workflows/release.yml)
+
 ### Windows (WinDivert)
 
 ![](https://share.cdn.vmminfra.dev/petko-new/2026/10/powershell_04MIiHw9Ux.png)
