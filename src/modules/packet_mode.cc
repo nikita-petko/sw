@@ -38,12 +38,12 @@ bool get_tcp_numbers(const uint8_t* packet, uint32_t length, uint32_t& sequence,
 
 PacketMode::PacketMode(ProfileOptions options, const char* mode_name) : options_(std::move(options)), mode_name_(mode_name)
 {
-	LOG_DEBUG("packet mode init: %s (%s)", mode_name_, options_.name.c_str());
+	LOG_DEBUG_GROUP(logging::group::profile, "packet mode init: %s (%s)", mode_name_, options_.name.c_str());
 }
 
 PacketMode::~PacketMode()
 {
-	LOG_DEBUG("packet mode deinit: %s (%s)", mode_name_, options_.name.c_str());
+	LOG_DEBUG_GROUP(logging::group::profile, "packet mode deinit: %s (%s)", mode_name_, options_.name.c_str());
 }
 
 void PacketMode::prepare_packet_for_send(uint8_t* packet, uint32_t length, const backend::PacketMeta* address)
@@ -115,7 +115,7 @@ void PacketMode::capture(const uint8_t*				 packet,
 										   : sequence == queued_sequence && acknowledgment == queued_acknowledgment;
 				if (duplicate)
 				{
-					LOG_DEBUG("profile #%d - %s drop: duplicate TCP retransmission (mode = %s, sequence = %u, ack = %u)",
+					LOG_DEBUG_GROUP(logging::group::packet_drop, "profile #%d - %s drop: duplicate TCP retransmission (mode = %s, sequence = %u, ack = %u)",
 							  profile,
 							  options_.name.c_str(),
 							  retransmission_mode_name(options_.retransmission_mode),

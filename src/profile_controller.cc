@@ -242,10 +242,10 @@ void ProfileController::apply_switches()
 	{
 		if (!switch_profiles_[index])
 			continue;
-		LOG_DEBUG("Switching to profile %d", static_cast<int>(index + 1));
+		LOG_DEBUG_GROUP(logging::group::profile, "Switching to profile %d", static_cast<int>(index + 1));
 		setup_profile(index);
 		activation_key_held_[index] = active_profiles_[index];
-		LOG_DEBUG("Profile %d activated after disabling mutually exclusive profiles", static_cast<int>(index + 1));
+		LOG_DEBUG_GROUP(logging::group::profile, "Profile %d activated after disabling mutually exclusive profiles", static_cast<int>(index + 1));
 	}
 }
 
@@ -254,15 +254,15 @@ void ProfileController::update_hold_profile(size_t index)
 	[[maybe_unused]] const int profile = static_cast<int>(index + 1);
 	if (active_profiles_[index] && !running(index))
 	{
-		LOG_DEBUG("Setting up profile %d", profile);
+		LOG_DEBUG_GROUP(logging::group::profile, "Setting up profile %d", profile);
 		setup_profile(index);
-		LOG_DEBUG("Profile %d activated (hold mode)", profile);
+		LOG_DEBUG_GROUP(logging::group::profile, "Profile %d activated (hold mode)", profile);
 	}
 	if (!active_profiles_[index] && running(index))
 	{
-		LOG_DEBUG("Disabling profile %d", profile);
+		LOG_DEBUG_GROUP(logging::group::profile, "Disabling profile %d", profile);
 		schedule_teardown(index, false);
-		LOG_DEBUG("Profile %d deactivated (hold mode)", profile);
+		LOG_DEBUG_GROUP(logging::group::profile, "Profile %d deactivated (hold mode)", profile);
 	}
 }
 
@@ -274,34 +274,34 @@ void ProfileController::update_toggle_profile(size_t index)
 		return;
 	if (shared_profiles_running_[index] && running(index) && is_toggle_release_mode(options.delay_mode))
 	{
-		LOG_DEBUG("Toggling profile %d", profile);
+		LOG_DEBUG_GROUP(logging::group::profile, "Toggling profile %d", profile);
 		if (engine_.toggle(profile))
 		{
 			schedule_teardown(index, false);
-			LOG_DEBUG("Profile %d released and deactivated (%s mode)", profile, toggle_release_mode_name(options.delay_mode));
+			LOG_DEBUG_GROUP(logging::group::profile, "Profile %d released and deactivated (%s mode)", profile, toggle_release_mode_name(options.delay_mode));
 		}
 	}
 	else if (shared_profiles_running_[index] && running(index))
 	{
 		if (disable_at_[index] != 0)
 		{
-			LOG_DEBUG("Restarting profile %d during disable wait", profile);
+			LOG_DEBUG_GROUP(logging::group::profile, "Restarting profile %d during disable wait", profile);
 			schedule_teardown(index, true);
 			setup_profile(index);
-			LOG_DEBUG("Profile %d restarted (toggle mode)", profile);
+			LOG_DEBUG_GROUP(logging::group::profile, "Profile %d restarted (toggle mode)", profile);
 		}
 		else
 		{
-			LOG_DEBUG("Disabling profile %d", profile);
+			LOG_DEBUG_GROUP(logging::group::profile, "Disabling profile %d", profile);
 			schedule_teardown(index, false);
-			LOG_DEBUG("Profile %d deactivated (toggle mode)", profile);
+			LOG_DEBUG_GROUP(logging::group::profile, "Profile %d deactivated (toggle mode)", profile);
 		}
 	}
 	else
 	{
-		LOG_DEBUG("Setting up profile %d", profile);
+		LOG_DEBUG_GROUP(logging::group::profile, "Setting up profile %d", profile);
 		setup_profile(index);
-		LOG_DEBUG("Profile %d activated (toggle mode)", profile);
+		LOG_DEBUG_GROUP(logging::group::profile, "Profile %d activated (toggle mode)", profile);
 	}
 }
 
@@ -317,7 +317,7 @@ void ProfileController::update_profile(size_t index)
 	}
 	if (send_key_pressed && running(index))
 	{
-		LOG_DEBUG("Flushing packets for profile %d on send_key", profile);
+		LOG_DEBUG_GROUP(logging::group::profile, "Flushing packets for profile %d on send_key", profile);
 		engine_.flush_on_demand(profile);
 	}
 	if (options_.profiles[index].mode == ProfileActivationMode::hold)

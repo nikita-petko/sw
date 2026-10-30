@@ -1,4 +1,5 @@
 // Unit tests for the human-readable option formatting used in the loaded-profile listing (src/format.cc).
+#include <cstring>
 #include <string>
 
 #include "format.h"
@@ -134,6 +135,85 @@ void test_format_duration()
 	CHECK(logging::format_duration(61000) == "1m 1s");
 	CHECK(logging::format_duration(3600000) == "60m");
 }
+void test_log_group_registry()
+{
+	const auto& registry = logging::groups();
+	CHECK(!registry.empty());
+	CHECK(logging::group_stats().size() == registry.size());
+	for (const logging::group_info& group : registry)
+	{
+		CHECK(group.name != nullptr && group.name[0] != '\0');
+		CHECK(group.description != nullptr && group.description[0] != '\0');
+	}
+}
+
+void test_log_group_rules()
+{
+	std::string error;
+	CHECK(logging::group_enabled(logging::group::discovery_packet));
+
+	// The most specific rule wins, regardless of the order the rules were given
+	CHECK(logging::set_groups("-discovery,+discovery.stats", error));
+	CHECK(!logging::group_enabled(logging::group::discovery));
+	CHECK(!logging::group_enabled(logging::group::discovery_packet));
+	CHECK(logging::group_enabled(logging::group::discovery_stats));
+	CHECK(logging::group_enabled(logging::group::region));
+
+	CHECK(logging::set_groups("all,-region_client_does_not_match", error) == false);
+	CHECK(error.find("region_client_does_not_match") != std::string::npos);
+	CHECK(!logging::group_enabled(logging::group::discovery));
+
+	CHECK(logging::set_groups("-all,+packet.recv", error));
+	CHECK(!logging::group_enabled(logging::group::profile));
+	CHECK(logging::group_enabled(logging::group::packet_recv));
+	CHECK(!logging::group_enabled(logging::group::packet_send));
+
+	CHECK(!logging::set_groups("", error));
+	CHECK(!logging::set_groups("discovery,,region", error));
+	CHECK(logging::group_enabled(logging::group::packet_recv));
+
+	CHECK(logging::set_groups("all", error));
+	CHECK(logging::group_enabled(logging::group::discovery_packet));
+}
+
+void test_log_group_counts()
+{
+	const auto index_of = [](const char* name) {
+		const auto& registry = logging::groups();
+		for (size_t index = 0; index < registry.size(); ++index)
+			if (std::strcmp(registry[index].name, name) == 0)
+				return index;
+		return registry.size();
+	};
+	const size_t index = index_of(logging::group::discovery_packet);
+	CHECK(index < logging::groups().size());
+	const auto before = logging::group_stats()[index];
+
+	std::string error;
+	logging::set_level(logging::level::debug);
+	CHECK(logging::set_groups("all", error));
+	CHECK(logging::group_accepts(logging::group::discovery_packet, logging::level::debug));
+	CHECK(logging::group_accepts(logging::group::discovery_packet, logging::level::error));
+
+	// Warnings and errors are never muted; debug and info are counted as muted instead
+	CHECK(logging::set_groups("-discovery.packet", error));
+	CHECK(!logging::group_accepts(logging::group::discovery_packet, logging::level::debug));
+	CHECK(!logging::group_accepts(logging::group::discovery_packet, logging::level::info));
+	CHECK(logging::group_accepts(logging::group::discovery_packet, logging::level::warn));
+
+	// A message below the minimum level never reaches the log, so it is not counted at all
+	logging::set_level(logging::level::info);
+	CHECK(!logging::group_accepts(logging::group::discovery_packet, logging::level::debug));
+	CHECK(logging::set_groups("all", error));
+
+	const auto after = logging::group_stats()[index];
+	CHECK(after.by_level[static_cast<size_t>(logging::level::debug)] - before.by_level[static_cast<size_t>(logging::level::debug)] == 1);
+	CHECK(after.by_level[static_cast<size_t>(logging::level::error)] - before.by_level[static_cast<size_t>(logging::level::error)] == 1);
+	CHECK(after.by_level[static_cast<size_t>(logging::level::warn)] - before.by_level[static_cast<size_t>(logging::level::warn)] == 1);
+	CHECK(after.by_level[static_cast<size_t>(logging::level::info)] == before.by_level[static_cast<size_t>(logging::level::info)]);
+	CHECK(after.muted - before.muted == 2);
+	CHECK(after.written() - before.written() == 3);
+}
 }  // namespace
 
 int main(int argc, char** argv)
@@ -147,6 +227,9 @@ int main(int argc, char** argv)
 		{"delay_description", test_delay_description},
 		{"ratio_and_group_description", test_ratio_and_group_description},
 		{"format_duration", test_format_duration},
+		{"log_group_registry", test_log_group_registry},
+		{"log_group_rules", test_log_group_rules},
+		{"log_group_counts", test_log_group_counts},
 	};
 	return test::run_tests("format", cases, argc, argv);
 }

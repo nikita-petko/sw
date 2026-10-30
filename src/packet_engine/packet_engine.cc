@@ -14,8 +14,8 @@ void log_profile_enabled([[maybe_unused]] int profile,
 						[[maybe_unused]] const std::string& capture_filter,
 						[[maybe_unused]] bool forward)
 {
-	LOG_DEBUG("profile #%d - %s setup: opening handle", profile, profile_options.name.c_str());
-	LOG_DEBUG("profile #%d - %s setup: backend = %s, forward = %d, filter = %s",
+	LOG_DEBUG_GROUP(logging::group::profile, "profile #%d - %s setup: opening handle", profile, profile_options.name.c_str());
+	LOG_DEBUG_GROUP(logging::group::profile, "profile #%d - %s setup: backend = %s, forward = %d, filter = %s",
 			  profile,
 			  profile_options.name.c_str(),
 			  backend::name(),
@@ -176,7 +176,7 @@ void PacketEngine::flush_on_demand(int profile)
 
 void PacketEngine::teardown(int profile)
 {
-	LOG_DEBUG("profile #%d teardown: requested", profile);
+	LOG_DEBUG_GROUP(logging::group::profile, "profile #%d teardown: requested", profile);
 	uint64_t				 enabled_time = 0;
 	std::shared_ptr<Session> session;
 	{
@@ -186,7 +186,7 @@ void PacketEngine::teardown(int profile)
 		session = state_->active_sessions[profile - 1];
 		if (!session)
 			return;
-		LOG_DEBUG("profile #%d - %s teardown: stopping workers", profile, options_.profiles[profile - 1].name.c_str());
+		LOG_DEBUG_GROUP(logging::group::profile, "profile #%d - %s teardown: stopping workers", profile, options_.profiles[profile - 1].name.c_str());
 		State::ProfileStats& stats = state_->profile_stats[profile - 1];
 		enabled_time			   = platform::tick_ms() - stats.enabled_since;
 		stats.last_enabled_time	   = enabled_time;

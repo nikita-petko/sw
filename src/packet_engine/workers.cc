@@ -27,7 +27,7 @@ void PacketEngine::start_discovery_worker()
 	open_options.sniff	= true;
 	open_options.include_forward = true;
 	std::string open_error;
-	LOG_DEBUG("Server discovery setup: opening sniff channel with filter '%s'", filter.c_str());
+	LOG_DEBUG_GROUP(logging::group::discovery, "Server discovery setup: opening sniff channel with filter '%s'", filter.c_str());
 	state_->discovery_handle = backend::open(open_options, open_error);
 	if (!state_->discovery_handle)
 	{

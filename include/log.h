@@ -44,6 +44,62 @@ void set_extra_status(const std::vector<std::string>& lines);
 /// Clears the persistent status line.
 void clear_status();
 
+/// Log groups subdivide chatty output so a single source can be muted without lowering the log level.
+/// Names are dotted; a child (such as "discovery.packet") can be toggled on its own, while toggling its
+/// parent (such as "discovery") affects every child that has no rule of its own.
+/// Muting a group hides its debug and info messages only; warnings and errors are always written.
+/// Every group is listed in the registry returned by groups(), which also tracks per-level message counts.
+namespace group {
+inline constexpr const char* profile			 = "profile";			  ///< Profile activation, setup, and teardown.
+inline constexpr const char* input				 = "input";				  ///< Keyboard input.
+inline constexpr const char* backend			 = "backend";			  ///< Packet backend internals.
+inline constexpr const char* http				 = "http";				  ///< HTTPS requests.
+inline constexpr const char* packet				 = "packet";			  ///< All per-packet profile traffic.
+inline constexpr const char* packet_recv		 = "packet.recv";		  ///< Packets received by a profile.
+inline constexpr const char* packet_send		 = "packet.send";		  ///< Packets sent or flushed by a profile.
+inline constexpr const char* packet_drop		 = "packet.drop";		  ///< Packets dropped by a profile.
+inline constexpr const char* discovery			 = "discovery";			  ///< Server discovery lifecycle and decisions.
+inline constexpr const char* discovery_stats	 = "discovery.stats";	  ///< Periodic server discovery capture totals.
+inline constexpr const char* discovery_packet	 = "discovery.packet";	  ///< Every packet seen by server discovery.
+inline constexpr const char* forwarded			 = "forwarded";			  ///< Forwarded address discovery windows and results.
+inline constexpr const char* forwarded_packet	 = "forwarded.packet";	  ///< Every packet seen by forwarded address discovery.
+inline constexpr const char* region				 = "region";			  ///< Server region lookups.
+inline constexpr const char* region_client		 = "region.client";		  ///< Client region lookup.
+inline constexpr const char* enforcement		 = "enforcement";		  ///< Region enforcement decisions.
+inline constexpr const char* enforcement_packet	 = "enforcement.packet";  ///< Every packet delayed or sent by region enforcement.
+}  // namespace group
+
+/// A registered log group.
+struct group_info
+{
+	const char* name;		 ///< Dotted group name, as accepted by set_groups().
+	const char* description; ///< One-line summary of what the group logs.
+};
+
+/// Message counts for one group since startup, indexed like groups().
+struct group_counts
+{
+	std::uint64_t by_level[4] = {}; ///< Messages written, indexed by level (error, warn, info, debug).
+	std::uint64_t muted		  = 0;	///< Debug and info messages dropped because the group is muted.
+
+	std::uint64_t written() const { return by_level[0] + by_level[1] + by_level[2] + by_level[3]; }
+};
+
+/// Returns the registry of every known log group.
+const std::vector<group_info>& groups();
+/// Returns a snapshot of the message counts of every group, in the same order as groups().
+std::vector<group_counts> group_stats();
+/// Applies a comma-separated list of group rules, e.g. "-discovery.packet,-packet". A bare or "+"-prefixed name
+/// enables a group, a "-"-prefixed name disables it, and "all" matches every group and discards all earlier rules.
+/// The most specific rule wins. Rules from repeated calls accumulate.
+/// Returns false and describes the problem in error when a name is unknown; no rules are applied in that case.
+bool set_groups(const std::string& spec, std::string& error);
+/// Returns whether debug and info messages in the given group are currently written. Every group is enabled by default.
+bool group_enabled(const char* group_name);
+/// Counts a message in the given group and returns whether it should be written, i.e. it passes the minimum
+/// level and its group is not muted. Used by the LOG_*_GROUP macros so muted messages never evaluate their arguments.
+bool group_accepts(const char* group_name, level message_level);
+
 } // namespace logging
 
 #define LOG_ERROR(message, ...) logging::write(logging::level::error, message, ##__VA_ARGS__)
@@ -54,10 +110,22 @@ void clear_status();
 #define LOG_SERVER(message, ...) logging::write_styled(logging::style::server, message, ##__VA_ARGS__)
 #define LOG_REGION(message, ...) logging::write_styled(logging::style::region, message, ##__VA_ARGS__)
 #define LOG_DETAIL(message, ...) logging::write_styled(logging::style::detail, message, ##__VA_ARGS__)
+// The group check short-circuits, so arguments are not evaluated for a muted or level-filtered message.
+#define LOG_GROUP_IMPL(group_name, message_level, message, ...)                      \
+	do                                                                               \
+	{                                                                                \
+		if (logging::group_accepts(group_name, message_level))                       \
+			logging::write(message_level, message, ##__VA_ARGS__);                   \
+	} while (0)
+#define LOG_ERROR_GROUP(group_name, message, ...) LOG_GROUP_IMPL(group_name, logging::level::error, message, ##__VA_ARGS__)
+#define LOG_WARN_GROUP(group_name, message, ...) LOG_GROUP_IMPL(group_name, logging::level::warn, message, ##__VA_ARGS__)
+#define LOG_INFO_GROUP(group_name, message, ...) LOG_GROUP_IMPL(group_name, logging::level::info, message, ##__VA_ARGS__)
 #ifdef NDEBUG
 #define LOG_DEBUG(...) ((void)0)
+#define LOG_DEBUG_GROUP(...) ((void)0)
 #else
 #define LOG_DEBUG(message, ...) logging::write(logging::level::debug, message, ##__VA_ARGS__)
+#define LOG_DEBUG_GROUP(group_name, message, ...) LOG_GROUP_IMPL(group_name, logging::level::debug, message, ##__VA_ARGS__)
 #endif
 
 #endif // LOG_H_

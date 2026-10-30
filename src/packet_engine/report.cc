@@ -1,6 +1,7 @@
 #include "internal.h"
 
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 
 #include "log.h"
@@ -30,10 +31,41 @@ struct DiscoveryReport
 	std::unordered_map<std::string, std::string>  regions;
 };
 
-/// The width of the report box: wide enough for the longest profile label and the longest possible enabled-time line.
-size_t report_width(const PacketEngineOptions& options)
+/// One state line per log group that has logged or muted anything, e.g. "discovery.packet  err 0, warn 0, info 0, debug 12 (muted 3)".
+std::vector<std::string> log_group_lines()
+{
+	const auto&				   registry = logging::groups();
+	const auto				   stats	= logging::group_stats();
+	size_t					   name_width = 0;
+	for (size_t index = 0; index < registry.size(); ++index)
+		if (stats[index].written() != 0 || stats[index].muted != 0)
+			name_width = (std::max)(name_width, std::strlen(registry[index].name));
+
+	std::vector<std::string> lines;
+	for (size_t index = 0; index < registry.size(); ++index)
+	{
+		const logging::group_counts& counts = stats[index];
+		if (counts.written() == 0 && counts.muted == 0)
+			continue;
+		std::string name = registry[index].name;
+		name.resize(name_width, ' ');
+		std::string line = name + "  err " + highlight(std::to_string(counts.by_level[static_cast<size_t>(logging::level::error)])) + ", warn " +
+						   highlight(std::to_string(counts.by_level[static_cast<size_t>(logging::level::warn)])) + ", info " +
+						   highlight(std::to_string(counts.by_level[static_cast<size_t>(logging::level::info)])) + ", debug " +
+						   highlight(std::to_string(counts.by_level[static_cast<size_t>(logging::level::debug)]));
+		if (counts.muted != 0)
+			line += " (" + highlight(std::to_string(counts.muted)) + " muted)";
+		lines.push_back(std::move(line));
+	}
+	return lines;
+}
+
+/// The width of the report box: wide enough for the longest profile label, the longest possible enabled-time line, and the log group lines.
+size_t report_width(const PacketEngineOptions& options, const std::vector<std::string>& group_lines)
 {
 	size_t width = 53;
+	for (const std::string& line : group_lines)
+		width = (std::max)(width, visible_length(line) + 4);
 	for (size_t index = 0; index < options.profiles.size(); ++index)
 	{
 		const std::string label = "profile #" + std::to_string(index + 1) + " - " + options.profiles[index].name;
@@ -136,7 +168,8 @@ void PacketEngine::print_state() const
 		return left.first < right.first;
 	});
 
-	const size_t state_width = report_width(options_);
+	const std::vector<std::string> group_lines = log_group_lines();
+	const size_t				   state_width = report_width(options_, group_lines);
 	LOG_INFO("+%s+", std::string(state_width - 2, '-').c_str());
 	log_state_line(state_width, "status:          " + highlight(running_ ? "RUNNING" : "STOPPED"));
 	for (size_t index = 0; index < options_.profiles.size(); ++index)
@@ -186,5 +219,12 @@ void PacketEngine::print_state() const
 		LOG_INFO("%s", format_state_divider(state_width).c_str());
 	}
 #endif
+	if (!group_lines.empty())
+	{
+		LOG_INFO("%s", format_state_divider(state_width, "log groups").c_str());
+		for (const std::string& line : group_lines)
+			log_state_line(state_width, line);
+		LOG_INFO("%s", format_state_divider(state_width).c_str());
+	}
 	LOG_INFO("+%s+", std::string(state_width - 2, '-').c_str());
 }

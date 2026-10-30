@@ -31,7 +31,7 @@ bool check_privileges(std::string& error)
 
 std::unique_ptr<PacketChannel> open(const OpenOptions& options, std::string& error)
 {
-	LOG_DEBUG("stub backend: open requested for filter '%s'", options.filter.c_str());
+	LOG_DEBUG_GROUP(logging::group::backend, "stub backend: open requested for filter '%s'", options.filter.c_str());
 	(void)options;
 	error = kNotImplemented;
 	return nullptr;

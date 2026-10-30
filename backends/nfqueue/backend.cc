@@ -87,7 +87,7 @@ public:
 		nfq_set_queue_maxlen(queue_, kQueueMaxLength);
 		// Fail open when the queue overflows; GSO lets the kernel pass large offloaded packets instead of dropping them.
 		if (nfq_set_queue_flags(queue_, NFQA_CFG_F_FAIL_OPEN | NFQA_CFG_F_GSO, NFQA_CFG_F_FAIL_OPEN | NFQA_CFG_F_GSO) < 0)
-			LOG_DEBUG("nfqueue: queue flags are not supported by this kernel");
+			LOG_DEBUG_GROUP(logging::group::backend, "nfqueue: queue flags are not supported by this kernel");
 		fd_ = nfq_fd(handle_);
 		int enable = 1;
 		::setsockopt(fd_, SOL_NETLINK, NETLINK_NO_ENOBUFS, &enable, sizeof(enable));
@@ -112,7 +112,7 @@ public:
 				const NativeMeta* native = reinterpret_cast<const NativeMeta*>(packet.meta.native);
 				if (packet.data.size() > capacity)
 				{
-					LOG_DEBUG("nfqueue: accepting %zu byte packet larger than the receive buffer unchanged", packet.data.size());
+					LOG_DEBUG_GROUP(logging::group::backend, "nfqueue: accepting %zu byte packet larger than the receive buffer unchanged", packet.data.size());
 					verdict(native->packet_id, NF_ACCEPT, nullptr, 0);
 					continue;
 				}
@@ -183,7 +183,7 @@ public:
 		{
 			const uint64_t one = 1;
 			if (::write(event_fd_, &one, sizeof(one)) < 0)
-				LOG_DEBUG("nfqueue: failed to wake the receive loop");
+				LOG_DEBUG_GROUP(logging::group::backend, "nfqueue: failed to wake the receive loop");
 		}
 	}
 

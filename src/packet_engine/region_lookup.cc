@@ -242,7 +242,7 @@ void load_region_cache(std::unordered_map<std::string, RegionCacheEntry>& cache)
 		}
 		catch (const std::exception&)
 		{
-			LOG_DEBUG("Ignoring malformed region cache entry");
+			LOG_DEBUG_GROUP(logging::group::region, "Ignoring malformed region cache entry");
 		}
 	}
 }
@@ -273,7 +273,7 @@ HttpResponse https_get_until_not_rate_limited(const std::string& host, const std
 		if (response.status != 429)
 			return response;
 		const uint32_t delay_seconds = response.retry_after_seconds == 0 ? 1 : response.retry_after_seconds;
-		LOG_DEBUG("https_get: rate limited, retrying in %u second(s)", delay_seconds);
+		LOG_DEBUG_GROUP(logging::group::http, "https_get: rate limited, retrying in %u second(s)", delay_seconds);
 		const uint32_t delay_ms =
 			delay_seconds > (std::numeric_limits<uint32_t>::max)() / 1000 ? (std::numeric_limits<uint32_t>::max)() : delay_seconds * 1000;
 		platform::sleep_ms(delay_ms);

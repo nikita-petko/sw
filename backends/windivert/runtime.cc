@@ -56,7 +56,7 @@ bool extract_resource(int resource_id, const std::filesystem::path& path)
 	if (!success)
 		LOG_ERROR("Could not write embedded WinDivert file '%s' (error %lu)", path.string().c_str(), error);
 	else
-		LOG_DEBUG("Extracted embedded WinDivert resource to '%s' (%lu bytes)", path.string().c_str(), size);
+		LOG_DEBUG_GROUP(logging::group::backend, "Extracted embedded WinDivert resource to '%s' (%lu bytes)", path.string().c_str(), size);
 	return success;
 }
 

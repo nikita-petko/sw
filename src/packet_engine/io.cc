@@ -14,7 +14,7 @@ void log_received_packet([[maybe_unused]] const std::string& profile_label, cons
 	{
 		const TcpHeader* tcp_header = parsed.tcp;
 		(void)tcp_header;
-		LOG_DEBUG("%s recv: TCP packet: Length = %u, Flags = %s, Sequence = %u, Ack = %u, Src = %s, Dst = %s",
+		LOG_DEBUG_GROUP(logging::group::packet_recv, "%s recv: TCP packet: Length = %u, Flags = %s, Sequence = %u, Ack = %u, Src = %s, Dst = %s",
 				  profile_label.c_str(),
 				  received_length,
 				  format_tcp_flags(*tcp_header).c_str(),
@@ -25,7 +25,7 @@ void log_received_packet([[maybe_unused]] const std::string& profile_label, cons
 	}
 	else
 	{
-		LOG_DEBUG("%s recv: packet: Length = %u, Src = %s, Dst = %s",
+		LOG_DEBUG_GROUP(logging::group::packet_recv, "%s recv: packet: Length = %u, Src = %s, Dst = %s",
 				  profile_label.c_str(),
 				  received_length,
 				  addresses.source.c_str(),
@@ -57,7 +57,7 @@ uint32_t transmit_packet(PacketMode&				mode,
 		ParsedPacket						  parsed;
 		[[maybe_unused]] const bool			  has_tcp_header = parse_packet(node->packet, node->length, parsed) && parsed.tcp != nullptr;
 		[[maybe_unused]] const TcpHeader*	  tcp_header	 = parsed.tcp;
-		LOG_DEBUG("%s %s: Length = %u, Flags = %s, Src = %s, Dst = %s, SendLen = %u",
+		LOG_DEBUG_GROUP(logging::group::packet_send, "%s %s: Length = %u, Flags = %s, Src = %s, Dst = %s, SendLen = %u",
 				  profile_label.c_str(),
 				  success,
 				  node->length,
@@ -165,5 +165,5 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 			destroy_packet_node(node);
 		}
 	}
-	LOG_DEBUG("%s flush: stopped", profile_label.c_str());
+	LOG_DEBUG_GROUP(logging::group::packet_send, "%s flush: stopped", profile_label.c_str());
 }

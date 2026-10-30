@@ -81,13 +81,16 @@ private:
 			if (waited < window_ms)
 				continue;
 			waited = 0;
-			[[maybe_unused]] const uint64_t received = counters.received.exchange(0);
-			LOG_DEBUG("Server discovery: last %s: %llu packets captured (%llu skipped while a profile was active, %llu unparsable)%s",
-					  logging::format_duration(window_ms).c_str(),
-					  static_cast<unsigned long long>(received),
-					  static_cast<unsigned long long>(counters.suppressed.exchange(0)),
-					  static_cast<unsigned long long>(counters.unparsed.exchange(0)),
-					  received == 0 ? " - no packets hit the discovery filter" : "");
+			[[maybe_unused]] const uint64_t received   = counters.received.exchange(0);
+			[[maybe_unused]] const uint64_t suppressed = counters.suppressed.exchange(0);
+			[[maybe_unused]] const uint64_t unparsed   = counters.unparsed.exchange(0);
+			LOG_DEBUG_GROUP(logging::group::discovery_stats,
+							"Server discovery: last %s: %llu packets captured (%llu skipped while a profile was active, %llu unparsable)%s",
+							logging::format_duration(window_ms).c_str(),
+							static_cast<unsigned long long>(received),
+							static_cast<unsigned long long>(suppressed),
+							static_cast<unsigned long long>(unparsed),
+							received == 0 ? " - no packets hit the discovery filter" : "");
 		}
 	}
 
@@ -109,7 +112,7 @@ void PacketEngine::discover_packets()
 	DiscoveryScan	   scan(platform::tick_ms());
 	DiscoveryHeartbeat heartbeat(scan.counters, options_.discovery_window_ms);
 	uint8_t			   packet_data[0xFFFF];
-	LOG_DEBUG("Server discovery: capture loop started, waiting for packets");
+	LOG_DEBUG_GROUP(logging::group::discovery, "Server discovery: capture loop started, waiting for packets");
 	while (!shutdown_)
 	{
 		backend::PacketMeta address;
@@ -124,11 +127,11 @@ void PacketEngine::discover_packets()
 		}
 		else if (!shutdown_ && recv_status == backend::IoStatus::error)
 		{
-			LOG_ERROR("Server discovery recv: %s", io_error.c_str());
+			LOG_ERROR_GROUP(logging::group::discovery, "Server discovery recv: %s", io_error.c_str());
 		}
 		else if (!shutdown_)
 		{
-			LOG_DEBUG("Server discovery: recv returned status %d without a packet", static_cast<int>(recv_status));
+			LOG_DEBUG_GROUP(logging::group::discovery_packet, "Server discovery: recv returned status %d without a packet", static_cast<int>(recv_status));
 		}
 
 		const uint64_t now = platform::tick_ms();
@@ -143,11 +146,11 @@ bool PacketEngine::scan_discovery_packet(DiscoveryScan& scan, const uint8_t* pac
 {
 	++scan.counters.received;
 	if (++scan.total_received == 1)
-		LOG_DEBUG("Server discovery: first packet captured (%u bytes)", length);
+		LOG_DEBUG_GROUP(logging::group::discovery, "Server discovery: first packet captured (%u bytes)", length);
 	if (running_.load())
 	{
 		if (!scan.was_running)
-			LOG_DEBUG("Server discovery disabled while a profile is active");
+			LOG_DEBUG_GROUP(logging::group::discovery, "Server discovery disabled while a profile is active");
 		++scan.counters.suppressed;
 		scan.was_running = true;
 		scan.packet_counts.clear();
@@ -160,7 +163,7 @@ bool PacketEngine::scan_discovery_packet(DiscoveryScan& scan, const uint8_t* pac
 	}
 	if (scan.was_running)
 	{
-		LOG_DEBUG("Server discovery enabled after all profiles were deactivated");
+		LOG_DEBUG_GROUP(logging::group::discovery, "Server discovery enabled after all profiles were deactivated");
 		scan.was_running	= false;
 		scan.window_started = platform::tick_ms();
 	}
@@ -168,21 +171,22 @@ bool PacketEngine::scan_discovery_packet(DiscoveryScan& scan, const uint8_t* pac
 	if (!parse_packet(packet_data, length, parsed))
 	{
 		++scan.counters.unparsed;
-		LOG_DEBUG("Server discovery: ignoring unparsable packet (%u bytes)", length);
+		LOG_DEBUG_GROUP(logging::group::discovery_packet, "Server discovery: ignoring unparsable packet (%u bytes)", length);
 		return true;
 	}
 	const std::string address_text = endpoint_address(parsed, server_is_destination(parsed, meta, *options_.discovery_port));
 	if (address_text.empty())
 	{
-		LOG_DEBUG("Server discovery: packet has no usable IP address");
+		LOG_DEBUG_GROUP(logging::group::discovery_packet, "Server discovery: packet has no usable IP address");
 		return true;
 	}
-	LOG_DEBUG("Server discovery: %s packet, %u bytes, %s, counted for server %s (if_index = %u)",
-			  meta.outbound ? "outbound" : "inbound",
-			  length,
-			  parsed.tcp ? format_tcp_flags(*parsed.tcp).c_str() : (parsed.udp ? "UDP" : "-"),
-			  address_text.c_str(),
-			  meta.if_index);
+	LOG_DEBUG_GROUP(logging::group::discovery_packet,
+					"Server discovery: %s packet, %u bytes, %s, counted for server %s (if_index = %u)",
+					meta.outbound ? "outbound" : "inbound",
+					length,
+					parsed.tcp ? format_tcp_flags(*parsed.tcp).c_str() : (parsed.udp ? "UDP" : "-"),
+					address_text.c_str(),
+					meta.if_index);
 	count_discovered_server(scan, address_text);
 	return true;
 }
@@ -205,11 +209,11 @@ void PacketEngine::count_discovered_server(DiscoveryScan& scan, const std::strin
 		{
 			if (is_public_address(address_text))
 			{
-				LOG_DEBUG("Server discovery: '%s' is public, triggering region lookup", address_text.c_str());
+				LOG_DEBUG_GROUP(logging::group::discovery, "Server discovery: '%s' is public, triggering region lookup", address_text.c_str());
 				resolve_region(address_text, configured_server);
 			}
 			else
-				LOG_DEBUG("Server discovery: '%s' is private/local, skipping region lookup", address_text.c_str());
+				LOG_DEBUG_GROUP(logging::group::discovery, "Server discovery: '%s' is private/local, skipping region lookup", address_text.c_str());
 		}
 	}
 	++scan.packet_counts[address_text];

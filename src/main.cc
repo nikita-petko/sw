@@ -121,7 +121,7 @@ int main(int argc, char* argv[])
 	{
 		const int key = platform::read_key();
 		if (key != -1)
-			LOG_DEBUG("Input received: %d", key);
+			LOG_DEBUG_GROUP(logging::group::input, "Input received: %d", key);
 
 		const KeyAction action = handle_command_key(engine, key);
 		if (action == KeyAction::quit)

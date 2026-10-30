@@ -1,5 +1,6 @@
 #include "options.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -68,6 +69,31 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 #endif
 				logging::set_level(requested_level);
 		}
+		else if (std::strcmp(argv[index], "--log-group") == 0 || std::strcmp(argv[index], "-g") == 0)
+		{
+			if (index + 1 >= argc)
+			{
+				LOG_ERROR("--log-group requires a comma-separated list of debug log groups, e.g. -discovery.packet");
+				return false;
+			}
+
+			std::string error;
+			if (!logging::set_groups(argv[++index], error))
+			{
+				LOG_ERROR("--log-group: %s (use --help to list the groups)", error.c_str());
+				return false;
+			}
+		}
+		else if (std::strcmp(argv[index], "--print-log-groups") == 0)
+		{
+			size_t name_width = 0;
+			for (const logging::group_info& group : logging::groups())
+				name_width = (std::max)(name_width, std::strlen(group.name));
+			std::printf("Log groups (toggle with --log-group):\n");
+			for (const logging::group_info& group : logging::groups())
+				std::printf("  %-*s  %s\n", static_cast<int>(name_width), group.name, group.description);
+			return false;
+		}
 		else if (std::strcmp(argv[index], "--server") == 0 || std::strcmp(argv[index], "-s") == 0)
 		{
 			if (index + 1 >= argc)
@@ -105,6 +131,9 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 			std::printf("Usage: %s [options]\nOptions:\n", argv[0]);
 			std::printf("  --config <file> Load profiles from YAML\n");
 			std::printf("  --log-level, -l <level> Set log level: error, warn, info, or debug\n");
+			std::printf("  --log-group, -g <rules> Toggle log groups, e.g. -discovery.packet,-packet.recv or all,+region\n");
+			std::printf("                          A name enables a group, a '-' prefix disables it, and the most specific rule wins\n");
+			std::printf("  --print-log-groups      List every log group and exit\n");
 			std::printf("  --server, -s <server> Select the initial configured server\n");
 			std::printf("  --client-address <address> Set both client source and destination addresses\n");
 			std::printf("  --client-source-address <address> Set the client source address\n");

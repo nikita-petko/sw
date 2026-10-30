@@ -198,7 +198,7 @@ void remove_channel_rules(ChannelChains& chains)
 		script += std::string("flush chain ") + kTable + " " + chain + "\ndelete chain " + kTable + " " + chain + "\n";
 	std::string error;
 	if (!run_nft_impl(script, error))
-		LOG_DEBUG("failed to remove nftables chains: %s", error.c_str());
+		LOG_DEBUG_GROUP(logging::group::backend, "failed to remove nftables chains: %s", error.c_str());
 	chains.names.clear();
 }
 }  // namespace nfq

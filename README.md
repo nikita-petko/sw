@@ -238,6 +238,8 @@ Options:
 | --- | --- |
 | `--config <file>` | Load profiles from a YAML file. Required. |
 | `--log-level <level>`, `-l <level>` | Set the minimum log level: `error`, `warn`, `info`, or `debug`. |
+| `--log-group <rules>`, `-g <rules>` | Mute or unmute log groups, a comma-separated list such as `-discovery.packet,-packet.recv`. A bare or `+` name enables a group, a `-` prefix disables it, and `all` matches every group and discards earlier rules. The most specific rule wins and a parent such as `discovery` covers its children. Only debug and info messages are muted; warnings and errors always show. Every group is on by default. |
+| `--print-log-groups` | List every log group with a description and exit. |
 | `--server <server>`, `-s <server>` | Select the initial configured server by name or address. Unknown values warn and use `none`. |
 | `--client-address <address>` | Set both the client source and destination addresses. |
 | `--client-source-address <address>` | Set the client source address. |
@@ -253,7 +255,9 @@ While the program is running:
   Releasing the key deactivates it.
 - Press `Tab` to print packet and activation statistics.
   When discovery is enabled, it also prints the current authoritative server
-  and a packet-ranked list for the active discovery window.
+  and a packet-ranked list for the active discovery window. A final `log groups`
+  section shows how many error, warn, info, and debug messages each log group
+  has written and how many were muted by `--log-group`.
 - Press Page Up or Page Down to cycle the configured server filter, including
   `none` (which applies no server filter).
 - When region enforcement is enabled, press Left or Right to cycle the enforced

@@ -51,7 +51,7 @@ private:
 		for (size_t index = 0; index < drop_count; ++index)
 		{
 			PacketNode* node = packets[index];
-			LOG_DEBUG("%s drop: %s packet: Length = %u, Timestamp = %llu",
+			LOG_DEBUG_GROUP(logging::group::packet_drop, "%s drop: %s packet: Length = %u, Timestamp = %llu",
 					  profile_label.c_str(),
 					  source,
 					  node->length,

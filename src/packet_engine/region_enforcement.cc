@@ -94,7 +94,7 @@ void PacketEngine::region_enforcement_recv()
 		const uint64_t release_at = now + delay_ms;
 
 		const PacketAddresses addresses = packet_addresses(packet_data, received_length);
-		LOG_DEBUG("Region enforcement recv: TCP PSH packet (delaying for %llums): Length = %u, Src = %s, Dst = %s",
+		LOG_DEBUG_GROUP(logging::group::enforcement_packet, "Region enforcement recv: TCP PSH packet (delaying for %llums): Length = %u, Src = %s, Dst = %s",
 				  static_cast<unsigned long long>(delay_ms),
 				  received_length,
 				  addresses.source.c_str(),
@@ -180,7 +180,7 @@ bool PacketEngine::send_due_enforcement_packets()
 		else if (sent != 0)
 		{
 			const PacketAddresses addresses = packet_addresses(pkt.data.data(), static_cast<uint32_t>(pkt.data.size()));
-			LOG_DEBUG("Region enforcement send: delayed packet: Length = %zu, Src = %s, Dst = %s, SendLen = %u",
+			LOG_DEBUG_GROUP(logging::group::enforcement_packet, "Region enforcement send: delayed packet: Length = %zu, Src = %s, Dst = %s, SendLen = %u",
 					  pkt.data.size(),
 					  addresses.source.c_str(),
 					  addresses.destination.c_str(),
@@ -207,7 +207,7 @@ void PacketEngine::flush_enforcement_queue()
 			sent != 0)
 		{
 			const PacketAddresses addresses = packet_addresses(pkt.data.data(), static_cast<uint32_t>(pkt.data.size()));
-			LOG_DEBUG("Region enforcement flush: sent packet: Length = %zu, Src = %s, Dst = %s, SendLen = %u",
+			LOG_DEBUG_GROUP(logging::group::enforcement_packet, "Region enforcement flush: sent packet: Length = %zu, Src = %s, Dst = %s, SendLen = %u",
 					  pkt.data.size(),
 					  addresses.source.c_str(),
 					  addresses.destination.c_str(),
@@ -298,7 +298,7 @@ void PacketEngine::log_probed_server(const std::string& server_address)
 	  });
 	if (server == options_.servers.end())
 	{
-		LOG_DEBUG("Unknown server '%s' was probed", server_address.c_str());
+		LOG_DEBUG_GROUP(logging::group::enforcement, "Unknown server '%s' was probed", server_address.c_str());
 		return;
 	}
 	const std::string server_region = !server->group.empty() ? server->group : server->name;
@@ -306,7 +306,7 @@ void PacketEngine::log_probed_server(const std::string& server_address)
 	if (enforced_region != "none" && !enforced_region.empty() && server_region == enforced_region)
 		LOG_SERVER("Server '%s' within enforced region '%s' was probed", label.c_str(), enforced_region.c_str());
 	else
-		LOG_DEBUG("Server '%s' (region '%s') was probed", label.c_str(), server_region.c_str());
+		LOG_DEBUG_GROUP(logging::group::enforcement, "Server '%s' (region '%s') was probed", label.c_str(), server_region.c_str());
 }
 
 bool PacketEngine::is_region_enforcement_enabled() const
