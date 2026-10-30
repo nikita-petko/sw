@@ -7,6 +7,7 @@
 #include <fstream>
 #include <functional>
 #include <iterator>
+#include <random>
 #include <string>
 
 #ifdef _WIN32
@@ -50,7 +51,9 @@ inline int descriptor_of(std::FILE* file)
 /// Runs `body` and returns everything it wrote to stdout.
 inline std::string capture_stdout(const std::function<void()>& body)
 {
-	const std::filesystem::path path = std::filesystem::temp_directory_path() / "lagsw_test_stdout.txt";
+	// Test binaries run in parallel under `xmake test`, so every process needs a capture file of its own.
+	static const std::string name = "lagsw_test_stdout_" + std::to_string(std::random_device{}()) + ".txt";
+	const std::filesystem::path path = std::filesystem::temp_directory_path() / name;
 	std::fflush(stdout);
 	const int  saved  = detail::duplicate(detail::descriptor_of(stdout));
 	std::FILE* target = std::fopen(path.string().c_str(), "wb");

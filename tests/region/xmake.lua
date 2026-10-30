@@ -1,0 +1,10 @@
+-- Unit tests for the region lookup helpers. Run with `xmake test region_test`.
+target("region_test")
+    set_kind("binary")
+    set_default(false)
+    set_rundir(os.projectdir())
+    add_files("region_test.cc", "../support/platform_stub.cc")
+    add_files("../../src/log.cc", "../../src/packet_engine/region_lookup.cc")
+    add_includedirs("../../include", "../../src", "..")
+    add_options("region_enforcement", "pcap_files", "desync_countdown", "forwarded_address_discovery")
+    add_tests("default")

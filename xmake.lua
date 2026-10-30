@@ -71,6 +71,8 @@ includes("src/")
 includes("tests/options")
 includes("tests/packet")
 includes("tests/modes")
+includes("tests/region")
+includes("tests/engine")
 includes("tests/nfqueue_filter")
 if is_plat("windows") then
     includes("pocs/tcp_tls_proxy")
