@@ -1,0 +1,10 @@
+-- Unit tests for the packet scheduling modes. Run with `xmake test modes_test`.
+target("modes_test")
+    set_kind("binary")
+    set_default(false)
+    set_rundir(os.projectdir())
+    add_files("modes_test.cc", "../support/platform_stub.cc")
+    add_files("../../src/log.cc", "../../src/packet_headers.cc", "../../src/modules/*.cc")
+    add_includedirs("../../include", "../../src", "..")
+    add_options("region_enforcement", "pcap_files", "desync_countdown", "forwarded_address_discovery")
+    add_tests("default")

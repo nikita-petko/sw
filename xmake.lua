@@ -70,6 +70,7 @@ includes("backends/nfqueue")
 includes("src/")
 includes("tests/options")
 includes("tests/packet")
+includes("tests/modes")
 includes("tests/nfqueue_filter")
 if is_plat("windows") then
     includes("pocs/tcp_tls_proxy")

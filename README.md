@@ -94,6 +94,7 @@ xmake build packet_test && xmake run packet_test visible   # only cases whose na
 | --- | --- |
 | `options_test` | profiles YAML loader and validation (`src/options/`) |
 | `packet_test` | IPv4/IPv6/TCP/UDP header parsing and packet formatting helpers |
+| `modes_test` | packet scheduling modes (`src/modules/`) driven with a fake clock, plus ACK restoration and retransmission filtering |
 | `format_test` | text formatting of profile options |
 | `nfqueue_filter_test` | capture-filter to nftables compiler (not built on Windows) |
 
