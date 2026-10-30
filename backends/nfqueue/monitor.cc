@@ -64,8 +64,6 @@ std::string sample(uint16_t first_queue, uint32_t queue_count, uint32_t backlog_
 		const bool		   dropping = before != previous.end() && (now.queue_dropped > before->second.queue_dropped || now.user_dropped > before->second.user_dropped);
 		const bool		   backlog	 = now.queue_total >= backlog_threshold;
 		alert = alert || dropping || backlog;
-		LOG_DEBUG("queue %u: waiting %u, dropped %llu/%llu", static_cast<unsigned>(number), now.queue_total,
-				  static_cast<unsigned long long>(now.queue_dropped), static_cast<unsigned long long>(now.user_dropped));
 		if (dropping)
 			LOG_WARN("queue %u is dropping packets (kernel %llu -> %llu, user space %llu -> %llu)", static_cast<unsigned>(number),
 					 static_cast<unsigned long long>(before->second.queue_dropped), static_cast<unsigned long long>(now.queue_dropped),

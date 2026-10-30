@@ -95,7 +95,7 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 				name_width = (std::max)(name_width, std::strlen(group.name));
 			std::printf("Log groups (toggle with --log-group):\n");
 			for (const logging::group_info& group : logging::groups())
-				std::printf("  %-*s  %s\n", static_cast<int>(name_width), group.name, group.description);
+				std::printf("  %-*s  %s%s\n", static_cast<int>(name_width), group.name, group.description, group.enabled_by_default ? "" : " [off by default]");
 			return false;
 		}
 		else if (std::strcmp(argv[index], "--server") == 0 || std::strcmp(argv[index], "-s") == 0)
@@ -135,7 +135,8 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 			std::printf("Usage: %s [options]\nOptions:\n", argv[0]);
 			std::printf("  --config <file> Load profiles from YAML\n");
 			std::printf("  --log-level, -l <level> Set log level: error, warn, info, or debug\n");
-			std::printf("  --log-group, -g <rules> Toggle log groups, e.g. -discovery.packet,-packet.recv or all,+region\n");
+			std::printf("  --log-group, -g <rules> Toggle log groups, e.g. -region,+discovery.packet or all,-packet.recv\n");
+			std::printf("                          Chatty per-packet groups are off by default; 'all' enables every group\n");
 			std::printf("                          A name enables a group, a '-' prefix disables it, and the most specific rule wins\n");
 			std::printf("  --show-log-groups       Prefix each log line with its log group\n");
 			std::printf("  --print-log-groups      List every log group and exit\n");

@@ -91,6 +91,7 @@ struct group_info
 {
 	const char* name;		 ///< Dotted group name, as accepted by set_groups().
 	const char* description; ///< One-line summary of what the group logs.
+	bool enabled_by_default = true; ///< False for per-packet groups that are too chatty to show unless asked for.
 };
 
 /// Message counts for one group since startup, indexed like groups().
@@ -111,7 +112,7 @@ std::vector<group_counts> group_stats();
 /// The most specific rule wins. Rules from repeated calls accumulate.
 /// Returns false and describes the problem in error when a name is unknown; no rules are applied in that case.
 bool set_groups(const std::string& spec, std::string& error);
-/// Returns whether debug and info messages in the given group are currently written. Every group is enabled by default.
+/// Returns whether debug and info messages in the given group are currently written. Groups are enabled unless they are marked off by default.
 bool group_enabled(const char* group_name);
 /// Counts a message in the given group and returns whether it should be written, i.e. it passes the minimum
 /// level and its group is not muted. Used by the LOG_*_GROUP macros so muted messages never evaluate their arguments.

@@ -150,7 +150,16 @@ void test_log_group_registry()
 void test_log_group_rules()
 {
 	std::string error;
+	// Per-packet groups are off by default; everything else is on
+	CHECK(!logging::group_enabled(logging::group::discovery_packet));
+	CHECK(!logging::group_enabled(logging::group::nfq_packet));
+	CHECK(logging::group_enabled(logging::group::discovery));
+	CHECK(logging::group_enabled(logging::group::discovery_stats));
+	CHECK(logging::set_groups("+discovery.packet", error));
 	CHECK(logging::group_enabled(logging::group::discovery_packet));
+	CHECK(logging::group_enabled(logging::group::region));
+	CHECK(!logging::group_enabled(logging::group::nfq_packet));
+	CHECK(logging::set_groups("-discovery.packet", error));
 
 	// The most specific rule wins, regardless of the order the rules were given
 	CHECK(logging::set_groups("-discovery,+discovery.stats", error));

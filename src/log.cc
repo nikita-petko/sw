@@ -188,24 +188,24 @@ const std::vector<group_info>& groups()
 		{group::nft, "nftables table and chain lifecycle (Linux)"},
 		{group::nft_script, "Every nft script run and its result (Linux)"},
 		{group::nfq, "NFQUEUE queue lifecycle, verdicts, and errors (Linux)"},
-		{group::nfq_packet, "Every packet queued, accepted, or dropped by NFQUEUE (Linux)"},
+		{group::nfq_packet, "Every packet queued, accepted, or dropped by NFQUEUE (Linux)", false},
 		{group::nfq_filter, "Capture filter compilation to nftables rules (Linux)"},
 		{group::nfq_monitor, "NFQUEUE and nftables health sampling (Linux)"},
 		{group::backend, "Packet backend internals"},
 		{group::http, "HTTPS requests"},
 		{group::packet, "All per-packet profile traffic"},
-		{group::packet_recv, "Packets received by a profile"},
-		{group::packet_send, "Packets sent or flushed by a profile"},
-		{group::packet_drop, "Packets dropped by a profile"},
+		{group::packet_recv, "Packets received by a profile", false},
+		{group::packet_send, "Packets sent or flushed by a profile", false},
+		{group::packet_drop, "Packets dropped by a profile", false},
 		{group::discovery, "Server discovery lifecycle and decisions"},
 		{group::discovery_stats, "Periodic server discovery capture totals"},
-		{group::discovery_packet, "Every packet seen by server discovery"},
+		{group::discovery_packet, "Every packet seen by server discovery", false},
 		{group::forwarded, "Forwarded address discovery windows and results"},
-		{group::forwarded_packet, "Every packet seen by forwarded address discovery"},
+		{group::forwarded_packet, "Every packet seen by forwarded address discovery", false},
 		{group::region, "Server region lookups"},
 		{group::region_client, "Client region lookup"},
 		{group::enforcement, "Region enforcement decisions"},
-		{group::enforcement_packet, "Every packet delayed or sent by region enforcement"},
+		{group::enforcement_packet, "Every packet delayed or sent by region enforcement", false},
 	};
 	return registry;
 }
@@ -277,12 +277,15 @@ bool set_groups(const std::string& spec, std::string& error)
 
 bool group_enabled(const char* group_name)
 {
-	if (!groups_configured.load(std::memory_order_acquire))
-		return true;
-
 	const std::string name = group_name;
+	bool			  enabled = true;
+	for (const group_info& candidate : groups())
+		if (name == candidate.name)
+			enabled = candidate.enabled_by_default;
+	if (!groups_configured.load(std::memory_order_acquire))
+		return enabled;
+
 	std::lock_guard	  lock(group_mutex);
-	bool			  enabled	  = true;
 	size_t			  best_length = 0;
 	bool			  matched	  = false;
 	for (const auto& [rule, rule_enabled] : group_rules)
