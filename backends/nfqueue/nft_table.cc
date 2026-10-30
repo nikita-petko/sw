@@ -13,7 +13,7 @@
 
 #include "log.h"
 
-LOG_DEFAULT_GROUP(logging::group::backend)
+LOG_DEFAULT_GROUP(logging::group::nft)
 
 extern char** environ;
 
@@ -62,6 +62,7 @@ std::string trim(std::string text)
 // The script and nft's stderr travel through memfds, which avoids pipe-buffer deadlocks and SIGPIPE.
 bool run_nft_impl(const std::string& script, std::string& error)
 {
+	LOG_DEBUG_GROUP(logging::group::nft_script, "nft: running script:\n%s", trim(script).c_str());
 	const int input	 = ::memfd_create("lagsw-nft-in", MFD_CLOEXEC);
 	const int output = ::memfd_create("lagsw-nft-err", MFD_CLOEXEC);
 	if (input < 0 || output < 0)
@@ -91,6 +92,7 @@ bool run_nft_impl(const std::string& script, std::string& error)
 		{
 			error = std::string("failed to run nft: ") + std::strerror(rc);
 			ok	  = false;
+			LOG_DEBUG_GROUP(logging::group::nft_script, "nft: spawn failed: %s", error.c_str());
 		}
 		else
 		{
@@ -104,7 +106,14 @@ bool run_nft_impl(const std::string& script, std::string& error)
 				if (error.empty())
 					error = "nft exited abnormally";
 				ok = false;
+				LOG_DEBUG_GROUP(logging::group::nft_script,
+								"nft: script failed (%s %d): %s",
+								WIFEXITED(status) ? "exit code" : "signal/status",
+								WIFEXITED(status) ? WEXITSTATUS(status) : status,
+								error.c_str());
 			}
+			else
+				LOG_DEBUG_GROUP(logging::group::nft_script, "nft: script succeeded");
 		}
 	}
 	::close(input);
@@ -129,11 +138,16 @@ bool ensure_table(std::string& error)
 	std::lock_guard<std::mutex> lock(table_mutex);
 	if (table_created)
 		return true;
+	LOG_DEBUG("preparing the nftables table %s (replacing any stale copy)", kTable);
 	// add + delete + add replaces a leftover table atomically and succeeds when none exists.
 	const std::string script = std::string("add table ") + kTable + "\ndelete table " + kTable + "\nadd table " + kTable + "\n";
 	if (!run_nft_impl(script, error))
+	{
+		LOG_ERROR("failed to create the nftables table %s: %s", kTable, error.c_str());
 		return false;
+	}
 	table_created = true;
+	LOG_DEBUG("nftables table %s created", kTable);
 	return true;
 }
 
@@ -153,9 +167,12 @@ void remove_table()
 	std::lock_guard<std::mutex> lock(table_mutex);
 	if (!table_created)
 		return;
+	LOG_DEBUG("removing the nftables table %s", kTable);
 	std::string error;
 	if (!run_nft_impl(std::string("delete table ") + kTable + "\n", error))
 		LOG_WARN("failed to remove the nftables table %s: %s", kTable, error.c_str());
+	else
+		LOG_DEBUG("nftables table %s removed", kTable);
 	table_created = false;
 }
 
@@ -186,7 +203,16 @@ bool add_channel_rules(uint32_t channel_id,
 	if (script.empty())
 		return true;
 	if (run_nft_impl(script, error))
+	{
+		LOG_DEBUG("channel %u: installed %zu chain(s) and %zu rule(s) feeding queue %u at priority %d",
+				  channel_id,
+				  chains.names.size(),
+				  rules.size(),
+				  static_cast<unsigned>(queue_number),
+				  priority);
 		return true;
+	}
+	LOG_ERROR("channel %u: failed to install nftables rules for queue %u: %s", channel_id, static_cast<unsigned>(queue_number), error.c_str());
 	chains.names.clear();
 	return false;
 }
@@ -200,7 +226,9 @@ void remove_channel_rules(ChannelChains& chains)
 		script += std::string("flush chain ") + kTable + " " + chain + "\ndelete chain " + kTable + " " + chain + "\n";
 	std::string error;
 	if (!run_nft_impl(script, error))
-		LOG_DEBUG_GROUP(logging::group::backend, "failed to remove nftables chains: %s", error.c_str());
+		LOG_WARN("failed to remove %zu nftables chain(s): %s", chains.names.size(), error.c_str());
+	else
+		LOG_DEBUG("removed %zu nftables chain(s)", chains.names.size());
 	chains.names.clear();
 }
 }  // namespace nfq

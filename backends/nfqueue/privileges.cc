@@ -10,7 +10,7 @@
 
 #include "log.h"
 
-LOG_DEFAULT_GROUP(logging::group::backend)
+LOG_DEFAULT_GROUP(logging::group::nfq)
 
 #ifndef PR_CAP_AMBIENT
 #define PR_CAP_AMBIENT			1
@@ -53,6 +53,7 @@ void warn_if_keyboards_unreadable()
 		}
 	}
 	closedir(directory);
+	LOG_DEBUG("input devices: event nodes found = %d, readable = %d", found ? 1 : 0, readable ? 1 : 0);
 	if (found && !readable)
 		LOG_WARN("Cannot read /dev/input/event*, so hotkeys will not work. Run as root or add your user to the 'input' group.");
 }
@@ -62,15 +63,18 @@ bool check_privileges(std::string& error)
 {
 	if (!has_effective_capability(CAP_NET_ADMIN))
 	{
+		LOG_DEBUG("privilege check: CAP_NET_ADMIN is not effective (euid = %u)", static_cast<unsigned>(::geteuid()));
 		error = "lagsw needs CAP_NET_ADMIN to capture packets. Run it as root (for example `sudo ./lagsw ...` or scripts/bootstrap.sh).";
 		return false;
 	}
 	// Rules are installed by spawning `nft`, which does not inherit file capabilities.
 	if (::geteuid() != 0 && !has_ambient_capability(CAP_NET_ADMIN))
 	{
+		LOG_DEBUG("privilege check: CAP_NET_ADMIN is not ambient for euid %u", static_cast<unsigned>(::geteuid()));
 		error = "lagsw has CAP_NET_ADMIN but the `nft` helper it spawns would not inherit it. Run as root or grant the capability as an ambient capability.";
 		return false;
 	}
+	LOG_DEBUG("privilege check passed (euid = %u)", static_cast<unsigned>(::geteuid()));
 	warn_if_keyboards_unreadable();
 	return true;
 }

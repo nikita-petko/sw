@@ -21,7 +21,7 @@ std::mutex		 group_mutex;
 std::vector<std::pair<std::string, bool>> group_rules;	// An empty name is the "all" rule
 std::atomic<bool>						  groups_configured{false};
 
-constexpr size_t max_groups = 32;
+constexpr size_t max_groups = 64;
 struct GroupCounters
 {
 	std::atomic<std::uint64_t> by_level[4];
@@ -184,6 +184,12 @@ const std::vector<group_info>& groups()
 		{group::report, "The state report printed with Tab"},
 		{group::profile, "Profile activation, setup, and teardown"},
 		{group::input, "Keyboard input"},
+		{group::nft, "nftables table and chain lifecycle (Linux)"},
+		{group::nft_script, "Every nft script run and its result (Linux)"},
+		{group::nfq, "NFQUEUE queue lifecycle, verdicts, and errors (Linux)"},
+		{group::nfq_packet, "Every packet queued, accepted, or dropped by NFQUEUE (Linux)"},
+		{group::nfq_filter, "Capture filter compilation to nftables rules (Linux)"},
+		{group::nfq_monitor, "NFQUEUE and nftables health sampling (Linux)"},
 		{group::backend, "Packet backend internals"},
 		{group::http, "HTTPS requests"},
 		{group::packet, "All per-packet profile traffic"},

@@ -23,6 +23,8 @@
 #include "packet_backend.h"
 #include "privileges.h"
 
+LOG_DEFAULT_GROUP(logging::group::nfq)
+
 namespace backend {
 namespace {
 constexpr uint16_t kFirstQueueNumber = 10;
@@ -61,38 +63,46 @@ public:
 
 	bool start(uint16_t queue_number, int priority, const std::vector<nfq::CompiledRule>& rules, std::string& error)
 	{
+		LOG_DEBUG("channel %u: starting on queue %u (sniff = %d, priority = %d, %zu rule(s))", channel_id_, static_cast<unsigned>(queue_number), sniff_ ? 1 : 0, priority, rules.size());
 		event_fd_ = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
 		if (event_fd_ < 0)
 		{
+			LOG_ERROR("channel %u: eventfd failed: %s", channel_id_, std::strerror(errno));
 			error = std::string("eventfd failed: ") + std::strerror(errno);
 			return false;
 		}
 		handle_ = nfq_open();
 		if (handle_ == nullptr)
 		{
+			LOG_ERROR("channel %u: nfq_open failed: %s", channel_id_, std::strerror(errno));
 			error = std::string("nfq_open failed: ") + std::strerror(errno) + " (CAP_NET_ADMIN is required)";
 			return false;
 		}
 		queue_ = nfq_create_queue(handle_, queue_number, &NfqChannel::on_packet, this);
 		if (queue_ == nullptr)
 		{
+			LOG_ERROR("channel %u: could not create queue %u: %s", channel_id_, static_cast<unsigned>(queue_number), std::strerror(errno));
 			error = "nfq_create_queue(" + std::to_string(queue_number) + ") failed: " + std::strerror(errno);
 			return false;
 		}
 		if (nfq_set_mode(queue_, NFQNL_COPY_PACKET, 0xFFFF) < 0)
 		{
+			LOG_ERROR("channel %u: nfq_set_mode failed: %s", channel_id_, std::strerror(errno));
 			error = std::string("nfq_set_mode failed: ") + std::strerror(errno);
 			return false;
 		}
+		LOG_DEBUG("channel %u: queue %u bound (copy packet, max length %u)", channel_id_, static_cast<unsigned>(queue_number), kQueueMaxLength);
 		nfq_set_queue_maxlen(queue_, kQueueMaxLength);
 		// Fail open when the queue overflows; GSO lets the kernel pass large offloaded packets instead of dropping them.
 		if (nfq_set_queue_flags(queue_, NFQA_CFG_F_FAIL_OPEN | NFQA_CFG_F_GSO, NFQA_CFG_F_FAIL_OPEN | NFQA_CFG_F_GSO) < 0)
-			LOG_DEBUG_GROUP(logging::group::backend, "nfqueue: queue flags are not supported by this kernel");
+			LOG_WARN("channel %u: kernel lacks the fail-open/GSO queue flags; a full queue will drop packets", channel_id_);
 		fd_ = nfq_fd(handle_);
 		int enable = 1;
-		::setsockopt(fd_, SOL_NETLINK, NETLINK_NO_ENOBUFS, &enable, sizeof(enable));
+		if (::setsockopt(fd_, SOL_NETLINK, NETLINK_NO_ENOBUFS, &enable, sizeof(enable)) < 0)
+			LOG_DEBUG("channel %u: NETLINK_NO_ENOBUFS failed: %s", channel_id_, std::strerror(errno));
 		int buffer = kSocketBuffer;
-		::setsockopt(fd_, SOL_SOCKET, SO_RCVBUF, &buffer, sizeof(buffer));
+		if (::setsockopt(fd_, SOL_SOCKET, SO_RCVBUF, &buffer, sizeof(buffer)) < 0)
+			LOG_DEBUG("channel %u: SO_RCVBUF %d failed: %s", channel_id_, buffer, std::strerror(errno));
 
 		// The queue exists before the rules that feed it, so no packet is ever bypassed during setup.
 		return nfq::add_channel_rules(channel_id_, queue_number, priority, rules, chains_, error);
@@ -112,7 +122,7 @@ public:
 				const NativeMeta* native = reinterpret_cast<const NativeMeta*>(packet.meta.native);
 				if (packet.data.size() > capacity)
 				{
-					LOG_DEBUG_GROUP(logging::group::backend, "nfqueue: accepting %zu byte packet larger than the receive buffer unchanged", packet.data.size());
+					LOG_WARN("channel %u: accepting a %zu byte packet larger than the %u byte receive buffer unchanged", channel_id_, packet.data.size(), capacity);
 					verdict(native->packet_id, NF_ACCEPT, nullptr, 0);
 					continue;
 				}
@@ -130,18 +140,25 @@ public:
 			{
 				if (errno == EINTR)
 					continue;
+				LOG_ERROR("channel %u: poll failed: %s", channel_id_, std::strerror(errno));
 				error = std::string("poll failed: ") + std::strerror(errno);
 				return IoStatus::error;
 			}
 			if ((fds[1].revents & POLLIN) != 0 || shutdown_.load())
+			{
+				LOG_DEBUG("channel %u: receive loop woken for shutdown", channel_id_);
 				return IoStatus::closed;
+			}
 			if ((fds[0].revents & POLLIN) == 0)
 				continue;
 			const ssize_t count = ::recv(fd_, receive_buffer_.data(), receive_buffer_.size(), 0);
 			if (count < 0)
 			{
+				if (errno == ENOBUFS)
+					LOG_WARN("channel %u: the netlink socket overflowed; queue notifications were lost", channel_id_);
 				if (errno == EINTR || errno == ENOBUFS || errno == EAGAIN)
 					continue;
+				LOG_ERROR("channel %u: netlink recv failed: %s", channel_id_, std::strerror(errno));
 				error = std::string("netlink recv failed: ") + std::strerror(errno);
 				return IoStatus::error;
 			}
@@ -160,8 +177,10 @@ public:
 		const NativeMeta* native = reinterpret_cast<const NativeMeta*>(meta.native);
 		// An unmodified packet is accepted as-is so the kernel keeps its offload and checksum state.
 		const bool unchanged = length == native->length && hash_payload(packet, length) == native->payload_hash;
+		LOG_DEBUG_GROUP(logging::group::nfq_packet, "channel %u: accept packet id %u (%u bytes, %s)", channel_id_, native->packet_id, length, unchanged ? "unchanged" : "modified");
 		if (!verdict(native->packet_id, NF_ACCEPT, unchanged ? nullptr : packet, unchanged ? 0 : length))
 		{
+			LOG_ERROR("channel %u: failed to accept packet id %u: %s", channel_id_, native->packet_id, std::strerror(errno));
 			error = std::string("nfq_set_verdict failed: ") + std::strerror(errno);
 			return IoStatus::error;
 		}
@@ -173,7 +192,10 @@ public:
 	{
 		if (sniff_)
 			return;
-		verdict(reinterpret_cast<const NativeMeta*>(meta.native)->packet_id, NF_DROP, nullptr, 0);
+		const uint32_t packet_id = reinterpret_cast<const NativeMeta*>(meta.native)->packet_id;
+		LOG_DEBUG_GROUP(logging::group::nfq_packet, "channel %u: drop packet id %u", channel_id_, packet_id);
+		if (!verdict(packet_id, NF_DROP, nullptr, 0))
+			LOG_ERROR("channel %u: failed to drop packet id %u: %s", channel_id_, packet_id, std::strerror(errno));
 	}
 
 	void shutdown_recv() override
@@ -183,7 +205,7 @@ public:
 		{
 			const uint64_t one = 1;
 			if (::write(event_fd_, &one, sizeof(one)) < 0)
-				LOG_DEBUG_GROUP(logging::group::backend, "nfqueue: failed to wake the receive loop");
+				LOG_DEBUG("channel %u: failed to wake the receive loop", channel_id_);
 		}
 	}
 
@@ -191,6 +213,7 @@ public:
 	{
 		if (closed_.exchange(true))
 			return;
+		LOG_DEBUG("channel %u: closing", channel_id_);
 		shutdown_recv();
 		// Remove the rules first so traffic stops being queued before the queue disappears.
 		nfq::remove_channel_rules(chains_);
@@ -206,6 +229,7 @@ public:
 		if (event_fd_ >= 0)
 			::close(event_fd_);
 		event_fd_ = -1;
+		LOG_DEBUG("channel %u: closed", channel_id_);
 	}
 
 private:
@@ -236,13 +260,17 @@ private:
 	{
 		const nfqnl_msg_packet_hdr* header = nfq_get_msg_packet_hdr(data);
 		if (header == nullptr)
+		{
+			LOG_DEBUG_GROUP(logging::group::nfq_packet, "channel %u: queued message without a packet header, ignoring", channel_id_);
 			return;
+		}
 		const uint32_t packet_id = ntohl(header->packet_id);
 		unsigned char* payload	 = nullptr;
 		const int	   length	 = nfq_get_payload(data, &payload);
 		// Only well-formed IPv4 packets are handed to the engine; everything else is let through untouched.
 		if (length < static_cast<int>(kMinIpv4Header) || payload == nullptr || (payload[0] >> 4) != 4)
 		{
+			LOG_DEBUG_GROUP(logging::group::nfq_packet, "channel %u: accept packet id %u untouched (not well-formed IPv4, length = %d)", channel_id_, packet_id, length);
 			verdict(packet_id, NF_ACCEPT, nullptr, 0);
 			return;
 		}
@@ -255,6 +283,7 @@ private:
 			packet.meta.timestamp = static_cast<int64_t>(stamp.tv_sec) * 1000000 + stamp.tv_usec;
 		NativeMeta native{packet_id, static_cast<uint32_t>(length), hash_payload(payload, static_cast<uint32_t>(length))};
 		std::memcpy(packet.meta.native, &native, sizeof(native));
+		LOG_DEBUG_GROUP(logging::group::nfq_packet, "channel %u: queued packet id %u (%d bytes, hook = %u, outbound = %d)", channel_id_, packet_id, length, static_cast<unsigned>(header->hook), packet.meta.outbound ? 1 : 0);
 		pending_.push_back(std::move(packet));
 	}
 
@@ -314,10 +343,15 @@ std::unique_ptr<PacketChannel> open(const OpenOptions& options, std::string& err
 	if (!nfq::compile_filter(options.filter, options.forward, rules, error, position, options.include_forward))
 	{
 		error += " (at position " + std::to_string(position) + ")";
+		LOG_ERROR_GROUP(logging::group::nfq_filter, "could not compile filter '%s': %s", options.filter.c_str(), error.c_str());
 		return nullptr;
 	}
+	LOG_DEBUG_GROUP(logging::group::nfq_filter, "compiled filter '%s' (forward = %d, include_forward = %d) into %zu rule(s)", options.filter.c_str(), options.forward ? 1 : 0, options.include_forward ? 1 : 0, rules.size());
+	for ([[maybe_unused]] const nfq::CompiledRule& rule : rules)
+		LOG_DEBUG_GROUP(logging::group::nfq_filter, "  %s", rule.match.c_str());
 	if (!nfq::ensure_table(error))
 	{
+		LOG_ERROR("nfqueue: could not prepare the nftables table: %s", error.c_str());
 		error = "failed to prepare the nftables table (is nft installed and CAP_NET_ADMIN granted?): " + error;
 		return nullptr;
 	}
@@ -325,7 +359,11 @@ std::unique_ptr<PacketChannel> open(const OpenOptions& options, std::string& err
 	const int	   priority		= kBasePriority - static_cast<int>(options.priority);
 	auto		   channel		= std::make_unique<NfqChannel>(options.sniff, channel_id);
 	if (!channel->start(static_cast<uint16_t>(kFirstQueueNumber + channel_id), priority, rules, error))
+	{
+		LOG_ERROR("nfqueue: channel %u failed to start: %s", channel_id, error.c_str());
 		return nullptr;
+	}
+	LOG_DEBUG("nfqueue: opened channel %u on queue %u for filter '%s'", channel_id, static_cast<unsigned>(kFirstQueueNumber + channel_id), options.filter.c_str());
 	return channel;
 }
 
