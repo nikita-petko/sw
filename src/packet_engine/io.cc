@@ -5,6 +5,8 @@
 
 #include "log.h"
 
+LOG_DEFAULT_GROUP(logging::group::packet)
+
 namespace {
 void log_received_packet([[maybe_unused]] const std::string& profile_label, const uint8_t* packet_data, uint32_t received_length)
 {

@@ -7,6 +7,8 @@
 
 #include "log.h"
 
+LOG_DEFAULT_GROUP(logging::group::backend)
+
 namespace backend {
 namespace {
 constexpr const char* kNotImplemented = "packet capture is not implemented on this platform (stub backend)";

@@ -4,6 +4,8 @@
 #include "log.h"
 #include "packet_backend.h"
 
+LOG_DEFAULT_GROUP(logging::group::config)
+
 namespace config {
 namespace {
 const char* describe(const std::string& error)

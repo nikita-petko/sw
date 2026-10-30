@@ -2,6 +2,8 @@
 
 #include "log.h"
 
+LOG_DEFAULT_GROUP(logging::group::discovery)
+
 void PacketEngine::start_workers()
 {
 	if (options_.resolve_region)

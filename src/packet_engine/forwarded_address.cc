@@ -4,6 +4,8 @@
 
 #include "log.h"
 
+LOG_DEFAULT_GROUP(logging::group::forwarded)
+
 namespace {
 using AddressCounts = std::unordered_map<std::string, uint64_t>;
 

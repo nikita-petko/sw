@@ -9,6 +9,8 @@
 #include "profile_controller.h"
 #include "status_line.h"
 
+LOG_DEFAULT_GROUP(logging::group::startup)
+
 namespace {
 void log_profile(const PacketEngineOptions& options, size_t index)
 {

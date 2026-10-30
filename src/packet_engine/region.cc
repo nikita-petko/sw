@@ -4,6 +4,8 @@
 
 #include "log.h"
 
+LOG_DEFAULT_GROUP(logging::group::region)
+
 bool PacketEngine::use_cached_region(const std::string& address, bool preserve_name)
 {
 	RegionCacheEntry cached;

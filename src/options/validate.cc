@@ -5,6 +5,8 @@
 #include "internal.h"
 #include "log.h"
 
+LOG_DEFAULT_GROUP(logging::group::config)
+
 namespace config {
 namespace {
 bool has_profile(const PacketEngineOptions& options, const std::string& name)

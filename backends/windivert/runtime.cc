@@ -10,6 +10,8 @@
 #include "log.h"
 #include "runtime.h"
 
+LOG_DEFAULT_GROUP(logging::group::backend)
+
 namespace {
 constexpr int kWinDivertDllResource = 101;
 constexpr int kWinDivertSysResource = 102;

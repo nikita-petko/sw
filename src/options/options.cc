@@ -8,6 +8,8 @@
 #include "internal.h"
 #include "log.h"
 
+LOG_DEFAULT_GROUP(logging::group::config)
+
 namespace {
 constexpr const char* kDefaultFilter = "tcp.DstPort == 55000 or tcp.SrcPort == 55000";
 

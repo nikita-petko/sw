@@ -6,6 +6,8 @@
 
 #include "log.h"
 
+LOG_DEFAULT_GROUP(logging::group::enforcement)
+
 void PacketEngine::start_region_enforcement()
 {
 	const std::string filter = region_enforcement_filter();

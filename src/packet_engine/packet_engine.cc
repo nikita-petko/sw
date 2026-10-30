@@ -8,6 +8,8 @@
 #include "format.h"
 #include "log.h"
 
+LOG_DEFAULT_GROUP(logging::group::profile)
+
 namespace {
 void log_profile_enabled([[maybe_unused]] int profile,
 						const ProfileOptions& profile_options,
@@ -43,12 +45,12 @@ PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(opt
 	{
 		const std::string label = server.name == server.address ? server.address : server.name + " [" + server.address + "]";
 		if (server.group.empty())
-			LOG_SERVER("Pre-configured server: %s", label.c_str());
+			LOG_SERVER_GROUP(logging::group::server, "Pre-configured server: %s", label.c_str());
 		else
 		{
 			if (logged_server_groups.insert(server.group).second)
-				LOG_SERVER("Pre-configured server group '%s':", server.group.c_str());
-			LOG_SERVER("  %s", label.c_str());
+				LOG_SERVER_GROUP(logging::group::server, "Pre-configured server group '%s':", server.group.c_str());
+			LOG_SERVER_GROUP(logging::group::server, "  %s", label.c_str());
 		}
 	}
 	state_->select_authoritative_server = !options_.initial_server || *options_.initial_server == "none";
@@ -64,9 +66,9 @@ PacketEngine::PacketEngine(PacketEngineOptions options) : options_(std::move(opt
 			}
 		}
 		if (server_index_ == 0 && !state_->select_authoritative_server)
-			LOG_WARN("Server '%s' does not exist; using none", options_.initial_server->c_str());
+			LOG_WARN_GROUP(logging::group::server, "Server '%s' does not exist; using none", options_.initial_server->c_str());
 	}
-	LOG_SERVER("Initial server: %s", current_server().c_str());
+	LOG_SERVER_GROUP(logging::group::server, "Initial server: %s", current_server().c_str());
 }
 
 PacketEngine::~PacketEngine()

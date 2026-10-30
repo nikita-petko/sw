@@ -5,6 +5,8 @@
 #include "log.h"
 #include "platform.h"
 
+LOG_DEFAULT_GROUP(logging::group::profile)
+
 namespace {
 bool shares_activation_key(const ProfileOptions& first, const ProfileOptions& second)
 {

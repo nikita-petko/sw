@@ -8,6 +8,8 @@
 #include "disconnect_detector.h"
 #include "log.h"
 
+LOG_DEFAULT_GROUP(logging::group::discovery)
+
 namespace {
 using AddressCounts = std::unordered_map<std::string, uint64_t>;
 

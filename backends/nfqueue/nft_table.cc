@@ -13,6 +13,8 @@
 
 #include "log.h"
 
+LOG_DEFAULT_GROUP(logging::group::backend)
+
 extern char** environ;
 
 namespace nfq {

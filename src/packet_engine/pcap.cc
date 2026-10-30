@@ -11,6 +11,8 @@
 #include "log.h"
 #include "platform.h"
 
+LOG_DEFAULT_GROUP(logging::group::pcap)
+
 bool pcap_files_enabled_for(const PcapFilesOptions& pcap_files, const ProfileOptions& profile)
 {
 	return pcap_files.enabled &&

@@ -177,6 +177,11 @@ void set_level(level minimum)
 const std::vector<group_info>& groups()
 {
 	static const std::vector<group_info> registry = {
+		{group::startup, "Startup banner, loaded profile listing, and shutdown"},
+		{group::config, "Command line and profile configuration parsing and validation"},
+		{group::server, "Server list and server selection"},
+		{group::pcap, "PCAP file capture"},
+		{group::report, "The state report printed with Tab"},
 		{group::profile, "Profile activation, setup, and teardown"},
 		{group::input, "Keyboard input"},
 		{group::backend, "Packet backend internals"},

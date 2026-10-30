@@ -10,6 +10,8 @@
 
 #include "log.h"
 
+LOG_DEFAULT_GROUP(logging::group::backend)
+
 #ifndef PR_CAP_AMBIENT
 #define PR_CAP_AMBIENT			1
 #define PR_CAP_AMBIENT_IS_SET	1

@@ -6,6 +6,8 @@
 
 #include "log.h"
 
+LOG_DEFAULT_GROUP(logging::group::report)
+
 namespace {
 /// A snapshot of one profile's counters for the state report.
 struct ProfileReport

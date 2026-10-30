@@ -9,6 +9,8 @@
 
 #include "log.h"
 
+LOG_DEFAULT_GROUP(logging::group::profile)
+
 namespace {
 class PacketGroupSendMode final : public PacketMode
 {

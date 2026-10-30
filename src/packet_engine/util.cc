@@ -6,6 +6,8 @@
 #include "log.h"
 #include "platform.h"
 
+LOG_DEFAULT_GROUP(logging::group::report)
+
 std::string format_state_divider(size_t width, const std::string& label)
 {
 	const size_t inner_width = width - 2;

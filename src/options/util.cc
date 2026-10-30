@@ -6,6 +6,8 @@
 
 #include "log.h"
 
+LOG_DEFAULT_GROUP(logging::group::config)
+
 namespace config {
 namespace {
 template <typename T, size_t N>

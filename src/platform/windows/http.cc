@@ -12,6 +12,8 @@
 
 #include "log.h"
 
+LOG_DEFAULT_GROUP(logging::group::http)
+
 namespace platform {
 
 HttpResponse https_get(const std::string& host, const std::string& path)

@@ -8,6 +8,8 @@
 #include "internal.h"
 #include "log.h"
 
+LOG_DEFAULT_GROUP(logging::group::config)
+
 namespace config {
 namespace {
 constexpr unsigned long kMaxPort = (std::numeric_limits<uint16_t>::max)();

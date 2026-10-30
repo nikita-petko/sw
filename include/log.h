@@ -50,6 +50,11 @@ void clear_status();
 /// Muting a group hides its debug and info messages only; warnings and errors are always written.
 /// Every group is listed in the registry returned by groups(), which also tracks per-level message counts.
 namespace group {
+inline constexpr const char* startup			 = "startup";			  ///< Startup banner, loaded profile listing, and shutdown.
+inline constexpr const char* config			 = "config";			  ///< Command line and profile configuration parsing and validation.
+inline constexpr const char* server			 = "server";			  ///< Server list and server selection.
+inline constexpr const char* pcap				 = "pcap";				  ///< PCAP file capture.
+inline constexpr const char* report			 = "report";			  ///< The state report printed with Tab.
 inline constexpr const char* profile			 = "profile";			  ///< Profile activation, setup, and teardown.
 inline constexpr const char* input				 = "input";				  ///< Keyboard input.
 inline constexpr const char* backend			 = "backend";			  ///< Packet backend internals.
@@ -102,29 +107,49 @@ bool group_accepts(const char* group_name, level message_level);
 
 } // namespace logging
 
-#define LOG_ERROR(message, ...) logging::write(logging::level::error, message, ##__VA_ARGS__)
-#define LOG_WARN(message, ...) logging::write(logging::level::warn, message, ##__VA_ARGS__)
-#define LOG_INFO(message, ...) logging::write(logging::level::info, message, ##__VA_ARGS__)
-#define LOG_ACTIVATE(message, ...) logging::write_styled(logging::style::activate, message, ##__VA_ARGS__)
-#define LOG_DEACTIVATE(message, ...) logging::write_styled(logging::style::deactivate, message, ##__VA_ARGS__)
-#define LOG_SERVER(message, ...) logging::write_styled(logging::style::server, message, ##__VA_ARGS__)
-#define LOG_REGION(message, ...) logging::write_styled(logging::style::region, message, ##__VA_ARGS__)
-#define LOG_DETAIL(message, ...) logging::write_styled(logging::style::detail, message, ##__VA_ARGS__)
-// The group check short-circuits, so arguments are not evaluated for a muted or level-filtered message.
-#define LOG_GROUP_IMPL(group_name, message_level, message, ...)                      \
-	do                                                                               \
-	{                                                                                \
-		if (logging::group_accepts(group_name, message_level))                       \
-			logging::write(message_level, message, ##__VA_ARGS__);                   \
+// Every translation unit that logs declares its default group once with LOG_DEFAULT_GROUP(...); the plain
+// LOG_* macros use it, while the *_GROUP variants name a group explicitly. Arguments are not evaluated when the
+// message is muted or below the minimum level.
+#define LOG_DEFAULT_GROUP(group_name)                                                              \
+	namespace                                                                                      \
+	{                                                                                              \
+	[[maybe_unused]] constexpr const char* log_default_group = group_name;                         \
+	}
+#define LOG_GROUP_IMPL(group_name, message_level, message, ...)                                    \
+	do                                                                                             \
+	{                                                                                              \
+		if (logging::group_accepts(group_name, message_level))                                     \
+			logging::write(message_level, message, ##__VA_ARGS__);                                 \
 	} while (0)
+#define LOG_STYLED_GROUP_IMPL(group_name, message_style, message, ...)                             \
+	do                                                                                             \
+	{                                                                                              \
+		if (logging::group_accepts(group_name, logging::level::info))                              \
+			logging::write_styled(message_style, message, ##__VA_ARGS__);                          \
+	} while (0)
+
 #define LOG_ERROR_GROUP(group_name, message, ...) LOG_GROUP_IMPL(group_name, logging::level::error, message, ##__VA_ARGS__)
 #define LOG_WARN_GROUP(group_name, message, ...) LOG_GROUP_IMPL(group_name, logging::level::warn, message, ##__VA_ARGS__)
 #define LOG_INFO_GROUP(group_name, message, ...) LOG_GROUP_IMPL(group_name, logging::level::info, message, ##__VA_ARGS__)
+#define LOG_ACTIVATE_GROUP(group_name, message, ...) LOG_STYLED_GROUP_IMPL(group_name, logging::style::activate, message, ##__VA_ARGS__)
+#define LOG_DEACTIVATE_GROUP(group_name, message, ...) LOG_STYLED_GROUP_IMPL(group_name, logging::style::deactivate, message, ##__VA_ARGS__)
+#define LOG_SERVER_GROUP(group_name, message, ...) LOG_STYLED_GROUP_IMPL(group_name, logging::style::server, message, ##__VA_ARGS__)
+#define LOG_REGION_GROUP(group_name, message, ...) LOG_STYLED_GROUP_IMPL(group_name, logging::style::region, message, ##__VA_ARGS__)
+#define LOG_DETAIL_GROUP(group_name, message, ...) LOG_STYLED_GROUP_IMPL(group_name, logging::style::detail, message, ##__VA_ARGS__)
+
+#define LOG_ERROR(message, ...) LOG_ERROR_GROUP(log_default_group, message, ##__VA_ARGS__)
+#define LOG_WARN(message, ...) LOG_WARN_GROUP(log_default_group, message, ##__VA_ARGS__)
+#define LOG_INFO(message, ...) LOG_INFO_GROUP(log_default_group, message, ##__VA_ARGS__)
+#define LOG_ACTIVATE(message, ...) LOG_ACTIVATE_GROUP(log_default_group, message, ##__VA_ARGS__)
+#define LOG_DEACTIVATE(message, ...) LOG_DEACTIVATE_GROUP(log_default_group, message, ##__VA_ARGS__)
+#define LOG_SERVER(message, ...) LOG_SERVER_GROUP(log_default_group, message, ##__VA_ARGS__)
+#define LOG_REGION(message, ...) LOG_REGION_GROUP(log_default_group, message, ##__VA_ARGS__)
+#define LOG_DETAIL(message, ...) LOG_DETAIL_GROUP(log_default_group, message, ##__VA_ARGS__)
 #ifdef NDEBUG
 #define LOG_DEBUG(...) ((void)0)
 #define LOG_DEBUG_GROUP(...) ((void)0)
 #else
-#define LOG_DEBUG(message, ...) logging::write(logging::level::debug, message, ##__VA_ARGS__)
+#define LOG_DEBUG(message, ...) LOG_DEBUG_GROUP(log_default_group, message, ##__VA_ARGS__)
 #define LOG_DEBUG_GROUP(group_name, message, ...) LOG_GROUP_IMPL(group_name, logging::level::debug, message, ##__VA_ARGS__)
 #endif
 
