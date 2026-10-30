@@ -117,7 +117,7 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 	const ProfileOptions& profile_options = options_.profiles[session->profile - 1];
 	const std::string	  profile_label	  = "profile #" + std::to_string(session->profile) + " - " + profile_options.name;
 	State::ProfileStats&  stats			  = state_->profile_stats[session->profile - 1];
-	while (!session->stopping)
+	// The loop ends only once the session is stopping; the flush below must run even when that happens before the first iteration.
 	{
 		while (!session->stopping)
 		{
