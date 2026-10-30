@@ -165,6 +165,47 @@ when `/dev/input/event*` is not readable, since hotkeys would not work.
   output and input hooks, so use `outbound: true` to capture it once.
 - Filter terms outside the supported subset are rejected at startup with the position of the error.
 
+### Setting up a gateway
+
+`scripts/setup_gateway.sh` configures the host as a router between two interfaces, which is what
+`forward: true` profiles need. For example, share the wired uplink `eth0` with clients on a `wlan0`
+access point:
+
+```sh
+# Give wlan0 the address 192.168.50.1/24, hand out leases with DHCP, forward + NAT to eth0:
+sudo scripts/setup_gateway.sh up --wan eth0 --lan wlan0 --lan-address 192.168.50.1/24 --dhcp
+sudo scripts/setup_gateway.sh status                      # also reprints the client network settings
+sudo scripts/setup_gateway.sh down                        # undo everything `up` did
+```
+
+`up` enables `net.ipv4.ip_forward`, allows `--lan` to `--wan` traffic (and the established replies back)
+in the `FORWARD` chain, and masquerades traffic leaving `--wan`. All rules live in the `LAGSW_FWD`,
+`LAGSW_NAT` and `LAGSW_IN` iptables chains, so `up` is repeatable and `down` removes exactly what was
+added: the rules, the DHCP server, an address `up` assigned, and it restores the previous sysctl values.
+
+- `--lan-address ADDRESS/PREFIX` assigns the gateway address to `--lan`. If omitted, the IPv4 address
+  already on `--lan` is used (and `up` fails if there is none).
+- `--dhcp` starts `dnsmasq` (must be installed) as a DHCP-only server on `--lan`. It leases
+  `.100`-`.199` of a /24 (the whole subnet minus the gateway for smaller ones) and advertises this host as
+  the gateway and `--dns` (default `1.1.1.1,8.8.8.8`) as DNS. DNS itself is not served, so it never
+  clashes with a local resolver.
+- Without `--dhcp`, assign addresses to clients yourself. `up` and `status` print the values to use:
+
+  ```text
+  LAN network 192.168.50.0/24 on wlan0:
+    Gateway:  192.168.50.1
+    Netmask:  255.255.255.0 (/24)
+    DNS:      1.1.1.1, 8.8.8.8
+    DHCP:     off
+    Static client example: address 192.168.50.2, netmask 255.255.255.0, gateway 192.168.50.1, DNS 1.1.1.1, 8.8.8.8
+  ```
+
+- `--no-nat` forwards without masquerading, `--ipv6` also configures `ip6tables` (forwarding only: no
+  DHCPv6 or router advertisements), `--dry-run` prints the commands.
+
+The script does not create the access point itself (use hostapd, or your desktop's hotspot feature, which
+may fight over the interface and its address), and it does not persist across reboots.
+
 ### Testing
 
 `scripts/test_nfqueue_localhost.sh` and `scripts/test_nfqueue_gateway.sh` run end to end in a
