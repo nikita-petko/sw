@@ -62,19 +62,23 @@ std::string port(uint16_t port)
 	return "stub-port(" + std::to_string(port) + ")";
 }
 
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 std::string syn_probe(uint16_t port)
 {
 	return "stub-syn(" + std::to_string(port) + ")";
-}
-
-std::string forwarded_address(uint32_t inbound_if_index, uint32_t outbound_if_index, uint16_t port)
-{
-	return "stub-forwarded(" + std::to_string(inbound_if_index) + "," + std::to_string(outbound_if_index) + "," + std::to_string(port) + ")";
 }
 
 std::string region_enforcement(const std::vector<std::string>& server_addresses, uint16_t port)
 {
 	return "stub-region(" + std::to_string(server_addresses.size()) + "," + std::to_string(port) + ")";
 }
+#endif
+
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
+std::string forwarded_address(uint32_t inbound_if_index, uint32_t outbound_if_index, uint16_t port)
+{
+	return "stub-forwarded(" + std::to_string(inbound_if_index) + "," + std::to_string(outbound_if_index) + "," + std::to_string(port) + ")";
+}
+#endif
 }  // namespace filters
 }  // namespace backend

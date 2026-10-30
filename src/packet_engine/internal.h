@@ -43,7 +43,9 @@ struct PacketEngine::Session
 	uint64_t					   next_receive_order = 0;
 	PacketQueue					   delayed_packets;
 	PacketMode*					   mode;
+#ifdef LAGSW_FEATURE_PCAP_FILES
 	PcapCapture					   pcap;
+#endif
 	std::thread					   receive_thread;
 	std::thread					   send_thread;
 };
@@ -89,6 +91,7 @@ struct PacketEngine::State
 	std::vector<std::thread>						  region_threads;
 	std::string										  client_region;
 
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	std::unique_ptr<backend::PacketChannel> probe_handle;
 	std::thread						probe_thread;
 	std::unique_ptr<backend::PacketChannel> region_enforcement_handle;
@@ -103,12 +106,6 @@ struct PacketEngine::State
 	uint64_t						next_check_time	 = 0;
 	std::unordered_set<std::string> probed_addresses_in_window;
 
-	std::unique_ptr<backend::PacketChannel> fad_handle;
-	std::thread						fad_thread;
-	mutable std::mutex				fad_mutex;
-	std::string						fad_client_source_address;
-	std::string						fad_client_destination_address;
-
 	/// A packet buffered until its region-enforcement release time.
 	struct DelayedEnforcementPacket
 	{
@@ -117,6 +114,15 @@ struct PacketEngine::State
 		uint64_t			 release_at = 0;
 	};
 	std::vector<DelayedEnforcementPacket> enforcement_queue;
+#endif
+
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
+	std::unique_ptr<backend::PacketChannel> fad_handle;
+	std::thread						fad_thread;
+	mutable std::mutex				fad_mutex;
+	std::string						fad_client_source_address;
+	std::string						fad_client_destination_address;
+#endif
 };
 
 #endif

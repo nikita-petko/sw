@@ -46,6 +46,24 @@ set_languages("cxx20")
 -- always generate debug information
 set_symbols("debug")
 
+-- Optional features (the `features` section of the profiles config). Each one is compiled in only when enabled:
+-- `xmake f --pcap_files=y --desync_countdown=n`. A disabled feature's code is left out of the binary entirely and
+-- its configuration block is ignored with a warning. Targets opt in with add_options(), see src/xmake.lua.
+local features = {
+    {name = "region_enforcement",          default = true,  description = "Delay packets from servers outside the enforced region"},
+    {name = "pcap_files",                  default = false, description = "Write per-activation PCAP capture files (debugging aid)"},
+    {name = "desync_countdown",            default = true,  description = "Show the estimated post-deactivation desync countdown"},
+    {name = "forwarded_address_discovery", default = true,  description = "Discover client addresses of forwarded (shared) traffic"},
+}
+for _, feature in ipairs(features) do
+    option(feature.name)
+        set_default(feature.default)
+        set_showmenu(true)
+        set_description(feature.description)
+        add_defines("LAGSW_FEATURE_" .. feature.name:upper())
+    option_end()
+end
+
 includes("backends/windivert")
 includes("backends/stub")
 includes("backends/nfqueue")

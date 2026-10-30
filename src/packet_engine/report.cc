@@ -168,6 +168,7 @@ void PacketEngine::print_state() const
 		}
 		log_discovery_report(state_width, options_, discovery);
 	}
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	if (options_.features.region_enforcement.enabled)
 	{
 		LOG_INFO("%s", format_state_divider(state_width, "region enforcement").c_str());
@@ -176,11 +177,14 @@ void PacketEngine::print_state() const
 		log_state_line(state_width, "enforced region: " + highlight(current_enforced_region()));
 		LOG_INFO("%s", format_state_divider(state_width).c_str());
 	}
+#endif
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	if (options_.features.forwarded_address_discovery.enabled)
 	{
 		LOG_INFO("%s", format_state_divider(state_width, "forwarded address discovery").c_str());
 		log_state_line(state_width, "addresses:       " + highlight(forwarded_address_discovery_status()));
 		LOG_INFO("%s", format_state_divider(state_width).c_str());
 	}
+#endif
 	LOG_INFO("+%s+", std::string(state_width - 2, '-').c_str());
 }

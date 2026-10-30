@@ -125,12 +125,16 @@ void test_shipped_profiles()
 	CHECK(options.servers.size() == 10);
 	CHECK(options.servers[2].address == "34.13.202.203" && options.servers[2].name == "GR-EUC-203" && options.servers[2].group == "EU");
 	CHECK(options.discovery_port == 55000);
+#ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
 	CHECK(options.features.desync_countdown.enabled);
 	CHECK(options.features.desync_countdown.display == DesyncCountdownDisplay::override_activation);
 	CHECK(options.features.desync_countdown.enabled_for.size() == 2);
+#endif
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	CHECK(!options.features.forwarded_address_discovery.enabled);
 	CHECK(options.features.forwarded_address_discovery.inbound_if_idx == 5u);
 	CHECK(options.features.forwarded_address_discovery.outbound_if_idx == 67u);
+#endif
 
 	const ProfileOptions& trickle = options.profiles[0];
 	CHECK(trickle.name == "Trickle");
@@ -233,12 +237,20 @@ profiles:
 	CHECK(o.servers[3].group == "GROUP" && o.servers[3].name == "four");
 	CHECK(o.servers[1].name == "2.2.2.2");
 	CHECK(o.discovery_port == 1234 && o.discovery_window_ms == 3000);
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	CHECK(o.features.region_enforcement.enabled && o.features.region_enforcement.probe_port == 8080);
+#endif
+#ifdef LAGSW_FEATURE_PCAP_FILES
 	CHECK(o.features.pcap_files.enabled && o.features.pcap_files.output_dir == "caps");
 	CHECK(o.features.pcap_files.enabled_for == (std::vector<std::string>{"A", "B"}));
+#endif
+#ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
 	CHECK(o.features.desync_countdown.display == DesyncCountdownDisplay::until_reactivated);
 	CHECK(o.features.desync_countdown.duration_percent == 50);
+#endif
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	CHECK(o.features.forwarded_address_discovery.port == 55001 && o.features.forwarded_address_discovery.window_ms == 1500);
+#endif
 
 	const ProfileOptions& a = o.profiles[0];
 	CHECK(a.keys == (std::vector<int>{'X', 0x11, 0x41}));
@@ -305,17 +317,25 @@ void test_rejected_files()
 		{"unknown servers key", "servers:\n  nonsense: 1\n" + kProfile, "Invalid servers configuration key 'nonsense' in"},
 		{"zero discovery port", "servers:\n  discovery_port: 0\n" + kProfile, "Invalid discovery_port in"},
 		{"unknown features key", "features:\n  nonsense: 1\n" + kProfile, "Invalid features configuration key 'nonsense' in"},
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 		{"region enforcement without port", "features:\n  region_enforcement:\n    enabled: true\n" + kProfile, "probe_port is missing or invalid"},
+#endif
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 		{"same interfaces", "features:\n  forwarded_address_discovery:\n    enabled: true\n    port: 1\n    inbound: 2\n    outbound: 2\n" + kProfile,
 		 "different interfaces"},
 		{"interface index out of range", "features:\n  forwarded_address_discovery:\n    inbound: 4294967296\n" + kProfile, "Invalid inbound interface index in"},
+#endif
+#ifdef LAGSW_FEATURE_PCAP_FILES
 		{"pcap without profiles", "features:\n  pcap_files:\n    enabled: true\n" + kProfile, "pcap_files is enabled but enabled_for is missing"},
 		{"pcap unknown profile", "features:\n  pcap_files:\n    enabled: true\n    enabled_for: [Z]\n" + kProfile, "pcap_files enables unknown profile 'Z'"},
 		{"empty pcap output dir", "features:\n  pcap_files:\n    output_dir: \"\"\n" + kProfile, "Invalid pcap_files output_dir in"},
+#endif
+#ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
 		{"bad countdown display", "features:\n  desync_countdown:\n    display: never\n" + kProfile, "Invalid desync_countdown display 'never' in"},
 		{"countdown percentage", "features:\n  desync_countdown:\n    duration_percent: 101\n" + kProfile, "Invalid desync_countdown duration_percent in"},
 		{"countdown unknown profile", "features:\n  desync_countdown:\n    enabled: true\n    enabled_for:\n      - Z\n" + kProfile,
 		 "desync_countdown enables unknown profile 'Z'"},
+#endif
 	};
 	for (const ErrorCase& test : cases)
 	{
@@ -325,6 +345,50 @@ void test_rejected_files()
 			std::fprintf(stderr, "case '%s': expected failure containing '%s', got ok=%d log=%s\n", test.name, test.message, result.ok ? 1 : 0, result.log.c_str());
 			++failures;
 		}
+	}
+}
+
+/// A features block of a feature that is not compiled into the build is skipped with a warning, so profiles can be shared
+/// between builds. Features that are compiled in are covered by the other tests.
+void test_disabled_features_are_ignored()
+{
+	struct Section
+	{
+		const char* name;
+		bool		compiled;
+	};
+	const Section sections[] = {
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
+		{"region_enforcement", true},
+#else
+		{"region_enforcement", false},
+#endif
+#ifdef LAGSW_FEATURE_PCAP_FILES
+		{"pcap_files", true},
+#else
+		{"pcap_files", false},
+#endif
+#ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
+		{"desync_countdown", true},
+#else
+		{"desync_countdown", false},
+#endif
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
+		{"forwarded_address_discovery", true},
+#else
+		{"forwarded_address_discovery", false},
+#endif
+	};
+	for (const Section& section : sections)
+	{
+		if (section.compiled)
+			continue;
+		const std::string yaml = std::string("features:\n  ") + section.name +
+								 ":\n    enabled: true\n    nonsense: [1, 2]\n    enabled_for:\n      - Z\n    other: 3\n" + kProfile;
+		const LoadResult result = load_text(yaml);
+		CHECK(result.ok);
+		CHECK(result.log.find(std::string("Feature ") + section.name + " in ") != std::string::npos);
+		CHECK(result.log.find("not compiled into this build") != std::string::npos);
 	}
 }
 
@@ -355,6 +419,7 @@ int main()
 	test_shipped_profiles();
 	test_every_setting();
 	test_rejected_files();
+	test_disabled_features_are_ignored();
 	test_error_reports_line();
 	std::printf(failures == 0 ? "all options tests passed\n" : "%d options check(s) failed\n", failures);
 	return failures == 0 ? 0 : 1;

@@ -8,6 +8,7 @@
 #include "log.h"
 
 namespace {
+#ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
 bool desync_countdown_enabled_for(const DesyncCountdownOptions& countdown, const ProfileOptions& profile)
 {
 	if (!countdown.enabled)
@@ -15,6 +16,7 @@ bool desync_countdown_enabled_for(const DesyncCountdownOptions& countdown, const
 	return std::find(countdown.enabled_for.begin(), countdown.enabled_for.end(), "*") != countdown.enabled_for.end() ||
 		   std::find(countdown.enabled_for.begin(), countdown.enabled_for.end(), profile.name) != countdown.enabled_for.end();
 }
+#endif
 
 /// "(STOPPED)" or "(RUNNING: ...)" with the number of queued packets and the time until the next batch.
 std::string describe_run_state(const PacketEngine& engine)
@@ -37,7 +39,9 @@ std::string describe_run_state(const PacketEngine& engine)
 /// The running profiles with their packet status and, for period profiles, the time left.
 std::string describe_active_profiles(const PacketEngine& engine, const PacketEngineOptions& options)
 {
+#ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
 	const bool	override_activation = options.features.desync_countdown.display == DesyncCountdownDisplay::override_activation;
+#endif
 	std::string active_profiles;
 	for (size_t index = 0; index < options.profiles.size(); ++index)
 	{
@@ -45,9 +49,11 @@ std::string describe_active_profiles(const PacketEngine& engine, const PacketEng
 		const int			  number  = static_cast<int>(index + 1);
 		if (!engine.is_running(number))
 			continue;
+#ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
 		if (override_activation && profile.delay_mode != PacketDelayMode::packet_group_send &&
 			desync_countdown_enabled_for(options.features.desync_countdown, profile) && engine.profile_desync_countdown_ms(number))
 			continue;
+#endif
 		if (!active_profiles.empty())
 			active_profiles += ", ";
 		active_profiles += profile.name;
@@ -64,6 +70,7 @@ std::string describe_active_profiles(const PacketEngine& engine, const PacketEng
 	return active_profiles;
 }
 
+#ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
 /// The estimated desync time left for each profile that has the countdown enabled.
 std::string describe_desync_countdowns(const PacketEngine& engine, const PacketEngineOptions& options)
 {
@@ -81,8 +88,9 @@ std::string describe_desync_countdowns(const PacketEngine& engine, const PacketE
 	}
 	return desync_countdowns;
 }
+#endif
 
-/// The selected server with its regions and the region-enforcement and forwarded-address-discovery state.
+/// The selected server with its regions and the state of the region-enforcement and forwarded-address-discovery features.
 std::string describe_server(const PacketEngine& engine)
 {
 	const std::string server_region = engine.current_server_region();
@@ -92,6 +100,7 @@ std::string describe_server(const PacketEngine& engine)
 		region = (server_region.empty() ? "unknown" : server_region) + "/" + (client_region.empty() ? "unknown" : client_region);
 	std::string server_status =
 		engine.current_server() + (engine.is_authoritative_server() ? " (authoritative)" : "") + (region.empty() ? "" : " | " + region);
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	if (engine.is_region_enforcement_enabled())
 	{
 		const std::string re_status = engine.region_enforcement_status();
@@ -99,8 +108,11 @@ std::string describe_server(const PacketEngine& engine)
 		if (!re_status.empty())
 			server_status += " (" + re_status + ")";
 	}
+#endif
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	if (engine.is_forwarded_address_discovery_enabled())
 		server_status += " | fad: " + engine.forwarded_address_discovery_status();
+#endif
 	return server_status;
 }
 }  // namespace
@@ -130,11 +142,14 @@ void StatusLine::run()
 	{
 		const std::string status			= describe_run_state(engine_);
 		const std::string active_profiles	= describe_active_profiles(engine_, options_);
-		const std::string desync_countdowns = describe_desync_countdowns(engine_, options_);
 		const std::string server_status		= describe_server(engine_);
-		logging::set_status(status,
-							server_status + (active_profiles.empty() ? "" : " | " + active_profiles) +
-								(desync_countdowns.empty() ? "" : " | desync: " + desync_countdowns));
+		std::string		  details			= server_status + (active_profiles.empty() ? "" : " | " + active_profiles);
+#ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
+		const std::string desync_countdowns = describe_desync_countdowns(engine_, options_);
+		if (!desync_countdowns.empty())
+			details += " | desync: " + desync_countdowns;
+#endif
+		logging::set_status(status, details);
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 	}
 }

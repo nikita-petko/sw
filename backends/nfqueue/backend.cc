@@ -426,16 +426,11 @@ std::string port(uint16_t port)
 	return port_expression(port);
 }
 
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 std::string syn_probe(uint16_t port)
 {
 	const std::string text = std::to_string(port);
 	return "tcp.Syn and (tcp.DstPort == " + text + " or tcp.SrcPort == " + text + ")";
-}
-
-std::string forwarded_address(uint32_t inbound_if_index, uint32_t outbound_if_index, uint16_t port)
-{
-	return "outbound and (ifIdx == " + std::to_string(inbound_if_index) + " or ifIdx == " + std::to_string(outbound_if_index) + ") and (" +
-		   port_expression(port) + ")";
 }
 
 std::string region_enforcement(const std::vector<std::string>& server_addresses, uint16_t port)
@@ -444,5 +439,14 @@ std::string region_enforcement(const std::vector<std::string>& server_addresses,
 		return {};
 	return "tcp.Psh and (" + address_chain("ip.SrcAddr", server_addresses) + ") and tcp.SrcPort == " + std::to_string(port);
 }
+#endif
+
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
+std::string forwarded_address(uint32_t inbound_if_index, uint32_t outbound_if_index, uint16_t port)
+{
+	return "outbound and (ifIdx == " + std::to_string(inbound_if_index) + " or ifIdx == " + std::to_string(outbound_if_index) + ") and (" +
+		   port_expression(port) + ")";
+}
+#endif
 }  // namespace filters
 }  // namespace backend

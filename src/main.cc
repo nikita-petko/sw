@@ -60,10 +60,12 @@ KeyAction handle_command_key(PacketEngine& engine, int key)
 		engine.cycle_server(-1);
 	else if (key == platform::key::page_down)
 		engine.cycle_server(1);
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	else if (key == platform::key::left)
 		engine.cycle_enforced_region(-1);
 	else if (key == platform::key::right)
 		engine.cycle_enforced_region(1);
+#endif
 	else if (key == platform::key::tab)
 		engine.print_state();
 	else
@@ -89,16 +91,22 @@ int main(int argc, char* argv[])
 	PacketEngineOptions options;
 	if (!parse_options(argc, argv, options))
 		return 0;
+#ifdef LAGSW_FEATURE_PCAP_FILES
 	if (options.features.pcap_files.enabled)
 		LOG_WARN("PCAP file capture is enabled for debugging. Do not use it during normal operation.");
+#endif
 	log_loaded_profiles(options);
 
 	platform::ignore_interrupt();
 
 	PacketEngine engine(options);
-	LOG_INFO(
-		"Hold a configured profile key to start/stop packet capture, pgup/pgdn to cycle servers, left/right to cycle enforced server, 'q' "
-		"or backspace to quit.");
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
+	const char* region_keys_help = "left/right to cycle enforced server, ";
+#else
+	const char* region_keys_help = "";
+#endif
+	LOG_INFO("Hold a configured profile key to start/stop packet capture, pgup/pgdn to cycle servers, %s'q' or backspace to quit.",
+			 region_keys_help);
 	engine.start_workers();
 	StatusLine		  status_line(engine, options);
 	ProfileController controller(engine, options);

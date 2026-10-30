@@ -8,10 +8,14 @@ void PacketEngine::start_workers()
 		resolve_client_region();
 	if (options_.discovery_port)
 		start_discovery_worker();
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	if (options_.features.region_enforcement.enabled && options_.features.region_enforcement.probe_port != 0)
 		start_probe_worker();
+#endif
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	if (options_.features.forwarded_address_discovery.enabled)
 		start_forwarded_address_worker();
+#endif
 }
 
 void PacketEngine::start_discovery_worker()
@@ -36,78 +40,52 @@ void PacketEngine::start_discovery_worker()
 	state_->discovery_thread = std::thread(&PacketEngine::discover_packets, this);
 }
 
-void PacketEngine::start_probe_worker()
-{
-	const uint16_t	  port	 = options_.features.region_enforcement.probe_port;
-	const std::string filter = backend::filters::syn_probe(port);
-	backend::OpenOptions open_options;
-	open_options.filter			 = filter;
-	open_options.sniff			 = true;
-	open_options.include_forward = true;
-	std::string open_error;
-	state_->probe_handle = backend::open(open_options, open_error);
-	if (!state_->probe_handle)
-		LOG_ERROR("Probe detection setup: failed to open capture channel: %s", open_error.c_str());
-	else
-	{
-		LOG_INFO("Probe detection enabled on port %u", port);
-		state_->probe_thread = std::thread(&PacketEngine::probe_packets, this);
-	}
-
-	start_region_enforcement();
-}
-
-void PacketEngine::start_forwarded_address_worker()
-{
-	const uint32_t	  inbound_if_idx  = *options_.features.forwarded_address_discovery.inbound_if_idx;
-	const uint32_t	  outbound_if_idx = *options_.features.forwarded_address_discovery.outbound_if_idx;
-	const uint16_t	  port			  = options_.features.forwarded_address_discovery.port;
-	const std::string filter		  = backend::filters::forwarded_address(inbound_if_idx, outbound_if_idx, port);
-	LOG_DEBUG("Forwarded address discovery setup: opening filter '%s'", filter.c_str());
-	// a dedicated priority avoids losing packets to other priority-0 handles (server discovery, profiles) with overlapping filters
-	backend::OpenOptions open_options;
-	open_options.filter	  = filter;
-	open_options.sniff	  = true;
-	open_options.priority = 1000;
-	std::string open_error;
-	state_->fad_handle = backend::open(open_options, open_error);
-	if (!state_->fad_handle)
-	{
-		LOG_ERROR("Forwarded address discovery setup: failed to open capture channel: %s", open_error.c_str());
-		return;
-	}
-	LOG_INFO("Forwarded address discovery enabled (inbound ifIdx %u, outbound ifIdx %u)", inbound_if_idx, outbound_if_idx);
-	state_->fad_thread = std::thread(&PacketEngine::forwarded_address_discovery_recv, this);
-}
-
 void PacketEngine::stop_workers()
 {
 	shutdown_ = true;
 	if (state_->discovery_handle)
 		state_->discovery_handle->shutdown_recv();
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	if (state_->probe_handle)
 		state_->probe_handle->shutdown_recv();
+#endif
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	if (state_->fad_handle)
 		state_->fad_handle->shutdown_recv();
+#endif
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	stop_region_enforcement();
+#endif
 	teardown();
 	for (std::thread& cleanup_thread : state_->cleanup_threads)
 		if (cleanup_thread.joinable())
 			cleanup_thread.join();
 	if (state_->discovery_thread.joinable())
 		state_->discovery_thread.join();
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	if (state_->probe_thread.joinable())
 		state_->probe_thread.join();
+#endif
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	if (state_->fad_thread.joinable())
 		state_->fad_thread.join();
+#endif
 	for (std::thread& region_thread : state_->region_threads)
 		if (region_thread.joinable())
 			region_thread.join();
 	state_->region_threads.clear();
-	for (auto* channel : {&state_->discovery_handle, &state_->probe_handle, &state_->fad_handle})
-		if (*channel)
+	const auto close_channel = [](std::unique_ptr<backend::PacketChannel>& channel) {
+		if (channel)
 		{
-			(*channel)->close();
-			channel->reset();
+			channel->close();
+			channel.reset();
 		}
+	};
+	close_channel(state_->discovery_handle);
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
+	close_channel(state_->probe_handle);
+#endif
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
+	close_channel(state_->fad_handle);
+#endif
 }

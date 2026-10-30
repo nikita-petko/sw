@@ -124,12 +124,16 @@ namespace filters {
 std::string profile(const ProfileFilter& spec);
 /// Any TCP or UDP packet whose source or destination port equals `port`.
 std::string port(uint16_t port);
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 /// TCP SYN packets whose source or destination port equals `port`.
 std::string syn_probe(uint16_t port);
-/// Outbound TCP/UDP packets on `port` seen on either of the two interfaces.
-std::string forwarded_address(uint32_t inbound_if_index, uint32_t outbound_if_index, uint16_t port);
 /// TCP PSH packets coming from any of `server_addresses` on `port`.
 std::string region_enforcement(const std::vector<std::string>& server_addresses, uint16_t port);
+#endif
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
+/// Outbound TCP/UDP packets on `port` seen on either of the two interfaces.
+std::string forwarded_address(uint32_t inbound_if_index, uint32_t outbound_if_index, uint16_t port);
+#endif
 }  // namespace filters
 
 }  // namespace backend

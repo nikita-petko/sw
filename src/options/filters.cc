@@ -11,6 +11,7 @@ const char* describe(const std::string& error)
 	return error.empty() ? "unknown error" : error.c_str();
 }
 
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 bool validate_region_filters(const PacketEngineOptions& options)
 {
 	const uint16_t	  probe_port	 = options.features.region_enforcement.probe_port;
@@ -34,7 +35,9 @@ bool validate_region_filters(const PacketEngineOptions& options)
 	}
 	return true;
 }
+#endif
 
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 bool validate_forwarded_address_filter(const PacketEngineOptions& options)
 {
 	const ForwardedAddressDiscoveryOptions& discovery = options.features.forwarded_address_discovery;
@@ -48,6 +51,7 @@ bool validate_forwarded_address_filter(const PacketEngineOptions& options)
 	}
 	return true;
 }
+#endif
 
 /// Validates the capture filter of a profile for every server the user can select (and for no server).
 bool validate_profile_filters(const char* path, const PacketEngineOptions& options, const ProfileOptions& profile)
@@ -95,12 +99,16 @@ bool validate_filters(const char* path, const PacketEngineOptions& options)
 		LOG_ERROR("A profiles YAML file must contain at least one profile: %s", path);
 		return false;
 	}
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	if (options.features.region_enforcement.enabled && options.features.region_enforcement.probe_port != 0 &&
 		!validate_region_filters(options))
 		return false;
+#endif
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	if (options.features.forwarded_address_discovery.enabled && options.features.forwarded_address_discovery.port != 0 &&
 		!validate_forwarded_address_filter(options))
 		return false;
+#endif
 	for (const ProfileOptions& profile : options.profiles)
 		if (!validate_profile_filters(path, options, profile))
 			return false;

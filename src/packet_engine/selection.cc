@@ -40,41 +40,6 @@ std::string PacketEngine::current_server() const
 	return "none";
 }
 
-std::vector<std::string> PacketEngine::configured_regions() const
-{
-	std::vector<std::string> regions;
-	for (const ServerOptions& server : options_.servers)
-	{
-		if (!server.group.empty())
-		{
-			if (std::find(regions.begin(), regions.end(), server.group) == regions.end())
-				regions.push_back(server.group);
-		}
-	}
-	if (regions.empty())
-	{
-		for (const ServerOptions& server : options_.servers)
-		{
-			const std::string& name = server.name.empty() ? server.address : server.name;
-			if (!name.empty() && std::find(regions.begin(), regions.end(), name) == regions.end())
-				regions.push_back(name);
-		}
-	}
-	return regions;
-}
-
-std::string PacketEngine::current_enforced_region() const
-{
-	std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
-	const auto					regions		 = configured_regions();
-	const size_t				region_index = enforced_region_index_.load();
-	if (region_index != 0 && region_index <= regions.size())
-	{
-		return regions[region_index - 1];
-	}
-	return "none";
-}
-
 std::string PacketEngine::current_server_region() const
 {
 	std::string address;
@@ -122,22 +87,4 @@ void PacketEngine::cycle_server(int direction)
 		teardown(profile);
 	for (const int profile : active_profiles)
 		setup(profile);
-}
-
-void PacketEngine::cycle_enforced_region(int direction)
-{
-	const auto regions = configured_regions();
-	if (regions.empty() || direction == 0)
-		return;
-	const size_t option_count = regions.size() + 1;
-	size_t		 current	  = enforced_region_index_.load();
-	if (direction > 0)
-		current = (current + 1) % option_count;
-	else
-		current = current == 0 ? option_count - 1 : current - 1;
-	enforced_region_index_ = current;
-	LOG_REGION("Enforced region changed to: %s", current_enforced_region().c_str());
-
-	stop_region_enforcement();
-	start_region_enforcement();
 }

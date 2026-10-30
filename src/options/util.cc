@@ -125,6 +125,7 @@ std::optional<PacketGroupOrder> parse_packet_group_order(const std::string& valu
 	return lookup(value, table);
 }
 
+#ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
 std::optional<DesyncCountdownDisplay> parse_countdown_display(const std::string& value)
 {
 	static const std::pair<const char*, DesyncCountdownDisplay> table[] = {{"alongside", DesyncCountdownDisplay::alongside},
@@ -132,6 +133,7 @@ std::optional<DesyncCountdownDisplay> parse_countdown_display(const std::string&
 																		   {"until_reactivated", DesyncCountdownDisplay::until_reactivated}};
 	return lookup(value, table);
 }
+#endif
 
 std::optional<int> parse_key(std::string value)
 {

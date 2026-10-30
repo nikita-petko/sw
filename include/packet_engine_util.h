@@ -8,6 +8,7 @@
 #include "packet_engine.h"
 #include "packet_headers.h"
 
+#ifdef LAGSW_FEATURE_PCAP_FILES
 /// Returns whether PCAP capture is enabled globally and for the given profile.
 bool pcap_files_enabled_for(const PcapFilesOptions& pcap_files, const ProfileOptions& profile);
 /// Writes a 32-bit value to a PCAP stream in the platform's byte order.
@@ -28,6 +29,7 @@ void start_pcap_capture(const PcapFilesOptions& pcap_files, int profile, const P
 /// Appends a received packet (with a PCAP record header and the current time) to the capture. On a write failure the
 /// error is logged under `profile_label` and `capture.file` is reset.
 void record_pcap_packet(PcapCapture& capture, const uint8_t* packet_data, uint32_t length, const std::string& profile_label);
+#endif
 
 /// Creates a state-report divider of the requested width, optionally centered around a label.
 std::string format_state_divider(size_t width, const std::string& label = {});
@@ -55,5 +57,8 @@ struct PacketAddresses
 
 /// Parses a packet and returns its IPv4 or IPv6 source and destination addresses.
 PacketAddresses packet_addresses(const uint8_t* packet_data, uint32_t packet_length);
+
+/// The source or destination address of an IPv4 or IPv6 packet as text; empty when it has neither header.
+std::string endpoint_address(const ParsedPacket& parsed, bool destination);
 
 #endif

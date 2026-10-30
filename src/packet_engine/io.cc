@@ -89,8 +89,10 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 			continue;
 		}
 		state_->profile_stats[profile - 1].packets_caught.fetch_add(1);
+#ifdef LAGSW_FEATURE_PCAP_FILES
 		if (session->pcap.file)
 			record_pcap_packet(session->pcap, packet_data, received_length, profile_label);
+#endif
 		const bool sniff = profile_options.capture_options.sniff.value_or(false);
 		if (!sniff)
 		{

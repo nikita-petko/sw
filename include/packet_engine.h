@@ -156,6 +156,9 @@ struct ProfileOptions
 	CaptureOptions capture_options;
 };
 
+// Each optional feature is compiled in only when its LAGSW_FEATURE_* definition is set (see the root xmake.lua).
+
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 /// Settings for automatic region enforcement based on network probes.
 struct RegionEnforcementOptions
 {
@@ -164,7 +167,9 @@ struct RegionEnforcementOptions
 	/// UDP probe port used to identify the active region.
 	uint16_t probe_port = 0;
 };
+#endif
 
+#ifdef LAGSW_FEATURE_PCAP_FILES
 /// Settings for optional per-profile PCAP capture files.
 struct PcapFilesOptions
 {
@@ -175,7 +180,9 @@ struct PcapFilesOptions
 	/// Profile names to capture, or "*" to capture all profiles.
 	std::vector<std::string> enabled_for;
 };
+#endif
 
+#ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
 /// Controls when the estimated desynchronization countdown is displayed.
 enum class DesyncCountdownDisplay
 {
@@ -196,7 +203,9 @@ struct DesyncCountdownOptions
 	/// Profile names for which to display the countdown.
 	std::vector<std::string> enabled_for;
 };
+#endif
 
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 /// Settings for learning the client's forwarded addresses from captured packets.
 struct ForwardedAddressDiscoveryOptions
 {
@@ -211,18 +220,27 @@ struct ForwardedAddressDiscoveryOptions
 	/// Discovery observation window, in milliseconds.
 	uint64_t window_ms = 5000;
 };
+#endif
 
-/// Optional packet-engine features and their configuration.
+/// Optional packet-engine features and their configuration. Only the features compiled into the build are present.
 struct FeaturesOptions
 {
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	/// Region-enforcement feature settings.
 	RegionEnforcementOptions region_enforcement;
+#endif
+#ifdef LAGSW_FEATURE_PCAP_FILES
 	/// PCAP-capture feature settings.
 	PcapFilesOptions pcap_files;
+#endif
+#ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
 	/// Desynchronization-countdown feature settings.
 	DesyncCountdownOptions desync_countdown;
+#endif
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	/// Forwarded-address-discovery feature settings.
 	ForwardedAddressDiscoveryOptions forwarded_address_discovery;
+#endif
 };
 
 /// Complete configuration used to construct a packet engine.
@@ -285,18 +303,24 @@ public:
 	bool is_running() const;
 	/// Returns whether the numbered profile is currently active.
 	bool is_running(int profile) const;
+#ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
 	/// Returns the remaining estimated desynchronization countdown, if available.
 	std::optional<uint64_t> profile_desync_countdown_ms(int profile) const;
+#endif
 	/// Returns whether the selected server has been identified as authoritative.
 	bool is_authoritative_server() const;
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	/// Returns whether region enforcement is configured as enabled.
 	bool is_region_enforcement_enabled() const;
 	/// Returns the current region-enforcement status text.
 	std::string region_enforcement_status() const;
+#endif
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	/// Returns whether forwarded-address discovery is configured as enabled.
 	bool is_forwarded_address_discovery_enabled() const;
 	/// Returns the current forwarded-address discovery status text.
 	std::string forwarded_address_discovery_status() const;
+#endif
 	/// Returns elapsed time in milliseconds since the earliest active profile started.
 	uint64_t running_time_ms() const;
 	/// Returns the active time in milliseconds for a profile.
@@ -309,14 +333,18 @@ public:
 	uint64_t next_batch_in_ms() const;
 	/// Selects the next or previous configured server according to direction.
 	void cycle_server(int direction);
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	/// Selects the next or previous region for enforcement according to direction.
 	void cycle_enforced_region(int direction);
+#endif
 	/// Returns the currently selected server address.
 	std::string current_server() const;
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	/// Returns the currently selected enforced region.
 	std::string current_enforced_region() const;
 	/// Returns the set of configured regions available for enforcement.
 	std::vector<std::string> configured_regions() const;
+#endif
 	/// Returns the resolved region of the selected server, if known.
 	std::string current_server_region() const;
 	/// Returns the resolved client region, if known.
@@ -332,6 +360,7 @@ private:
 	void write_packets(const std::shared_ptr<Session>& session);
 	/// Runs server discovery.
 	void discover_packets();
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	/// Monitors packets used by region enforcement.
 	void probe_packets();
 	/// Receives packets used by region-enforcement forwarding.
@@ -344,6 +373,17 @@ private:
 	void stop_region_enforcement();
 	/// Builds the backend filter used for region enforcement.
 	std::string region_enforcement_filter() const;
+	/// Waits until region-enforcement packets are due and sends them. Returns false when the worker should stop.
+	bool send_due_enforcement_packets();
+	/// Sends every packet still held by region enforcement.
+	void flush_enforcement_queue();
+	/// Opens the probe-detection capture and starts its thread, then starts region enforcement.
+	void start_probe_worker();
+	/// Handles a packet captured by probe detection: starts a new probe window and logs the probed server.
+	void handle_probe_packet(const uint8_t* packet_data, uint32_t length, const backend::PacketMeta& meta);
+	/// Logs a server that was probed for the first time in the current window.
+	void log_probed_server(const std::string& server_address);
+#endif
 	/// Resolves and stores a server region.
 	void resolve_region(const std::string& address, bool preserve_name = false);
 	/// Applies a cached region of the server; returns false when there is no usable cache entry.
@@ -354,20 +394,18 @@ private:
 	void rename_server(const std::string& address, const std::string& name);
 	/// Looks up the client's own region online (runs on its own thread) and stores the result.
 	void lookup_client_region();
-	/// Waits until region-enforcement packets are due and sends them. Returns false when the worker should stop.
-	bool send_due_enforcement_packets();
-	/// Sends every packet still held by region enforcement.
-	void flush_enforcement_queue();
 	/// Opens the server-discovery capture and starts its thread.
 	void start_discovery_worker();
-	/// Opens the probe-detection capture and starts its thread, then starts region enforcement.
-	void start_probe_worker();
-	/// Opens the forwarded-address-discovery capture and starts its thread.
-	void start_forwarded_address_worker();
 	/// Resolves the configured or discovered client region.
 	void resolve_client_region();
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
+	/// Opens the forwarded-address-discovery capture and starts its thread.
+	void start_forwarded_address_worker();
 	/// Receives forwarded packets used to discover client addresses.
 	void forwarded_address_discovery_recv();
+	/// Adopts the busiest address in `counts` as the client's destination (or source) address and restarts active profiles.
+	void apply_forwarded_address_winner(std::unordered_map<std::string, uint64_t>& counts, bool is_destination);
+#endif
 	/// Returns the discovered client source address or its configured fallback.
 	std::optional<std::string> effective_client_source_address() const;
 	/// Returns the discovered client destination address or its configured fallback.
@@ -384,18 +422,14 @@ private:
 	void finish_discovery_window(DiscoveryScan& scan);
 	/// Display name of a server address, with the address in brackets when the server has a different configured name.
 	std::string server_label(const std::string& address) const;
-	/// Handles a packet captured by probe detection: starts a new probe window and logs the probed server.
-	void handle_probe_packet(const uint8_t* packet_data, uint32_t length, const backend::PacketMeta& meta);
-	/// Logs a server that was probed for the first time in the current window.
-	void log_probed_server(const std::string& server_address);
-	/// Adopts the busiest address in `counts` as the client's destination (or source) address and restarts active profiles.
-	void apply_forwarded_address_winner(std::unordered_map<std::string, uint64_t>& counts, bool is_destination);
 
 	PacketEngineOptions options_;
 	std::atomic<bool> running_ = false;
 	std::atomic<bool> shutdown_ = false;
 	std::atomic<size_t> server_index_ = 0;
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	std::atomic<size_t> enforced_region_index_ = 0;
+#endif
 	std::vector<std::unique_ptr<PacketMode>> packet_modes_;
 
 	struct State;

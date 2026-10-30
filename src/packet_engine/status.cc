@@ -6,54 +6,30 @@
 #include "log.h"
 #include "platform.h"
 
-std::string PacketEngine::forwarded_address_discovery_status() const
-{
-	if (!options_.features.forwarded_address_discovery.enabled)
-		return {};
-
-	std::lock_guard<std::mutex> lock(state_->fad_mutex);
-	const std::string			 source		 = state_->fad_client_source_address.empty() ? "unknown" : state_->fad_client_source_address;
-	const std::string			 destination = state_->fad_client_destination_address.empty() ? "unknown" : state_->fad_client_destination_address;
-	return "src: " + source + ", dst: " + destination;
-}
-
 std::optional<std::string> PacketEngine::effective_client_source_address() const
 {
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	if (options_.features.forwarded_address_discovery.enabled)
 	{
 		std::lock_guard<std::mutex> lock(state_->fad_mutex);
 		if (!state_->fad_client_source_address.empty())
 			return state_->fad_client_source_address;
 	}
+#endif
 	return options_.client_source_address;
 }
 
 std::optional<std::string> PacketEngine::effective_client_destination_address() const
 {
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	if (options_.features.forwarded_address_discovery.enabled)
 	{
 		std::lock_guard<std::mutex> lock(state_->fad_mutex);
 		if (!state_->fad_client_destination_address.empty())
 			return state_->fad_client_destination_address;
 	}
+#endif
 	return options_.client_destination_address;
-}
-
-std::string PacketEngine::region_enforcement_status() const
-{
-	if (!options_.features.region_enforcement.enabled)
-		return {};
-
-	std::lock_guard<std::mutex> lock(state_->probe_mutex);
-	if (!state_->probe_received)
-		return "Waiting for probes...";
-
-	const uint64_t now = platform::tick_ms();
-	if (now >= state_->next_check_time)
-		return "~0s";
-
-	const uint64_t remaining_ms = state_->next_check_time - now;
-	return "~" + logging::format_duration(remaining_ms);
 }
 
 uint64_t PacketEngine::running_time_ms() const
@@ -92,25 +68,6 @@ std::string PacketEngine::profile_packet_status(int profile) const
 		return {};
 	std::lock_guard<std::mutex> packet_lock(session->packet_mutex);
 	return session->mode->status();
-}
-
-std::optional<uint64_t> PacketEngine::profile_desync_countdown_ms(int profile) const
-{
-	if (profile < 1 || static_cast<size_t>(profile) > options_.profiles.size())
-		return std::nullopt;
-	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
-	const size_t				index = static_cast<size_t>(profile - 1);
-	const State::ProfileStats& stats = state_->profile_stats[index];
-	const bool hide_while_active = options_.features.desync_countdown.display == DesyncCountdownDisplay::until_reactivated;
-	if ((hide_while_active && state_->active_profiles[index]) || stats.enabled_count == 0 || stats.last_disabled_at == 0)
-		return std::nullopt;
-	const uint64_t duration_percent = options_.features.desync_countdown.duration_percent;
-	const uint64_t estimate_ms = (stats.last_enabled_time / 100) * duration_percent +
-								  (stats.last_enabled_time % 100) * duration_percent / 100;
-	const uint64_t elapsed_ms = platform::tick_ms() - stats.last_disabled_at;
-	if (elapsed_ms >= estimate_ms)
-		return std::nullopt;
-	return estimate_ms - elapsed_ms;
 }
 
 size_t PacketEngine::pending_packets() const

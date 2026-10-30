@@ -94,16 +94,6 @@ bool PacketEngine::is_authoritative_server() const
 	return state_->authoritative_server;
 }
 
-bool PacketEngine::is_region_enforcement_enabled() const
-{
-	return options_.features.region_enforcement.enabled;
-}
-
-bool PacketEngine::is_forwarded_address_discovery_enabled() const
-{
-	return options_.features.forwarded_address_discovery.enabled;
-}
-
 void PacketEngine::setup(int profile)
 {
 	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
@@ -139,8 +129,10 @@ void PacketEngine::setup(int profile)
 		if (const std::shared_ptr<Session> locked = weak_session.lock())
 			locked->handle->discard(meta);
 	});
+#ifdef LAGSW_FEATURE_PCAP_FILES
 	if (pcap_files_enabled_for(options_.features.pcap_files, profile_options))
 		start_pcap_capture(options_.features.pcap_files, profile, profile_options, session->pcap);
+#endif
 	state_->profile_stats[profile - 1].enabled_since = platform::tick_ms();
 	state_->active_sessions[profile - 1] = session;
 	state_->active_profiles[profile - 1] = true;
@@ -214,21 +206,25 @@ void PacketEngine::teardown(int profile)
 		state_->cleanup_threads.emplace_back([this, session, enabled_time, profile] {
 			session->receive_thread.join();
 			session->send_thread.join();
+#ifdef LAGSW_FEATURE_PCAP_FILES
 			const bool pcap_captured = session->pcap.file != nullptr;
 			if (pcap_captured)
 				session->pcap.file.reset();
+#endif
 			session->handle->close();
 			platform::end_timer_resolution();
 			LOG_DEACTIVATE("profile #%d - %s teardown: disabled after %s",
 					 profile,
 					 options_.profiles[profile - 1].name.c_str(),
 					 logging::format_duration(enabled_time).c_str());
+#ifdef LAGSW_FEATURE_PCAP_FILES
 			if (pcap_captured)
 				LOG_INFO("profile #%d - %s PCAP capture: %s (GUID: %s)",
 						 profile,
 						 options_.profiles[profile - 1].name.c_str(),
 						 session->pcap.path.c_str(),
 						 session->pcap.guid.c_str());
+#endif
 		});
 	}
 }

@@ -118,6 +118,7 @@ bool validate_send_keys(const PacketEngineOptions& options)
 	return true;
 }
 
+#if defined(LAGSW_FEATURE_PCAP_FILES) || defined(LAGSW_FEATURE_DESYNC_COUNTDOWN)
 /// Every name in an enabled_for list must be "*" or a configured profile.
 bool validate_enabled_for(const PacketEngineOptions& options, const char* feature, const std::vector<std::string>& enabled_for)
 {
@@ -131,16 +132,23 @@ bool validate_enabled_for(const PacketEngineOptions& options, const char* featur
 	}
 	return true;
 }
+#endif
 
-bool validate_features(const char* path, const PacketEngineOptions& options)
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
+bool validate_region_enforcement(const char* path, const RegionEnforcementOptions& region)
 {
-	const FeaturesOptions& features = options.features;
-	if (features.region_enforcement.enabled && features.region_enforcement.probe_port == 0)
+	if (region.enabled && region.probe_port == 0)
 	{
 		LOG_ERROR("Feature region_enforcement is enabled but probe_port is missing or invalid in %s", path);
 		return false;
 	}
-	const ForwardedAddressDiscoveryOptions& discovery = features.forwarded_address_discovery;
+	return true;
+}
+#endif
+
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
+bool validate_forwarded_address_discovery(const char* path, const ForwardedAddressDiscoveryOptions& discovery)
+{
 	if (discovery.enabled && (!discovery.inbound_if_idx || !discovery.outbound_if_idx))
 	{
 		LOG_ERROR("Feature forwarded_address_discovery is enabled but inbound and/or outbound is missing in %s", path);
@@ -156,24 +164,60 @@ bool validate_features(const char* path, const PacketEngineOptions& options)
 		LOG_ERROR("Feature forwarded_address_discovery is enabled but port is missing or invalid in %s", path);
 		return false;
 	}
-	if (features.pcap_files.enabled && features.pcap_files.enabled_for.empty())
+	return true;
+}
+#endif
+
+#ifdef LAGSW_FEATURE_PCAP_FILES
+bool validate_pcap_files(const char* path, const PacketEngineOptions& options)
+{
+	const PcapFilesOptions& pcap = options.features.pcap_files;
+	if (pcap.enabled && pcap.enabled_for.empty())
 	{
 		LOG_ERROR("Feature pcap_files is enabled but enabled_for is missing or empty in %s", path);
 		return false;
 	}
-	if (features.pcap_files.enabled && !validate_enabled_for(options, "pcap_files", features.pcap_files.enabled_for))
-		return false;
-	if (features.desync_countdown.enabled && features.desync_countdown.enabled_for.empty())
+	return !pcap.enabled || validate_enabled_for(options, "pcap_files", pcap.enabled_for);
+}
+#endif
+
+#ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
+bool validate_desync_countdown(const char* path, const PacketEngineOptions& options)
+{
+	const DesyncCountdownOptions& countdown = options.features.desync_countdown;
+	if (countdown.enabled && countdown.enabled_for.empty())
 	{
 		LOG_ERROR("Feature desync_countdown is enabled but enabled_for is missing or empty in %s", path);
 		return false;
 	}
-	if (features.desync_countdown.duration_percent == 0 || features.desync_countdown.duration_percent > 100)
+	if (countdown.duration_percent == 0 || countdown.duration_percent > 100)
 	{
 		LOG_ERROR("Feature desync_countdown duration_percent must be between 1 and 100 in %s", path);
 		return false;
 	}
-	return !features.desync_countdown.enabled || validate_enabled_for(options, "desync_countdown", features.desync_countdown.enabled_for);
+	return !countdown.enabled || validate_enabled_for(options, "desync_countdown", countdown.enabled_for);
+}
+#endif
+
+bool validate_features([[maybe_unused]] const char* path, [[maybe_unused]] const PacketEngineOptions& options)
+{
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
+	if (!validate_region_enforcement(path, options.features.region_enforcement))
+		return false;
+#endif
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
+	if (!validate_forwarded_address_discovery(path, options.features.forwarded_address_discovery))
+		return false;
+#endif
+#ifdef LAGSW_FEATURE_PCAP_FILES
+	if (!validate_pcap_files(path, options))
+		return false;
+#endif
+#ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
+	if (!validate_desync_countdown(path, options))
+		return false;
+#endif
+	return true;
 }
 }  // namespace
 

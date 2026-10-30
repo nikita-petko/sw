@@ -61,6 +61,27 @@ To remove generated build output:
 xmake clean
 ```
 
+### Optional features
+
+Each section of the profiles `features:` block is a compile-time feature. A
+disabled feature is not compiled into the binary at all, and its section in a
+profiles file is skipped with a warning. Toggle them when configuring:
+
+| Feature | xmake flag | Default |
+| --- | --- | --- |
+| `region_enforcement` | `--region_enforcement=y\|n` | `y` |
+| `pcap_files` | `--pcap_files=y\|n` | `n` |
+| `desync_countdown` | `--desync_countdown=y\|n` | `y` |
+| `forwarded_address_discovery` | `--forwarded_address_discovery=y\|n` | `y` |
+
+```powershell
+xmake f -m release --pcap_files=y --region_enforcement=n
+xmake
+```
+
+Each feature defines `LAGSW_FEATURE_<NAME>` (for example `LAGSW_FEATURE_PCAP_FILES`)
+while it is enabled.
+
 ## Linux
 
 ### Requirements
@@ -268,7 +289,11 @@ servers:
 
 ### Features
 
-PCAP output is a debugging feature and is disabled by default. When enabled,
+Every feature is optional at build time (see [Optional features](#optional-features));
+settings for a feature that was left out of the build are ignored with a warning.
+
+PCAP output is a debugging feature and is disabled by default, both in the
+build (`--pcap_files=n`) and in the profiles file. When enabled,
 each activation of a selected profile writes every packet received by that
 profile's capture thread to a separate PCAP file. The file name and the
 deactivation log share a GUID. PCAP files contain raw IP packets (`DLT_RAW`)

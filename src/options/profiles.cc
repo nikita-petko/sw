@@ -13,6 +13,8 @@ namespace {
 constexpr unsigned long kMaxPort = (std::numeric_limits<uint16_t>::max)();
 constexpr unsigned long kMaxU32	 = (std::numeric_limits<uint32_t>::max)();
 constexpr long			kMaxI32	 = (std::numeric_limits<int32_t>::max)();
+/// Name of the open `enabled_for:` list while a feature's settings are being read.
+constexpr const char*	kEnabledForList = "enabled_for";
 
 /// Outcome of offering a line to one of the parser's handlers.
 enum class Status
@@ -320,7 +322,9 @@ private:
 	{
 		section_ = name;
 		clear_subsection();
-		servers_base_ = features_base_ = pcap_base_ = countdown_base_ = -1;
+		servers_base_ = features_base_ = feature_indent_ = -1;
+		feature_.clear();
+		list_target_ = nullptr;
 		if (name == "features")
 			features_base_ = indent;
 		else if (name == "servers")
@@ -342,11 +346,8 @@ private:
 			return to_status(profile_ && indented && add_keys(context_, item, *profile_));
 		if (plain_item && subsection_ == "disables")
 			return to_status(profile_ && indented && add_names(context_, item, profile_->disables, "disabled profile"));
-		if (plain_item && subsection_ == "pcap_files_enabled_for")
-			return to_status(indented && add_names(context_, item, options_.features.pcap_files.enabled_for, "pcap_files enabled_for value"));
-		if (plain_item && subsection_ == "desync_countdown_enabled_for")
-			return to_status(indented &&
-							 add_names(context_, item, options_.features.desync_countdown.enabled_for, "desync_countdown enabled_for value"));
+		if (plain_item && subsection_ == kEnabledForList)
+			return to_status(indented && (!list_target_ || add_names(context_, item, *list_target_, list_what_)));
 		if (subsection_ == "addresses" || subsection_ == "server_group")
 			return to_status(indented && add_server(context_, item, options_, subsection_ == "server_group" ? server_group_ : ""));
 		return Status::unhandled;
@@ -355,52 +356,99 @@ private:
 	/// A key at or left of an enabled_for list's own key ends the list and returns to the feature's block.
 	void leave_finished_lists(int indent)
 	{
-		if (subsection_ == "pcap_files_enabled_for" && indent <= subsection_indent_)
-			enter_subsection("pcap_files", pcap_base_);
-		if (subsection_ == "desync_countdown_enabled_for" && indent <= subsection_indent_)
-			enter_subsection("desync_countdown", countdown_base_);
+		if (subsection_ == kEnabledForList && indent <= subsection_indent_)
+			enter_subsection(feature_, feature_indent_);
+	}
+
+	/// Opens the `enabled_for` list of the current feature; the values go to `target`, or nowhere when it is null.
+	Status begin_enabled_for(const std::string& value, int indent, std::vector<std::string>* target, const char* what)
+	{
+		enter_subsection(kEnabledForList, indent);
+		list_target_ = target;
+		list_what_	 = what;
+		return to_status(!target || add_names(context_, value, *target, what));
+	}
+
+	/// A feature section of the `features:` block, and how its keys are parsed.
+	struct Feature
+	{
+		using Parser = Status (ProfilesParser::*)(const std::string& key, const std::string& value, int indent);
+
+		Parser parse;
+		/// False when the feature was left out of this build; its section is then ignored.
+		bool compiled;
+	};
+
+	/// Maps every feature section to the function that parses its keys. Features that are not compiled into the build
+	/// map to ignore_feature, so a profiles file can be shared between builds.
+	static const std::unordered_map<std::string, Feature>& features()
+	{
+		[[maybe_unused]] static const Feature disabled{&ProfilesParser::ignore_feature, false};
+		static const std::unordered_map<std::string, Feature> table = {
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
+			{"region_enforcement", {&ProfilesParser::parse_region_enforcement, true}},
+#else
+			{"region_enforcement", disabled},
+#endif
+#ifdef LAGSW_FEATURE_PCAP_FILES
+			{"pcap_files", {&ProfilesParser::parse_pcap_files, true}},
+#else
+			{"pcap_files", disabled},
+#endif
+#ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
+			{"desync_countdown", {&ProfilesParser::parse_desync_countdown, true}},
+#else
+			{"desync_countdown", disabled},
+#endif
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
+			{"forwarded_address_discovery", {&ProfilesParser::parse_forwarded_address_discovery, true}},
+#else
+			{"forwarded_address_discovery", disabled},
+#endif
+		};
+		return table;
 	}
 
 	bool parse_feature(const std::string& key, const std::string& value, int indent)
 	{
+		const auto& table = features();
 		if (value.empty())
 		{
-			if (key == "region_enforcement" || key == "forwarded_address_discovery")
+			if (const auto feature = table.find(key); feature != table.end())
 			{
+				feature_		= key;
+				feature_indent_ = indent;
 				enter_subsection(key, indent);
-				return true;
-			}
-			if (key == "pcap_files")
-			{
-				enter_subsection(key, indent);
-				pcap_base_ = indent;
-				return true;
-			}
-			if (key == "desync_countdown")
-			{
-				enter_subsection(key, indent);
-				countdown_base_ = indent;
+				if (!feature->second.compiled)
+					LOG_WARN("Feature %s in %s at line %d is not compiled into this build; its settings are ignored",
+							 key.c_str(),
+							 context_.path,
+							 context_.line);
 				return true;
 			}
 		}
 		if (indent > subsection_indent_)
 		{
-			Status status = Status::unhandled;
-			if (subsection_ == "forwarded_address_discovery")
-				status = parse_forwarded_address_discovery(key, value);
-			else if (subsection_ == "region_enforcement")
-				status = parse_region_enforcement(key, value);
-			else if (subsection_ == "pcap_files")
-				status = parse_pcap_files(key, value, indent);
-			else if (subsection_ == "desync_countdown")
-				status = parse_desync_countdown(key, value, indent);
-			if (status != Status::unhandled)
-				return status == Status::ok;
+			if (const auto feature = table.find(subsection_); feature != table.end())
+			{
+				const Status status = (this->*feature->second.parse)(key, value, indent);
+				if (status != Status::unhandled)
+					return status == Status::ok;
+			}
 		}
 		return invalid(context_, "features configuration key '" + key + "'");
 	}
 
-	Status parse_forwarded_address_discovery(const std::string& key, const std::string& value)
+	/// Skips the settings of a feature that is not compiled into this build.
+	Status ignore_feature(const std::string& key, const std::string& value, int indent)
+	{
+		if (key == "enabled_for")
+			return begin_enabled_for(value, indent, nullptr, "");
+		return Status::ok;
+	}
+
+#ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
+	Status parse_forwarded_address_discovery(const std::string& key, const std::string& value, int)
 	{
 		ForwardedAddressDiscoveryOptions& discovery = options_.features.forwarded_address_discovery;
 		if (key == "enabled")
@@ -419,8 +467,10 @@ private:
 				context_, parse_ulong(unquote(value), 1, kMaxPort), discovery.port, "forwarded_address_discovery port"));
 		return Status::unhandled;
 	}
+#endif
 
-	Status parse_region_enforcement(const std::string& key, const std::string& value)
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
+	Status parse_region_enforcement(const std::string& key, const std::string& value, int)
 	{
 		RegionEnforcementOptions& region = options_.features.region_enforcement;
 		if (key == "enabled")
@@ -429,7 +479,9 @@ private:
 			return to_status(assign_number<uint16_t>(context_, parse_ulong(unquote(value), 1, kMaxPort), region.probe_port, "probe_port"));
 		return Status::unhandled;
 	}
+#endif
 
+#ifdef LAGSW_FEATURE_PCAP_FILES
 	Status parse_pcap_files(const std::string& key, const std::string& value, int indent)
 	{
 		PcapFilesOptions& pcap = options_.features.pcap_files;
@@ -444,13 +496,12 @@ private:
 			return Status::ok;
 		}
 		if (key == "enabled_for")
-		{
-			enter_subsection("pcap_files_enabled_for", indent);
-			return to_status(add_names(context_, value, pcap.enabled_for, "pcap_files enabled_for value"));
-		}
+			return begin_enabled_for(value, indent, &pcap.enabled_for, "pcap_files enabled_for value");
 		return Status::unhandled;
 	}
+#endif
 
+#ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
 	Status parse_desync_countdown(const std::string& key, const std::string& value, int indent)
 	{
 		DesyncCountdownOptions& countdown = options_.features.desync_countdown;
@@ -465,12 +516,10 @@ private:
 			return to_status(assign_number<uint8_t>(
 				context_, parse_ulong(unquote(value), 1, 100), countdown.duration_percent, "desync_countdown duration_percent"));
 		if (key == "enabled_for")
-		{
-			enter_subsection("desync_countdown_enabled_for", indent);
-			return to_status(add_names(context_, value, countdown.enabled_for, "desync_countdown enabled_for value"));
-		}
+			return begin_enabled_for(value, indent, &countdown.enabled_for, "desync_countdown enabled_for value");
 		return Status::unhandled;
 	}
+#endif
 
 	/// Handles a setting inside the `servers:` block: discovery settings, address lists and named server groups.
 	bool parse_server_setting(const std::string& key, const std::string& value, int indent)
@@ -607,8 +656,12 @@ private:
 	int					 subsection_indent_ = -1;
 	int					 servers_base_		= -1;
 	int					 features_base_		= -1;
-	int					 pcap_base_			= -1;
-	int					 countdown_base_	= -1;
+	/// The feature section being read and the indentation of its key.
+	std::string			 feature_;
+	int					 feature_indent_	= -1;
+	/// Destination of the open enabled_for list; null when the feature is not compiled into this build.
+	std::vector<std::string>* list_target_	= nullptr;
+	const char*			 list_what_			= "";
 };
 }  // namespace
 
@@ -624,12 +677,8 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 	options.profiles.clear();
 	options.servers.clear();
 	options.discovery_port.reset();
-	options.discovery_window_ms					 = 5000;
-	options.features.region_enforcement.enabled	 = false;
-	options.features.region_enforcement.probe_port = 0;
-	options.features.pcap_files					 = {};
-	options.features.desync_countdown			 = {};
-	options.features.forwarded_address_discovery = {};
+	options.discovery_window_ms = 5000;
+	options.features			= {};
 	return ProfilesParser(path, options).parse(file) && validate_profiles(path, options);
 }
 
