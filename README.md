@@ -97,6 +97,7 @@ xmake build packet_test && xmake run packet_test visible   # only cases whose na
 | `modes_test` | packet scheduling modes (`src/modules/`) driven with a fake clock, plus ACK restoration and retransmission filtering |
 | `region_test` | region lookup helpers: response parsing, server naming, the on-disk cache and rate-limit retries (HTTPS, sleep and data directory are faked) |
 | `engine_test` | `PacketEngine` with its real worker threads against an in-memory capture backend: profile lifecycle, packet release and flushing, server selection, server and forwarded-address discovery, region resolution, desync countdown and the state report |
+| `region_enforcement_test` | region enforcement on the same in-memory backend: enforced-region cycle, which servers are delayed, delayed release and flushing, probe detection (only built with `--region_enforcement=y`) |
 | `format_test` | text formatting of profile options |
 | `nfqueue_filter_test` | capture-filter to nftables compiler (not built on Windows) |
 
