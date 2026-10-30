@@ -224,6 +224,11 @@ bool initialize()
 	return true;
 }
 
+bool check_privileges(std::string&)
+{
+	return true;
+}
+
 std::unique_ptr<PacketChannel> open(const OpenOptions& options, std::string& error)
 {
 	std::lock_guard<std::mutex> lock(fakes::registry_mutex);

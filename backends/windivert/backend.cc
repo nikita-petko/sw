@@ -124,6 +124,13 @@ bool initialize()
 	return initialize_windivert();
 }
 
+bool check_privileges(std::string& error)
+{
+	// Elevation is enforced by the UAC manifest.
+	(void)error;
+	return true;
+}
+
 std::unique_ptr<PacketChannel> open(const OpenOptions& options, std::string& error)
 {
 	const WINDIVERT_LAYER layer = options.forward ? WINDIVERT_LAYER_NETWORK_FORWARD : WINDIVERT_LAYER_NETWORK;

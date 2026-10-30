@@ -142,7 +142,10 @@ sudo ./lagsw --config profiles/div1.sw.yml
 ```
 
 `setcap cap_net_admin` on the binary is not enough: rules are installed by spawning the `nft`
-binary, which does not inherit file capabilities.
+binary, which does not inherit file capabilities. lagsw checks this right after parsing the
+options and exits with an explanatory error if `CAP_NET_ADMIN` is missing (`--help` and option
+errors still work unprivileged). It never re-executes itself under `sudo`. A warning is logged
+when `/dev/input/event*` is not readable, since hotkeys would not work.
 
 `scripts/bootstrap.sh` re-executes itself with `sudo` and runs `lagsw` with preset arguments.
 

@@ -23,6 +23,12 @@ bool initialize()
 	return true;
 }
 
+bool check_privileges(std::string& error)
+{
+	(void)error;
+	return true;
+}
+
 std::unique_ptr<PacketChannel> open(const OpenOptions& options, std::string& error)
 {
 	LOG_DEBUG("stub backend: open requested for filter '%s'", options.filter.c_str());

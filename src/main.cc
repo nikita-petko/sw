@@ -91,6 +91,12 @@ int main(int argc, char* argv[])
 	PacketEngineOptions options;
 	if (!parse_options(argc, argv, options))
 		return 0;
+	std::string privilege_error;
+	if (!backend::check_privileges(privilege_error))
+	{
+		LOG_ERROR("%s", privilege_error.c_str());
+		return 1;
+	}
 #ifdef LAGSW_FEATURE_PCAP_FILES
 	if (options.features.pcap_files.enabled)
 		LOG_WARN("PCAP file capture is enabled for debugging. Do not use it during normal operation.");

@@ -20,6 +20,7 @@
 #include "log.h"
 #include "nft_table.h"
 #include "packet_backend.h"
+#include "privileges.h"
 
 namespace backend {
 namespace {
@@ -296,8 +297,13 @@ const char* name()
 
 bool initialize()
 {
-	// Privileges and the nftables table are only needed once a channel is opened, so --help and config checks work unprivileged.
+	// Privileges are verified by check_privileges() after option parsing, so --help and config checks work unprivileged.
 	return true;
+}
+
+bool check_privileges(std::string& error)
+{
+	return nfq::check_privileges(error);
 }
 
 std::unique_ptr<PacketChannel> open(const OpenOptions& options, std::string& error)

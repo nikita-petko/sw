@@ -93,6 +93,9 @@ public:
 const char* name();
 /// Prepares the backend for use (for example, loading a driver). Returns false after logging an error.
 bool		initialize();
+/// Checks that the process holds the privileges needed to open capture channels. Called after the options are parsed,
+/// so --help and config errors still work unprivileged. On failure, `error` explains how to fix it.
+bool		check_privileges(std::string& error);
 /// Opens a capture channel; returns nullptr and fills `error` on failure.
 std::unique_ptr<PacketChannel> open(const OpenOptions& options, std::string& error);
 /// Checks a filter without opening a channel. On failure, `error` and `position` describe the problem.
