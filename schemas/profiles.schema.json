@@ -144,6 +144,10 @@
               "maximum": 600000,
               "description": "Overrides delay_ms for outbound packets."
             },
+            "pause_key": {
+              "type": ["string", "integer"],
+              "description": "Key that pauses and resumes passive latency at runtime. Pausing releases every queued packet at once. Must not be a command key (q, Backspace, Tab, Page Up/Down, Left, Right)."
+            },
             "preserve_order": {
               "type": "boolean",
               "default": true,

@@ -129,6 +129,8 @@ struct PacketEngine::State
 	std::condition_variable			passive_latency_changed;
 	std::atomic<bool>				passive_latency_stopping = false;
 	std::unique_ptr<DelayModel>		passive_latency_model;
+	/// Guarded by passive_latency_mutex.
+	bool							passive_latency_paused = false;
 	uint64_t						passive_latency_next_receive_order = 0;
 	PacketQueue						passive_latency_queue;
 #endif

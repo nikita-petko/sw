@@ -70,6 +70,10 @@ KeyAction handle_command_key(PacketEngine& engine, int key)
 #endif
 	else if (key == platform::key::tab)
 		engine.print_state();
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+	else if (engine.passive_latency_pause_key() && (key >= 'a' && key <= 'z' ? key - 'a' + 'A' : key) == *engine.passive_latency_pause_key())
+		engine.toggle_passive_latency_pause();
+#endif
 	else
 		return KeyAction::none;
 	return KeyAction::handled;

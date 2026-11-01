@@ -230,6 +230,98 @@ void test_status_text()
 	options.features.passive_latency.inbound_delay_ms = 20;
 	CHECK(PacketEngine(options).passive_latency_status() == "60ms+/-10 out, 20ms+/-10 in");
 }
+
+void test_pause_flushes_and_lets_packets_through()
+{
+	fakes::reset();
+	PacketEngineOptions options				= passive_options(5000);
+	options.features.passive_latency.pause_key = 'P';
+	PacketEngine engine(options);
+	engine.start_workers();
+	const auto channel = fakes::channel_with_filter("tcp");
+
+	channel->inject(tcp_packet(1, 1, kAck), 1);
+	CHECK(wait_until([&] { return channel->consumed() == 1; }));
+	CHECK(channel->sent_count() == 0);
+	CHECK(engine.passive_latency_status() != "paused");
+
+	engine.toggle_passive_latency_pause();	// pausing releases what is queued
+	CHECK(engine.is_passive_latency_paused() && engine.passive_latency_status() == "paused");
+	CHECK(channel->sent_count() == 1);
+	channel->inject(tcp_packet(2, 1, kAck), 2);	// and new packets are not delayed
+	CHECK(wait_until([&] { return channel->sent_count() == 2; }, std::chrono::milliseconds(1000)));
+
+	engine.toggle_passive_latency_pause();	// resuming delays again
+	CHECK(!engine.is_passive_latency_paused());
+	channel->inject(tcp_packet(3, 1, kAck), 3);
+	CHECK(wait_until([&] { return channel->consumed() == 3; }));
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	CHECK(channel->sent_count() == 2);
+	engine.stop_workers();
+	CHECK(channel->sent_count() == 3);
+}
+
+void test_toggling_without_a_channel_is_harmless()
+{
+	fakes::reset();
+	PacketEngine engine(passive_options(50, 0, false));
+	engine.toggle_passive_latency_pause();
+	CHECK(!engine.is_passive_latency_paused());
+}
+
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
+constexpr uint16_t kProbePort = 55002;
+
+void test_probe_port_traffic_is_not_delayed()
+{
+	fakes::reset();
+	PacketEngineOptions options					  = passive_options(5000);
+	options.features.region_enforcement.enabled	  = true;
+	options.features.region_enforcement.probe_port = kProbePort;
+	PacketEngine engine(options);
+	engine.start_workers();
+	const auto channel = fakes::channel_with_filter("tcp");
+
+	channel->inject(tcp_packet(1, 0, kSyn, 40000, kProbePort), 1, true);	// probe SYN
+	channel->inject(tcp_packet(1, 2, kSyn | kAck, kProbePort, 40000), 2, false);	// answer
+	CHECK(wait_until([&] { return channel->sent_count() == 2; }, std::chrono::milliseconds(1000)));
+	channel->inject(tcp_packet(3, 1, kAck, 40000, 2000), 3, true);	// game traffic is still held
+	CHECK(wait_until([&] { return channel->consumed() == 3; }));
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	CHECK(channel->sent_count() == 2);
+	engine.stop_workers();
+}
+
+void test_probe_port_is_delayed_when_region_enforcement_is_off()
+{
+	fakes::reset();
+	PacketEngine engine(passive_options(5000));
+	engine.start_workers();
+	const auto channel = fakes::channel_with_filter("tcp");
+	channel->inject(tcp_packet(1, 0, kSyn, 40000, kProbePort), 1, true);
+	CHECK(wait_until([&] { return channel->consumed() == 1; }));
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	CHECK(channel->sent_count() == 0);
+	engine.stop_workers();
+}
+
+void test_passive_runs_before_region_enforcement()
+{
+	fakes::reset();
+	PacketEngineOptions options					  = passive_options(50);
+	options.servers								  = {{"34.0.0.1", "eu1", "EU"}, {"35.0.0.1", "na1", "NA"}};
+	options.features.region_enforcement.enabled	  = true;
+	options.features.region_enforcement.probe_port = kProbePort;
+	PacketEngine engine(options);
+	engine.start_workers();
+	engine.cycle_enforced_region(1);
+	const auto passive	   = fakes::channel_with_filter("tcp");
+	const auto enforcement = fakes::channel_with_filter("region_enforcement:35.0.0.1,:55002");
+	CHECK(passive != nullptr && enforcement != nullptr);
+	CHECK(passive->options.priority > enforcement->options.priority);
+	engine.stop_workers();
+}
+#endif
 }  // namespace
 
 int main(int argc, char** argv)
@@ -248,6 +340,13 @@ int main(int argc, char** argv)
 		{"per_direction_overrides", test_per_direction_overrides},
 		{"jitter_modes_preserve_order", test_jitter_modes_preserve_order},
 		{"status_text", test_status_text},
+		{"pause_flushes_and_lets_packets_through", test_pause_flushes_and_lets_packets_through},
+		{"toggling_without_a_channel_is_harmless", test_toggling_without_a_channel_is_harmless},
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
+		{"probe_port_traffic_is_not_delayed", test_probe_port_traffic_is_not_delayed},
+		{"probe_port_is_delayed_when_region_enforcement_is_off", test_probe_port_is_delayed_when_region_enforcement_is_off},
+		{"passive_runs_before_region_enforcement", test_passive_runs_before_region_enforcement},
+#endif
 	};
 	return test::run_tests("passive_latency", cases, argc, argv);
 }

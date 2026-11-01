@@ -543,6 +543,14 @@ private:
 			return millis(passive.outbound_delay_ms, "outbound_delay_ms");
 		if (key == "preserve_order")
 			return to_status(assign_bool(context_, value, passive.preserve_order));
+		if (key == "pause_key")
+		{
+			const auto parsed = parse_key(value);
+			if (!parsed)
+				return to_status(invalid(context_, "passive_latency pause_key"));
+			passive.pause_key = *parsed;
+			return Status::ok;
+		}
 		if (key == "max_queued_packets")
 			return to_status(assign_number<uint32_t>(
 				context_, parse_ulong(unquote(value), 1, kMaxU32), passive.max_queued_packets, "passive_latency max_queued_packets"));

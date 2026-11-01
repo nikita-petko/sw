@@ -119,6 +119,7 @@ features:
     inbound_delay_ms: 20
     outbound_delay_ms: 90
     preserve_order: false
+    pause_key: p
     max_queued_packets: 2048
     filter: "udp"
   pcap_files:
@@ -197,6 +198,7 @@ profiles:
 	CHECK(o.features.passive_latency.mode == PassiveLatencyMode::normal && o.features.passive_latency.jitter_ms == 8);
 	CHECK(o.features.passive_latency.inbound_delay_ms == 20 && o.features.passive_latency.outbound_delay_ms == 90);
 	CHECK(!o.features.passive_latency.preserve_order && o.features.passive_latency.direction == PassiveLatencyDirection::both);
+	CHECK(o.features.passive_latency.pause_key == 'P');
 	CHECK(o.features.passive_latency.effective_delay_ms(true) == 90 && o.features.passive_latency.effective_max_delay_ms(false) == 120);
 #endif
 #ifdef LAGSW_FEATURE_PCAP_FILES
@@ -303,6 +305,9 @@ void test_rejected_files()
 		{"passive latency inbound only without inbound delay",
 		 "features:\n  passive_latency:\n    enabled: true\n    direction: outbound\n    inbound_delay_ms: 40\n" + kProfile,
 		 "delay_ms must be positive for at least one direction"},
+		{"passive latency bad pause key", "features:\n  passive_latency:\n    pause_key: nonsense\n" + kProfile, "Invalid passive_latency pause_key in"},
+		{"passive latency reserved pause key", "features:\n  passive_latency:\n    enabled: true\n    delay_ms: 50\n    pause_key: q\n" + kProfile,
+		 "pause_key conflicts with a command key"},
 		{"passive latency huge delay", "features:\n  passive_latency:\n    delay_ms: 600001\n" + kProfile, "Invalid passive_latency delay_ms in"},
 		{"passive latency zero max queued", "features:\n  passive_latency:\n    max_queued_packets: 0\n" + kProfile,
 		 "Invalid passive_latency max_queued_packets in"},

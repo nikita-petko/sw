@@ -117,6 +117,16 @@ void PacketEngine::passive_latency_recv()
 			send_passive_packet(*state_->passive_latency_handle, packet_data, received_length, address, "send: stopping");
 			continue;
 		}
+		if (state_->passive_latency_paused)
+		{
+			send_passive_packet(*state_->passive_latency_handle, packet_data, received_length, address, "send: paused");
+			continue;
+		}
+		if (is_probe_traffic(packet_data, received_length))
+		{
+			send_passive_packet(*state_->passive_latency_handle, packet_data, received_length, address, "send: probe traffic");
+			continue;
+		}
 		if (state_->passive_latency_queue.size() >= passive.max_queued_packets)
 		{
 			LOG_WARN("Passive latency queue is full (%u packets); releasing a packet immediately", passive.max_queued_packets);
@@ -161,6 +171,52 @@ void PacketEngine::passive_latency_send()
 			destroy_packet_node(node);
 		}
 	}
+}
+
+bool PacketEngine::is_probe_traffic([[maybe_unused]] const uint8_t* packet, [[maybe_unused]] uint32_t length) const
+{
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
+	const RegionEnforcementOptions& region = options_.features.region_enforcement;
+	if (!region.enabled || region.probe_port == 0)
+		return false;
+	ParsedPacket parsed;
+	if (!parse_packet(packet, length, parsed))
+		return false;
+	if (parsed.tcp != nullptr)
+		return swap_u16(parsed.tcp->SrcPort) == region.probe_port || swap_u16(parsed.tcp->DstPort) == region.probe_port;
+	if (parsed.udp != nullptr)
+		return swap_u16(parsed.udp->SrcPort) == region.probe_port || swap_u16(parsed.udp->DstPort) == region.probe_port;
+#endif
+	return false;
+}
+
+void PacketEngine::toggle_passive_latency_pause()
+{
+	if (!state_->passive_latency_handle)
+		return;
+	{
+		std::lock_guard<std::mutex> lock(state_->passive_latency_mutex);
+		state_->passive_latency_paused = !state_->passive_latency_paused;
+		if (!state_->passive_latency_paused)
+		{
+			state_->passive_latency_model->reset();
+			LOG_INFO("Passive latency resumed");
+			return;
+		}
+		LOG_INFO("Passive latency paused");
+	}
+	flush_passive_latency_queue();
+}
+
+std::optional<int> PacketEngine::passive_latency_pause_key() const
+{
+	return options_.features.passive_latency.pause_key;
+}
+
+bool PacketEngine::is_passive_latency_paused() const
+{
+	std::lock_guard<std::mutex> lock(state_->passive_latency_mutex);
+	return state_->passive_latency_paused;
 }
 
 void PacketEngine::flush_passive_latency_queue()
@@ -208,6 +264,8 @@ std::string PacketEngine::describe_passive_latency() const
 std::string PacketEngine::passive_latency_status() const
 {
 	const PassiveLatencyOptions& passive = options_.features.passive_latency;
+	if (is_passive_latency_paused())
+		return "paused";
 	auto						 part	 = [&](bool outbound) {
 		   const int32_t mean = passive.effective_delay_ms(outbound);
 		   std::string	 text = std::to_string(mean) + "ms";

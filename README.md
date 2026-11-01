@@ -505,7 +505,13 @@ features:
 
 To reach an RTT floor of 120 ms either use `delay_ms: 60` with `direction: both`
 or `outbound_delay_ms: 120` with `inbound_delay_ms: 0`. Jitter never reorders
-packets of the same direction unless `preserve_order` is `false`.
+packets of the same direction unless `preserve_order` is `false`. Region-enforcement
+probe traffic (the configured `probe_port`) is never delayed, so region detection is not skewed.
+
+**Migrating from a proxy client:** remove the proxy client's latency from the path and set
+`delay_ms` (or the per-direction values) to the added RTT you were getting from it, split across
+both directions. Existing profile `delay_ms` values keep their meaning as extra delay beyond the baseline.
+The desync countdown estimate is based on a profile's active duration and excludes the baseline.
 
 | Field | Required | Description |
 | --- | --- | --- |
@@ -516,6 +522,7 @@ packets of the same direction unless `preserve_order` is `false`.
 | `max_delay_ms` | No | Upper clamp after sampling. `0` (the default) uses `delay_ms + 3 * jitter_ms` per direction; otherwise it must be at least each direction's delay. |
 | `direction` | No | `both` (default), `inbound`, or `outbound`. Packets of the other direction pass through undelayed. |
 | `inbound_delay_ms`, `outbound_delay_ms` | No | Override `delay_ms` for that direction. |
+| `pause_key` | No | Key that pauses and resumes passive latency while running (not `q`, Backspace, Tab, Page Up/Down or the arrow keys). Pausing releases queued packets at once; the status line shows `passive: paused`. |
 | `preserve_order` | No | Never release a packet before an earlier one of the same direction. Defaults to `true`; `false` can reorder TCP packets when jitter is used. |
 | `max_queued_packets` | No | Safety bound on queued packets; packets past this bound are released immediately instead of being dropped. Defaults to `4096`. |
 | `filter` | No | Capture filter in the active backend's syntax. Defaults to `global_filter` when unset. |

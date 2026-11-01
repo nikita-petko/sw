@@ -38,6 +38,18 @@ features:
       - "Long (Send - Instant Release)"
       - "Long (Send - Release Delay)"
 
+  # Always-on baseline delay that replaces a proxy client (FlClash, Clash Forge, Proton VPN) used only to add latency.
+  # Profile delay_ms values are EXTRA delay on top of this baseline, not absolute RTT: with this enabled the total delay
+  # of a delayed packet is passive + profile. delay_ms 60 on both directions raises the observed RTT by 120 ms; use
+  # outbound_delay_ms / inbound_delay_ms to place it on one side. Region-probe traffic is never delayed.
+  passive_latency:
+    enabled: false
+    mode: uniform
+    delay_ms: 60
+    jitter_ms: 10
+    direction: both
+    pause_key: p
+
   netfilter_monitor:
     enabled: true
 

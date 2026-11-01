@@ -225,6 +225,8 @@ struct PassiveLatencyOptions
 	bool preserve_order = true;
 	/// Capture filter in the active backend's syntax. Defaults to global_filter when unset.
 	std::optional<std::string> filter;
+	/// Virtual key that pauses and resumes passive latency at runtime.
+	std::optional<int> pause_key;
 	/// Safety bound on queued packets; packets are released immediately (not dropped) past this bound.
 	uint32_t max_queued_packets = 4096;
 
@@ -428,6 +430,11 @@ public:
 	bool is_passive_latency_enabled() const;
 	/// Compact description for the status line, for example "60ms +/-10 (both)".
 	std::string passive_latency_status() const;
+	/// Pauses or resumes passive latency. Pausing releases every queued packet at once and lets new packets through undelayed.
+	void toggle_passive_latency_pause();
+	bool is_passive_latency_paused() const;
+	/// The configured pause key as an upper-case virtual-key code.
+	std::optional<int> passive_latency_pause_key() const;
 #endif
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	/// Returns whether forwarded-address discovery is configured as enabled.
@@ -513,6 +520,8 @@ private:
 	void passive_latency_send();
 	/// Sends every packet still queued by passive latency, unconditionally.
 	void flush_passive_latency_queue();
+	/// Whether the packet belongs to the region-enforcement probe port, which passive latency must not delay.
+	bool is_probe_traffic(const uint8_t* packet, uint32_t length) const;
 #endif
 #ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 	/// Resolves and stores a server region.

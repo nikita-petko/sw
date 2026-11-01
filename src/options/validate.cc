@@ -4,6 +4,7 @@
 
 #include "internal.h"
 #include "log.h"
+#include "platform.h"
 
 LOG_DEFAULT_GROUP(logging::group::config)
 
@@ -190,6 +191,16 @@ bool validate_passive_latency(const char* path, const PassiveLatencyOptions& pas
 	const int32_t effective_max = (std::max)(passive.effective_max_delay_ms(true), passive.effective_max_delay_ms(false));
 	if (effective_max > 200)
 		LOG_WARN("Feature passive_latency delay of up to %d ms in %s is high enough to noticeably affect responsiveness", effective_max, path);
+	if (passive.pause_key)
+	{
+		const int pause = *passive.pause_key;
+		if (pause == 'Q' || pause == platform::key::backspace || pause == platform::key::tab || pause == platform::key::page_up ||
+			pause == platform::key::page_down || pause == platform::key::left || pause == platform::key::right)
+		{
+			LOG_ERROR("Feature passive_latency pause_key conflicts with a command key in %s", path);
+			return false;
+		}
+	}
 	if (!passive.preserve_order && passive.mode != PassiveLatencyMode::fixed)
 		LOG_WARN("Feature passive_latency preserve_order is false; jitter can reorder TCP packets in %s", path);
 	return true;
