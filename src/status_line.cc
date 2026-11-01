@@ -146,21 +146,17 @@ void StatusLine::run()
 {
 	while (!shutdown_.load())
 	{
-		std::vector<std::string> extra_lines;
-#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
-		if (engine_.is_passive_latency_enabled())
-			extra_lines.push_back("passive: " + engine_.passive_latency_status());
-#endif
+		std::string extra_line;
 #ifdef LAGSW_FEATURE_NETFILTER_MONITOR
 		if (options_.features.netfilter_monitor.enabled)
-		{
-			const std::string health = backend::monitor_status(options_.features.netfilter_monitor.interval_ms,
-															   options_.features.netfilter_monitor.backlog_threshold);
-			if (!health.empty())
-				extra_lines.push_back(health);
-		}
+			extra_line = backend::monitor_status(options_.features.netfilter_monitor.interval_ms,
+												 options_.features.netfilter_monitor.backlog_threshold);
 #endif
-		logging::set_extra_status(extra_lines);
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+		if (engine_.is_passive_latency_enabled())
+			extra_line += (extra_line.empty() ? "" : " | ") + std::string("passive: ") + engine_.passive_latency_status();
+#endif
+		logging::set_extra_status(extra_line.empty() ? std::vector<std::string>{} : std::vector<std::string>{extra_line});
 		const std::string status			= describe_run_state(engine_);
 		const std::string active_profiles	= describe_active_profiles(engine_, options_);
 		const std::string server_status		= describe_server(engine_);

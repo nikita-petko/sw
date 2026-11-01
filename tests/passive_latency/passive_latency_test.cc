@@ -13,6 +13,7 @@
 #include "fakes.h"
 #include "log.h"
 #include "packet_engine.h"
+#include "support/capture.h"
 #include "support/packets.h"
 
 namespace {
@@ -261,6 +262,28 @@ void test_pause_flushes_and_lets_packets_through()
 	CHECK(channel->sent_count() == 3);
 }
 
+#ifndef NDEBUG
+void test_packet_group_logs_each_packet()
+{
+	fakes::reset();
+	std::string error;
+	CHECK(logging::set_groups("+passive_latency.packet", error));
+	logging::set_level(logging::level::debug);
+	const std::string text = test::capture_stdout([] {
+		PacketEngine engine(passive_options(40));
+		engine.start_workers();
+		const auto channel = fakes::channel_with_filter("tcp");
+		channel->inject(tcp_packet(1, 1, kAck), 1, true);
+		wait_until([&] { return channel->sent_count() == 1; }, std::chrono::milliseconds(2000));
+		engine.stop_workers();
+	});
+	logging::set_level(logging::level::error);
+	CHECK(logging::set_groups("-passive_latency.packet", error));
+	CHECK(text.find("Passive latency recv: outbound packet (delaying for 40ms)") != std::string::npos);
+	CHECK(text.find("Passive latency send: delayed packet") != std::string::npos);
+}
+#endif
+
 void test_toggling_without_a_channel_is_harmless()
 {
 	fakes::reset();
@@ -341,6 +364,9 @@ int main(int argc, char** argv)
 		{"jitter_modes_preserve_order", test_jitter_modes_preserve_order},
 		{"status_text", test_status_text},
 		{"pause_flushes_and_lets_packets_through", test_pause_flushes_and_lets_packets_through},
+#ifndef NDEBUG
+		{"packet_group_logs_each_packet", test_packet_group_logs_each_packet},
+#endif
 		{"toggling_without_a_channel_is_harmless", test_toggling_without_a_channel_is_harmless},
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 		{"probe_port_traffic_is_not_delayed", test_probe_port_traffic_is_not_delayed},

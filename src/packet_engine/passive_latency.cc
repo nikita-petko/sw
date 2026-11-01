@@ -21,6 +21,8 @@ void send_passive_packet(backend::PacketChannel& handle, const uint8_t* packet, 
 	}
 	if (sent == 0)
 		return;
+	if (!logging::group_accepts(logging::group::passive_latency_packet, logging::level::debug))
+		return;
 	const PacketAddresses addresses = packet_addresses(packet, length);
 	LOG_DEBUG_GROUP(logging::group::passive_latency_packet, "Passive latency %s: Length = %u, Src = %s, Dst = %s, SendLen = %u",
 			  reason,
@@ -63,6 +65,7 @@ void PacketEngine::start_passive_latency()
 	backend::OpenOptions open_options;
 	open_options.filter   = passive.filter.value_or(options_.global_filter);
 	open_options.priority = 100;
+	open_options.include_forward = true;
 	std::string open_error;
 	state_->passive_latency_handle = backend::open(open_options, open_error);
 	if (!state_->passive_latency_handle)
@@ -137,6 +140,16 @@ void PacketEngine::passive_latency_recv()
 		const DelayDirection direction = address.outbound ? DelayDirection::outbound : DelayDirection::inbound;
 		const uint64_t		 now		= platform::tick_ms();
 		const uint64_t		 release_at = state_->passive_latency_model->release_at(direction, now);
+		if (logging::group_accepts(logging::group::passive_latency_packet, logging::level::debug))
+		{
+			const PacketAddresses addresses = packet_addresses(packet_data, received_length);
+			LOG_DEBUG_GROUP(logging::group::passive_latency_packet, "Passive latency recv: %s packet (delaying for %llums): Length = %u, Src = %s, Dst = %s",
+						   address.outbound ? "outbound" : "inbound",
+						   static_cast<unsigned long long>(release_at - now),
+						   received_length,
+						   addresses.source.c_str(),
+						   addresses.destination.c_str());
+		}
 		state_->passive_latency_queue.push(
 			make_packet_node(packet_data, received_length, address, 0, release_at, state_->passive_latency_next_receive_order++));
 		state_->passive_latency_changed.notify_one();

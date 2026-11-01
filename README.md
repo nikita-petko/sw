@@ -488,7 +488,7 @@ precise, directly configured value instead of an indirect and only loosely
 tunable side effect of routing, and it has no recurring cost. It runs on its
 own capture channel that is processed before profiles and region enforcement,
 so a profile's own delay (if any) is added on top. The delay can be fixed or
-jittered, set per direction, and is shown on an extra status line below the main one. See
+jittered, set per direction, and is shown on the extra status line below the main one, after the netfilter monitor text. See
 [`pocs/passive_latency.md`](pocs/passive_latency.md) for the full design and
 the remaining planned work (pause key, capture options, adaptive target RTT).
 
