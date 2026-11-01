@@ -46,7 +46,7 @@ double elapsed_ms(Clock::time_point from, Clock::time_point to)
 }
 
 /// Bytes of transport payload in an IP packet, or 0 when it cannot be determined.
-uint32_t payload_length(const ParsedPacket& parsed)
+uint32_t payload_length(const ParsedPacket& parsed, uint32_t captured_length)
 {
 	uint32_t ip_header = 0;
 	uint32_t total	   = 0;
@@ -62,6 +62,9 @@ uint32_t payload_length(const ParsedPacket& parsed)
 	}
 	else
 		return 0;
+	// Large send offload leaves the length field zero; fall back to the captured size.
+	if (total <= ip_header)
+		total = captured_length;
 	uint32_t header_bytes = ip_header;
 	if (parsed.tcp)
 		header_bytes += static_cast<uint32_t>(parsed.tcp->HdrLength) * 4;
@@ -575,7 +578,7 @@ void NetMonitor::record(const uint8_t* packet, uint32_t length)
 	}
 	Flow&		   flow	   = stats.flows[key];
 	const uint32_t seq	   = swap_u32(tcp.SeqNum);
-	const uint32_t payload = payload_length(parsed);
+	const uint32_t payload = payload_length(parsed, length);
 	const uint32_t end_seq = seq + payload + tcp.Syn + tcp.Fin;
 
 	if (tcp.Rst)

@@ -55,8 +55,26 @@ std::string generate_guid()
 	return text;
 }
 
+namespace {
+UINT original_output_code_page = 0;
+
+void restore_output_code_page()
+{
+	if (original_output_code_page != 0)
+		SetConsoleOutputCP(original_output_code_page);
+}
+}  // namespace
+
 void enable_terminal_colors()
 {
+	// The UI emits UTF-8 (block and box characters); a legacy OEM code page renders it as mojibake and breaks line widths.
+	const UINT code_page = GetConsoleOutputCP();
+	if (code_page != 0 && code_page != CP_UTF8 && SetConsoleOutputCP(CP_UTF8))
+	{
+		original_output_code_page = code_page;
+		std::atexit(restore_output_code_page);
+	}
+
 	HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
 	DWORD  mode	  = 0;
 	if (output != INVALID_HANDLE_VALUE && GetConsoleMode(output, &mode))

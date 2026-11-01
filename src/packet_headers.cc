@@ -27,7 +27,10 @@ bool parse_ipv4(uint8_t* packet, uint32_t length, ParsedPacket& parsed)
 		return false;
 	auto*		   header		 = reinterpret_cast<Ipv4Header*>(packet);
 	const uint32_t header_length = static_cast<uint32_t>(header->HdrLength) * 4;
-	const uint32_t total_length	 = static_cast<uint32_t>(((header->Length & 0xFF) << 8) | (header->Length >> 8));
+	uint32_t	   total_length	 = static_cast<uint32_t>(((header->Length & 0xFF) << 8) | (header->Length >> 8));
+	// Outbound packets with large send offload carry a zero length field; the captured length is authoritative.
+	if (total_length == 0)
+		total_length = length;
 	if (header->HdrLength < 5 || header_length > length || total_length < header_length || total_length > length)
 		return false;
 	parsed.ipv4 = header;
@@ -42,7 +45,10 @@ bool parse_ipv6(uint8_t* packet, uint32_t length, ParsedPacket& parsed)
 	if (length < sizeof(Ipv6Header))
 		return false;
 	auto*		   header	 = reinterpret_cast<Ipv6Header*>(packet);
-	const uint32_t payload	 = static_cast<uint32_t>(((header->Length & 0xFF) << 8) | (header->Length >> 8));
+	uint32_t	   payload	 = static_cast<uint32_t>(((header->Length & 0xFF) << 8) | (header->Length >> 8));
+	// A zero payload length with trailing data is a large send offload (or jumbo) packet.
+	if (payload == 0 && length > sizeof(Ipv6Header))
+		payload = length - static_cast<uint32_t>(sizeof(Ipv6Header));
 	const uint32_t total	 = static_cast<uint32_t>(sizeof(Ipv6Header)) + payload;
 	if (total > length)
 		return false;

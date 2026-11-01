@@ -7,8 +7,16 @@
 #include <windows.h>
 
 #include <cstring>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <thread>
+#include <vector>
 
+#include "log.h"
 #include "runtime.h"
+
+LOG_DEFAULT_GROUP(logging::group::backend)
 
 namespace backend {
 namespace {
@@ -95,6 +103,147 @@ private:
 	HANDLE handle_;
 };
 
+/// Combines a local-traffic channel and a forwarded-traffic channel into one. WinDivert handles are bound to a single
+/// layer, so each one gets a receive thread feeding a shared queue; send() routes back by the packet's layer.
+class MultiLayerChannel final : public PacketChannel
+{
+public:
+	MultiLayerChannel(std::unique_ptr<PacketChannel> local, std::unique_ptr<PacketChannel> forwarded)
+	: local_(std::move(local))
+	, forwarded_(std::move(forwarded))
+	{
+		running_ = 2;
+		pumps_.emplace_back(&MultiLayerChannel::pump, this, local_.get());
+		pumps_.emplace_back(&MultiLayerChannel::pump, this, forwarded_.get());
+	}
+	~MultiLayerChannel() override { close(); }
+
+	IoStatus recv(uint8_t* buffer, uint32_t capacity, uint32_t& length, PacketMeta& meta, std::string& error) override
+	{
+		length = 0;
+		std::unique_lock<std::mutex> lock(mutex_);
+		ready_.wait(lock, [this] { return !queue_.empty() || running_ == 0 || shutdown_; });
+		if (queue_.empty())
+			return IoStatus::closed;
+		Item item = std::move(queue_.front());
+		queue_.pop_front();
+		lock.unlock();
+		space_.notify_all();
+
+		if (item.status != IoStatus::ok)
+		{
+			error = std::move(item.error);
+			return item.status;
+		}
+		if (item.data.size() > capacity)
+		{
+			error = "packet larger than the receive buffer";
+			return IoStatus::error;
+		}
+		std::memcpy(buffer, item.data.data(), item.data.size());
+		length = static_cast<uint32_t>(item.data.size());
+		meta   = item.meta;
+		return IoStatus::ok;
+	}
+
+	IoStatus send(const uint8_t* packet, uint32_t length, const PacketMeta& meta, uint32_t& sent, std::string& error) override
+	{
+		WINDIVERT_ADDRESS address;
+		std::memcpy(&address, meta.native, sizeof(address));
+		PacketChannel& target = address.Layer == WINDIVERT_LAYER_NETWORK_FORWARD ? *forwarded_ : *local_;
+		return target.send(packet, length, meta, sent, error);
+	}
+
+	void shutdown_recv() override
+	{
+		local_->shutdown_recv();
+		forwarded_->shutdown_recv();
+		{
+			std::lock_guard<std::mutex> lock(mutex_);
+			shutdown_ = true;
+		}
+		ready_.notify_all();
+		space_.notify_all();
+	}
+
+	void close() override
+	{
+		shutdown_recv();
+		for (std::thread& pump : pumps_)
+			if (pump.joinable())
+				pump.join();
+		local_->close();
+		forwarded_->close();
+	}
+
+private:
+	struct Item
+	{
+		std::vector<uint8_t> data;
+		PacketMeta			 meta;
+		IoStatus			 status = IoStatus::ok;
+		std::string			 error;
+	};
+
+	static constexpr size_t kMaxQueued = 8192;
+
+	void pump(PacketChannel* source)
+	{
+		std::vector<uint8_t> buffer(0xFFFF);
+		for (;;)
+		{
+			Item	 item;
+			uint32_t length = 0;
+			item.status		= source->recv(buffer.data(), static_cast<uint32_t>(buffer.size()), length, item.meta, item.error);
+			if (item.status == IoStatus::closed)
+				break;
+			if (item.status == IoStatus::ok)
+				item.data.assign(buffer.begin(), buffer.begin() + length);
+
+			std::unique_lock<std::mutex> lock(mutex_);
+			space_.wait(lock, [this] { return queue_.size() < kMaxQueued || shutdown_; });
+			if (shutdown_)
+				break;
+			const bool failed = item.status == IoStatus::error;
+			queue_.push_back(std::move(item));
+			lock.unlock();
+			ready_.notify_one();
+			if (failed)
+				break;
+		}
+		{
+			std::lock_guard<std::mutex> lock(mutex_);
+			--running_;
+		}
+		ready_.notify_all();
+	}
+
+	std::unique_ptr<PacketChannel> local_;
+	std::unique_ptr<PacketChannel> forwarded_;
+	std::vector<std::thread>	   pumps_;
+	std::mutex					   mutex_;
+	std::condition_variable		   ready_;
+	std::condition_variable		   space_;
+	std::deque<Item>			   queue_;
+	int							   running_  = 0;
+	bool						   shutdown_ = false;
+};
+
+std::unique_ptr<PacketChannel> open_layer(const OpenOptions& options, WINDIVERT_LAYER layer, std::string& error)
+{
+	const UINT64 flags	= options.sniff ? WINDIVERT_FLAG_SNIFF : 0;
+	HANDLE		 handle = WinDivertOpen(options.filter.c_str(), layer, options.priority, flags);
+	if (handle == INVALID_HANDLE_VALUE)
+	{
+		error = format_error(GetLastError());
+		return nullptr;
+	}
+	WinDivertSetParam(handle, WINDIVERT_PARAM_QUEUE_LENGTH, kQueueLength);
+	WinDivertSetParam(handle, WINDIVERT_PARAM_QUEUE_TIME, kQueueTimeMs);
+	return std::make_unique<WinDivertChannel>(handle);
+}
+
+
 std::string address_chain(const char* field, const std::vector<std::string>& addresses)
 {
 	std::string chain;
@@ -133,17 +282,19 @@ bool check_privileges(std::string& error)
 
 std::unique_ptr<PacketChannel> open(const OpenOptions& options, std::string& error)
 {
-	const WINDIVERT_LAYER layer = options.forward ? WINDIVERT_LAYER_NETWORK_FORWARD : WINDIVERT_LAYER_NETWORK;
-	const UINT64		  flags = options.sniff ? WINDIVERT_FLAG_SNIFF : 0;
-	HANDLE				  handle = WinDivertOpen(options.filter.c_str(), layer, options.priority, flags);
-	if (handle == INVALID_HANDLE_VALUE)
+	std::unique_ptr<PacketChannel> local = open_layer(options, options.forward ? WINDIVERT_LAYER_NETWORK_FORWARD : WINDIVERT_LAYER_NETWORK, error);
+	if (!local || options.forward || !options.include_forward)
+		return local;
+
+	// Forwarded traffic is optional: not every filter compiles for the forward layer, and local capture still works without it.
+	std::string forward_error;
+	std::unique_ptr<PacketChannel> forwarded = open_layer(options, WINDIVERT_LAYER_NETWORK_FORWARD, forward_error);
+	if (!forwarded)
 	{
-		error = format_error(GetLastError());
-		return nullptr;
+		LOG_WARN("WinDivert: forwarded traffic is not captured, the forward layer could not be opened: %s", forward_error.c_str());
+		return local;
 	}
-	WinDivertSetParam(handle, WINDIVERT_PARAM_QUEUE_LENGTH, kQueueLength);
-	WinDivertSetParam(handle, WINDIVERT_PARAM_QUEUE_TIME, kQueueTimeMs);
-	return std::make_unique<WinDivertChannel>(handle);
+	return std::make_unique<MultiLayerChannel>(std::move(local), std::move(forwarded));
 }
 
 bool validate_filter(const std::string& filter, bool forward, std::string& error, uint32_t& position)
@@ -190,19 +341,21 @@ std::string profile(const ProfileFilter& spec)
 
 	if (spec.server_direction && !spec.server_addresses.empty())
 	{
-		const char* address_field = "ip.Addr";
+		// WinDivert has no ip.Addr field, so "both" matches either address field.
+		std::string address_filter;
 		switch (*spec.server_direction)
 		{
 			case ServerDirection::source:
-				address_field = "ip.SrcAddr";
+				address_filter = address_chain("ip.SrcAddr", spec.server_addresses);
 				break;
 			case ServerDirection::destination:
-				address_field = "ip.DstAddr";
+				address_filter = address_chain("ip.DstAddr", spec.server_addresses);
 				break;
 			case ServerDirection::both:
+				address_filter = address_chain("ip.SrcAddr", spec.server_addresses) + " or " + address_chain("ip.DstAddr", spec.server_addresses);
 				break;
 		}
-		filter = "(" + filter + ") and (" + address_chain(address_field, spec.server_addresses) + ")";
+		filter = "(" + filter + ") and (" + address_filter + ")";
 	}
 	return spec.outbound ? "outbound and (" + filter + ")" : filter;
 }
