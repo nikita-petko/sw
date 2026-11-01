@@ -488,7 +488,7 @@ precise, directly configured value instead of an indirect and only loosely
 tunable side effect of routing, and it has no recurring cost. It runs on its
 own capture channel that is processed before profiles and region enforcement,
 so a profile's own delay (if any) is added on top. The delay can be fixed or
-jittered, set per direction, and is shown in the status line. See
+jittered, set per direction, and is shown on an extra status line below the main one. See
 [`pocs/passive_latency.md`](pocs/passive_latency.md) for the full design and
 the remaining planned work (pause key, capture options, adaptive target RTT).
 
@@ -522,7 +522,7 @@ The desync countdown estimate is based on a profile's active duration and exclud
 | `max_delay_ms` | No | Upper clamp after sampling. `0` (the default) uses `delay_ms + 3 * jitter_ms` per direction; otherwise it must be at least each direction's delay. |
 | `direction` | No | `both` (default), `inbound`, or `outbound`. Packets of the other direction pass through undelayed. |
 | `inbound_delay_ms`, `outbound_delay_ms` | No | Override `delay_ms` for that direction. |
-| `pause_key` | No | Key that pauses and resumes passive latency while running (not `q`, Backspace, Tab, Page Up/Down or the arrow keys). Pausing releases queued packets at once; the status line shows `passive: paused`. |
+| `pause_key` | No | Key that pauses and resumes passive latency while running (not `q`, Backspace, Tab, Page Up/Down or the arrow keys). Pausing releases queued packets at once; the extra status line below the main one shows `passive: paused`. |
 | `preserve_order` | No | Never release a packet before an earlier one of the same direction. Defaults to `true`; `false` can reorder TCP packets when jitter is used. |
 | `max_queued_packets` | No | Safety bound on queued packets; packets past this bound are released immediately instead of being dropped. Defaults to `4096`. |
 | `filter` | No | Capture filter in the active backend's syntax. Defaults to `global_filter` when unset. |

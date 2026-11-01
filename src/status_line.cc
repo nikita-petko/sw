@@ -115,10 +115,6 @@ std::string describe_server(const PacketEngine& engine)
 			server_status += " (" + re_status + ")";
 	}
 #endif
-#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
-	if (engine.is_passive_latency_enabled())
-		server_status += " | passive: " + engine.passive_latency_status();
-#endif
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	if (engine.is_forwarded_address_discovery_enabled())
 		server_status += " | fad: " + engine.forwarded_address_discovery_status();
@@ -150,14 +146,21 @@ void StatusLine::run()
 {
 	while (!shutdown_.load())
 	{
+		std::vector<std::string> extra_lines;
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+		if (engine_.is_passive_latency_enabled())
+			extra_lines.push_back("passive: " + engine_.passive_latency_status());
+#endif
 #ifdef LAGSW_FEATURE_NETFILTER_MONITOR
 		if (options_.features.netfilter_monitor.enabled)
 		{
 			const std::string health = backend::monitor_status(options_.features.netfilter_monitor.interval_ms,
 															   options_.features.netfilter_monitor.backlog_threshold);
-			logging::set_extra_status(health.empty() ? std::vector<std::string>{} : std::vector<std::string>{health});
+			if (!health.empty())
+				extra_lines.push_back(health);
 		}
 #endif
+		logging::set_extra_status(extra_lines);
 		const std::string status			= describe_run_state(engine_);
 		const std::string active_profiles	= describe_active_profiles(engine_, options_);
 		const std::string server_status		= describe_server(engine_);
