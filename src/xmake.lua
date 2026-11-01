@@ -1,7 +1,7 @@
 target("lagsw")
     set_version("8")
     set_kind("binary")
-    add_files("*.cc", "modules/*.cc", "options/*.cc", "packet_engine/*.cc")
+    add_files("*.cc", "packet_mode/*.cc", "passive_latency/*.cc", "options/*.cc", "packet_engine/*.cc")
 
     add_includedirs("../include")
 

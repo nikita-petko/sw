@@ -100,7 +100,7 @@ xmake build packet_test && xmake run packet_test visible   # only cases whose na
 | --- | --- |
 | `options_test` | profiles YAML loader and validation (`src/options/`) |
 | `packet_test` | IPv4/IPv6/TCP/UDP header parsing and packet formatting helpers |
-| `modes_test` | packet scheduling modes (`src/modules/`) driven with a fake clock, plus ACK restoration and retransmission filtering |
+| `modes_test` | packet scheduling modes (`src/packet_mode/`) driven with a fake clock, plus ACK restoration and retransmission filtering |
 | `region_test` | region lookup helpers: response parsing, server naming, the on-disk cache and rate-limit retries (HTTPS, sleep and data directory are faked) |
 | `engine_test` | `PacketEngine` with its real worker threads against an in-memory capture backend: profile lifecycle, packet release and flushing, server selection, server and forwarded-address discovery, region resolution, desync countdown and the state report |
 | `region_enforcement_test` | region enforcement on the same in-memory backend: enforced-region cycle, which servers are delayed, delayed release and flushing, probe detection (only built with `--region_enforcement=y`) |

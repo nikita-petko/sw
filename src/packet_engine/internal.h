@@ -22,7 +22,7 @@
 #include "packet_headers.h"
 #include "packet_engine_util.h"
 #include "region_lookup.h"
-#include "../modules/packet_mode.h"
+#include "../packet_mode/packet_mode.h"
 
 /// Runtime resources and packet queues owned by one active profile.
 struct PacketEngine::Session

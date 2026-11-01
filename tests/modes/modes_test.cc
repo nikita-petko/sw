@@ -1,4 +1,4 @@
-// Unit tests for the packet scheduling modes (src/modules/). Modes are driven directly with a fake clock: every call passes the
+// Unit tests for the packet scheduling modes (src/packet_mode/). Modes are driven directly with a fake clock: every call passes the
 // current time in, nothing sleeps, and no capture backend is involved.
 #include <algorithm>
 #include <cstdint>
@@ -10,7 +10,8 @@
 #include <vector>
 
 #include "log.h"
-#include "modules/packet_mode.h"
+#include "passive_latency/delay_model.h"
+#include "packet_mode/packet_mode.h"
 #include "support/packets.h"
 #include "support/test.h"
 
@@ -831,6 +832,116 @@ void test_ack_restoration_is_off_by_default()
 	CHECK(acknowledgment_after_send(*mode, tcp_packet(2, 900, kAck | kPsh)) == 900);
 	CHECK(checksum_calls == 0);
 }
+
+DelayModelOptions model_options(DelayModelKind kind, int32_t delay_ms, int32_t jitter_ms, int32_t max_ms, bool preserve_order = true)
+{
+	DelayModelOptions options;
+	options.kind		   = kind;
+	options.preserve_order = preserve_order;
+	for (DirectionDelay& direction : options.directions)
+		direction = {delay_ms, jitter_ms, max_ms};
+	return options;
+}
+
+void test_delay_model_fixed_is_exact()
+{
+	DelayModel model(model_options(DelayModelKind::fixed, 60, 25, 200), 1);
+	for (int i = 0; i < 50; ++i)
+		CHECK(model.release_at(DelayDirection::outbound, 1000 + i) == 1060u + i);
+}
+
+void test_delay_model_samples_stay_within_bounds_and_center_on_the_mean()
+{
+	for (DelayModelKind kind : {DelayModelKind::uniform, DelayModelKind::normal})
+	{
+		DelayModel model(model_options(kind, 60, 10, 75), 42);
+		double	   total = 0;
+		const int  count = 20000;
+		for (int i = 0; i < count; ++i)
+		{
+			const uint64_t delay = model.sample(DelayDirection::inbound);
+			CHECK(delay <= 75);
+			total += static_cast<double>(delay);
+		}
+		const double mean = total / count;
+		CHECK(mean > 59.0 && mean < 61.0);
+	}
+}
+
+void test_delay_model_uniform_stays_within_the_jitter_range()
+{
+	DelayModel model(model_options(DelayModelKind::uniform, 60, 10, 500), 7);
+	for (int i = 0; i < 5000; ++i)
+	{
+		const uint64_t delay = model.sample(DelayDirection::outbound);
+		CHECK(delay >= 50 && delay <= 70);
+	}
+}
+
+void test_delay_model_clamps_to_zero_and_max()
+{
+	DelayModel low(model_options(DelayModelKind::normal, 0, 50, 100), 3);
+	DelayModel high(model_options(DelayModelKind::normal, 100, 500, 100), 3);
+	for (int i = 0; i < 5000; ++i)
+	{
+		CHECK(low.sample(DelayDirection::outbound) <= 100);
+		CHECK(high.sample(DelayDirection::outbound) <= 100);
+	}
+}
+
+void test_delay_model_is_deterministic_for_a_seed()
+{
+	DelayModel a(model_options(DelayModelKind::normal, 60, 10, 120), 99);
+	DelayModel b(model_options(DelayModelKind::normal, 60, 10, 120), 99);
+	for (int i = 0; i < 100; ++i)
+		CHECK(a.sample(DelayDirection::outbound) == b.sample(DelayDirection::outbound));
+}
+
+void test_delay_model_preserves_order_per_direction()
+{
+	DelayModel model(model_options(DelayModelKind::uniform, 50, 40, 200), 5);
+	uint64_t   last[2] = {0, 0};
+	for (int i = 0; i < 2000; ++i)
+	{
+		const DelayDirection direction = i % 3 == 0 ? DelayDirection::inbound : DelayDirection::outbound;
+		const uint64_t		 release   = model.release_at(direction, 1000 + static_cast<uint64_t>(i));
+		CHECK(release >= last[static_cast<int>(direction)]);
+		last[static_cast<int>(direction)] = release;
+	}
+}
+
+void test_delay_model_can_reorder_when_order_is_not_preserved()
+{
+	DelayModel model(model_options(DelayModelKind::uniform, 50, 40, 200, false), 5);
+	bool	   reordered = false;
+	uint64_t   last		 = 0;
+	for (int i = 0; i < 2000 && !reordered; ++i)
+	{
+		const uint64_t release = model.release_at(DelayDirection::outbound, 1000);
+		reordered			   = release < last;
+		last				   = release;
+	}
+	CHECK(reordered);
+}
+
+void test_delay_model_directions_are_independent()
+{
+	DelayModelOptions options = model_options(DelayModelKind::fixed, 0, 0, 500);
+	options.directions[static_cast<int>(DelayDirection::outbound)] = {120, 0, 500};
+	options.directions[static_cast<int>(DelayDirection::inbound)]  = {0, 0, 500};
+	DelayModel model(options, 1);
+	CHECK(model.release_at(DelayDirection::outbound, 1000) == 1120);
+	CHECK(model.release_at(DelayDirection::inbound, 1000) == 1000);
+	CHECK(model.release_at(DelayDirection::inbound, 1001) == 1001);
+}
+
+void test_delay_model_reset_forgets_ordering()
+{
+	DelayModel model(model_options(DelayModelKind::fixed, 100, 0, 100), 1);
+	CHECK(model.release_at(DelayDirection::outbound, 5000) == 5100);
+	model.reset();
+	CHECK(model.release_at(DelayDirection::outbound, 10) == 110);
+}
 }  // namespace
 
 int main(int argc, char** argv)
@@ -877,6 +988,15 @@ int main(int argc, char** argv)
 		{"ack_restoration_lets_pure_acks_bypass_the_mode", test_ack_restoration_lets_pure_acks_bypass_the_mode},
 		{"ack_restoration_never_lets_the_ack_go_backwards", test_ack_restoration_never_lets_the_ack_go_backwards},
 		{"ack_restoration_is_off_by_default", test_ack_restoration_is_off_by_default},
+		{"delay_model_fixed_is_exact", test_delay_model_fixed_is_exact},
+		{"delay_model_samples_stay_within_bounds_and_center_on_the_mean", test_delay_model_samples_stay_within_bounds_and_center_on_the_mean},
+		{"delay_model_uniform_stays_within_the_jitter_range", test_delay_model_uniform_stays_within_the_jitter_range},
+		{"delay_model_clamps_to_zero_and_max", test_delay_model_clamps_to_zero_and_max},
+		{"delay_model_is_deterministic_for_a_seed", test_delay_model_is_deterministic_for_a_seed},
+		{"delay_model_preserves_order_per_direction", test_delay_model_preserves_order_per_direction},
+		{"delay_model_can_reorder_when_order_is_not_preserved", test_delay_model_can_reorder_when_order_is_not_preserved},
+		{"delay_model_directions_are_independent", test_delay_model_directions_are_independent},
+		{"delay_model_reset_forgets_ordering", test_delay_model_reset_forgets_ordering},
 	};
 	return test::run_tests("modes", cases, argc, argv);
 }

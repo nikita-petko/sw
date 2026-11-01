@@ -1,5 +1,10 @@
 # PoC: Passive Latency (built-in artificial packet delay)
 
+## 0. Implementation status
+
+- Phase 0 (delay model): done. [delay_model.h](../src/passive_latency/delay_model.h) / [delay_model.cc](../src/passive_latency/delay_model.cc) implement `fixed`/`uniform`/`normal`, per-direction parameters, clamping, a seeded RNG, and per-direction order preservation. Covered by `delay_model_*` cases in `tests/modes/modes_test.cc`.
+- Phases 1-4: not started.
+
 ## 1. Summary
 
 Add an always-on, profile-independent **baseline delay** to every packet matched by a filter. The delay is configurable by mode (fixed, uniform jitter, normal jitter), by value, and by direction. It is applied by `lagsw` itself, at the packet layer, so the extra latency no longer has to come from a secondary dependency: a proxy-client that sits between the game client and the server and delays traffic from outside the engine.
@@ -121,7 +126,7 @@ uniform : delay_ms + U(-jitter_ms, +jitter_ms)
 normal  : delay_ms + N(0, jitter_ms)
 ```
 
-- The model is a pure function `(rng, direction) -> delay_ms` in a new `src/modules/delay_model.{h,cc}`, independent of the engine, so it can be tested deterministically with a seeded generator (`std::mt19937_64`; seed from config for tests, from `std::random_device` otherwise). This replaces the unseeded `std::rand()` style used in region enforcement.
+- The model is a pure function `(rng, direction) -> delay_ms` in a new `src/passive_latency/delay_model.{h,cc}`, independent of the engine, so it can be tested deterministically with a seeded generator (`std::mt19937_64`; seed from config for tests, from `std::random_device` otherwise). This replaces the unseeded `std::rand()` style used in region enforcement.
 - Delays are integer milliseconds to match `platform::tick_ms()` and `release_at` in `PacketNode`.
 - Samples are clamped to `[0, max_delay_ms]`; a `normal` tail can never produce an unbounded hold.
 
@@ -143,7 +148,7 @@ This behaves like a FIFO link with variable service time. `preserve_order: false
 Model it on [region_enforcement.cc](../src/packet_engine/region_enforcement.cc): an always-on capture channel with one receive thread and one send thread over a mutex-guarded queue.
 
 - New `src/packet_engine/passive_latency.cc`, compiled only under `LAGSW_FEATURE_PASSIVE_LATENCY`, with `start_passive_latency()`, `stop_passive_latency()`, `passive_latency_recv()`, `passive_latency_send()`, and state in `PacketEngine::State` (next to the `region_enforcement_*` members in [internal.h](../src/packet_engine/internal.h)).
-- Reuse `PacketNode`, `PacketQueue`, `make_packet_node`, `collect_due_packets`, and `destroy_packet_node` from [packet_mode.h](../src/modules/packet_mode.h) rather than the ad hoc `DelayedEnforcementPacket` vector, so the queue ordering rules (release time, then receive order) are shared.
+- Reuse `PacketNode`, `PacketQueue`, `make_packet_node`, `collect_due_packets`, and `destroy_packet_node` from [packet_mode.h](../src/packet_mode/packet_mode.h) rather than the ad hoc `DelayedEnforcementPacket` vector, so the queue ordering rules (release time, then receive order) are shared.
 - New xmake feature entry `passive_latency` (default `true`) in the root [xmake.lua](../xmake.lua) feature table, and `add_options("passive_latency")` for the engine target and tests.
 
 ### 8.2 Stage ordering

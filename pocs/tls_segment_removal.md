@@ -4,7 +4,7 @@
 
 Add a packet-mutation mode that inspects the TLS record layer inside a captured TCP payload, matches individual TLS records ("segments") against a size filter, and removes the matching records from the packet before it is reinjected. The mode never requires TLS decryption: the 5-byte TLS record header (content type, protocol version, record length) is always sent in the clear, even for encrypted application-data records, so record boundaries and sizes are fully visible to a WinDivert-level interceptor.
 
-This is a packet-mutation feature, not a stream proxy. It fits the existing `PacketMode` model in [packet_engine.h](../include/packet_engine.h) and [packet_mode.h](../src/modules/packet_mode.h): one packet in, zero-or-one mutated packet out, with the same capture/queue/release pipeline already used by `drop`, `ratio`, and `hold_and_send`. It must only be used against traffic and endpoints the operator is authorized to intercept.
+This is a packet-mutation feature, not a stream proxy. It fits the existing `PacketMode` model in [packet_engine.h](../include/packet_engine.h) and [packet_mode.h](../src/packet_mode/packet_mode.h): one packet in, zero-or-one mutated packet out, with the same capture/queue/release pipeline already used by `drop`, `ratio`, and `hold_and_send`. It must only be used against traffic and endpoints the operator is authorized to intercept.
 
 ```mermaid
 flowchart LR
@@ -106,7 +106,7 @@ profiles:
 
 For each captured packet with a non-empty TCP payload:
 
-1. Parse the IPv4 and TCP headers with `WinDivertHelperParsePacket` (as already done throughout [packet_mode.cc](../src/modules/packet_mode.cc)) to get the payload pointer and length.
+1. Parse the IPv4 and TCP headers with `WinDivertHelperParsePacket` (as already done throughout [packet_mode.cc](../src/packet_mode/packet_mode.cc)) to get the payload pointer and length.
 2. Walk the payload as a sequence of candidate TLS records: read `type` (1 byte), `version` (2 bytes), `length` (2 bytes, big-endian), then expect `length` bytes of fragment.
 3. If the bytes remaining are fewer than 5, or a declared `length` would run past the end of the payload, treat the *remaining* bytes as an **unparsed tail**, not a record. The tail is left untouched by the size filter (it cannot be evaluated because its true size is unknown from this packet alone) and is never removed.
 4. A payload that parses as zero complete records (e.g. plaintext pre-TLS control bytes, or the pre-TLS probe/challenge frames documented in [tcp_tls_proxy.md](tcp_tls_proxy.md#171-captured-protocol-lifecycle-overview)) is passed through unmodified — the segment filter only ever acts on payload that fully decodes as one or more TLS records.
@@ -183,7 +183,7 @@ Further considerations building on this:
 
 1. `N` only ever accumulates upward — every additional removal on the tracked direction adds to it — and is never decreased except by the reset described in point 3.
 2. SACK blocks (`TCP_OPT_SACK`) and TCP timestamp echoes referencing pre-shrink sequence numbers are not rewritten by this design; either strip them from affected packets or scope the profile's filter to exclude peers that negotiate SACK, since a stale SACK block is a correctness bug, not a cosmetic one.
-3. **`N`'s lifetime is scoped to the profile's activation, not the connection.** `N` starts at 0 when the profile activates (toggle on, or key held for `mode: hold`) and is discarded back to 0 the instant the profile deactivates, mirroring the existing per-direction state already reset in `PacketMode::reset()` (see [packet_mode.h](../src/modules/packet_mode.h) `last_sent_ack_`/`has_last_sent_ack_`). While active, every packet in both directions on the tracked connection continues to be corrected using the current `N`; once deactivated, correction stops immediately and unconditionally — there is no drain or gradual rollback.
+3. **`N`'s lifetime is scoped to the profile's activation, not the connection.** `N` starts at 0 when the profile activates (toggle on, or key held for `mode: hold`) and is discarded back to 0 the instant the profile deactivates, mirroring the existing per-direction state already reset in `PacketMode::reset()` (see [packet_mode.h](../src/packet_mode/packet_mode.h) `last_sent_ack_`/`has_last_sent_ack_`). While active, every packet in both directions on the tracked connection continues to be corrected using the current `N`; once deactivated, correction stops immediately and unconditionally — there is no drain or gradual rollback.
 4. Deactivating mid-connection leaves the two real endpoints permanently off by the final value of `N` — the physical bytes already removed cannot be un-removed after the fact. Once correction stops, the client's next real `SeqNum` and the server's next expected sequence number differ by `N`, indistinguishable from either endpoint's perspective from `N` bytes having been silently lost on the wire. Recovery is left entirely to the two endpoints' own TCP stacks (duplicate ACKs, retransmission timeout, most likely ending in the connection being reset and re-established) rather than anything this engine does. This is acceptable for short, deliberately-triggered activations — "a little amount of lag" while the endpoints resync or reconnect — and is precisely why this is not proposed as a permanent, connection-lifetime mechanism in the baseline design.
 5. A variant that keeps correcting forever regardless of profile activation state — so the two endpoints never have to resync — is possible in principle, but it requires `N` to live in a new, connection-scoped state store that outlives any single profile's activation window, which is a materially bigger architectural change than the profile-scoped tracker above. This is deferred as an open question (§14) rather than part of the baseline design.
 6. Retransmissions of an *already-shrunk* original segment must be shrunk identically and deterministically (same filter, same selection outcome), so a retransmission is byte-for-byte equal to the first transmission's shrunk form; this is why `selection: random` (§9) is unsafe under retransmission unless the random choice is derived deterministically from stable per-packet material (e.g. original `SeqNum`), not a fresh RNG draw per capture.
@@ -260,7 +260,7 @@ After the payload bytes are rewritten:
 
 1. IPv4 `Total Length` is reduced by the removed byte count.
 2. TCP header length (data offset) is unchanged — only the payload shrinks, not the TCP header/options.
-3. `WinDivertHelperCalcChecksums` recomputes the IPv4 and TCP checksums exactly as the existing `ack_restoration` path already does after mutating `AckNum` in [packet_mode.cc](../src/modules/packet_mode.cc); the segment-removal path reuses the same call after all field rewrites (payload, `SeqNum`, `AckNum`, flags) are applied, not after each individual rewrite, to avoid recomputing checksums against an intermediate, inconsistent packet.
+3. `WinDivertHelperCalcChecksums` recomputes the IPv4 and TCP checksums exactly as the existing `ack_restoration` path already does after mutating `AckNum` in [packet_mode.cc](../src/packet_mode/packet_mode.cc); the segment-removal path reuses the same call after all field rewrites (payload, `SeqNum`, `AckNum`, flags) are applied, not after each individual rewrite, to avoid recomputing checksums against an intermediate, inconsistent packet.
 4. The `WINDIVERT_ADDRESS`/packet length passed to `WinDivertSend` must reflect the new, shorter length; the engine must not reuse the original captured length after shrinking the buffer.
 
 ### 8.5 Exclusions
@@ -310,7 +310,7 @@ flowchart LR
 - Never leave `PSH` set on a packet with an empty payload (§8.3).
 - Never recompute checksums against a partially-mutated packet buffer — all field rewrites for a given packet happen before the single `WinDivertHelperCalcChecksums` call (§8.4).
 - Never treat an unparsed tail (§7) as a record; never remove bytes whose true record boundary this packet cannot establish.
-- Log, at debug level, every removal decision: connection tuple, direction, matched record offsets/sizes, selection outcome, and the resulting profile-scoped `N`, mirroring the existing `LOG_DEBUG` style already used for retransmission/duplicate decisions in [packet_mode.cc](../src/modules/packet_mode.cc).
+- Log, at debug level, every removal decision: connection tuple, direction, matched record offsets/sizes, selection outcome, and the resulting profile-scoped `N`, mirroring the existing `LOG_DEBUG` style already used for retransmission/duplicate decisions in [packet_mode.cc](../src/packet_mode/packet_mode.cc).
 - Do not log TLS record *contents* by default (consistent with the payload-redaction stance already established in [tcp_tls_proxy.md](tcp_tls_proxy.md#12-security-and-privacy-requirements)); logging sizes and offsets is sufficient for debugging and does not risk exposing plaintext or ciphertext.
 
 ## 12. Test plan
