@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <deque>
+#include <fstream>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -19,7 +20,7 @@
 
 /// Full-screen network statistics view (see pocs/net_monitor.md). Nothing is captured or rendered until toggle()
 /// switches the view on; leaving the view stops both again. Statistics are measured passively from a sniff channel
-/// that covers every configured server.
+/// that covers every known server, including the ones added by server discovery while the view is open.
 class NetMonitor
 {
 public:
@@ -39,10 +40,33 @@ public:
 	bool is_toggle_key(int key) const;
 	/// Whether the view is currently shown.
 	bool active() const { return active_; }
-	/// Handles a key while the view is shown: space pauses/resumes the measurement, 'r' resets the statistics.
-	void handle_key(int key);
+	/// Handles a key while the view is shown: space pauses/resumes the measurement, 'r' resets the statistics, 'f' switches
+	/// between the overview and the per-flow view, Up/Down select a flow and 'e' exports the measured window. Returns
+	/// whether the key was used by the view.
+	bool handle_key(int key);
 
+#ifdef LAGSW_NET_MONITOR_TESTING
+public:
+#else
 private:
+#endif
+	/// The screen that is shown.
+	enum class View
+	{
+		overview,
+		flows,
+	};
+
+	/// The conditions that can raise an alert for a server.
+	enum AlertKind
+	{
+		alert_rtt,
+		alert_jitter,
+		alert_retransmit,
+		alert_stall,
+		alert_kinds,
+	};
+
 	/// A bounded history of per-second samples for the sparklines.
 	struct Series
 	{
@@ -66,22 +90,68 @@ private:
 		std::chrono::steady_clock::time_point sent;
 	};
 
+	/// Per-second history of one flow; only kept for the flow that is selected in the flow view.
+	struct FlowDetail
+	{
+		Series bps_down, bps_up, rtt;
+	};
+
+	/// One TCP connection or UDP exchange of a server, identified by the client and server port.
 	struct Flow
 	{
 		std::deque<PendingSegment> pending;
 		uint32_t				   highest_out_end = 0;
 		uint32_t				   highest_in_end  = 0;
+		bool					   tcp			   = true;
 		bool					   out_seen		   = false;
 		bool					   in_seen		   = false;
 		bool					   syn_pending	   = false;
 		bool					   closed		   = false;
+		bool					   reset		   = false;
 		bool					   fin_out		   = false;
 		bool					   fin_in		   = false;
 		bool					   ack_out_seen	   = false;
 		bool					   ack_in_seen	   = false;
 		uint32_t				   last_ack_out	   = 0;
 		uint32_t				   last_ack_in	   = 0;
+		uint16_t				   client_port	   = 0;
+		uint16_t				   server_port	   = 0;
+		uint64_t				   packets_up	   = 0;
+		uint64_t				   packets_down	   = 0;
+		uint64_t				   bytes_up		   = 0;
+		uint64_t				   bytes_down	   = 0;
+		uint64_t				   bytes_up_tick   = 0;
+		uint64_t				   bytes_down_tick = 0;
+		uint64_t				   rtt_samples	   = 0;
+		double					   rtt_sum_ms	   = 0;
+		double					   last_rtt_ms	   = 0;
+		double					   rtt_tick_sum_ms = 0;
+		uint32_t				   rtt_tick_count  = 0;
 		std::chrono::steady_clock::time_point syn_sent;
+		std::chrono::steady_clock::time_point first_seen;
+		std::chrono::steady_clock::time_point last_seen;
+		std::shared_ptr<FlowDetail> detail;
+	};
+
+	/// Something worth remembering about the measurement: a profile switching on or off, or an alert.
+	struct Event
+	{
+		enum class Level
+		{
+			info,
+			alert,
+			ok,
+		};
+		uint64_t	tick = 0;
+		Level		level = Level::info;
+		std::string text;
+	};
+
+	/// Identifies a flow across frames: the server address and the flow key.
+	struct FlowId
+	{
+		std::string address;
+		uint64_t	key = 0;
 	};
 
 	/// Traffic towards one server port (TCP or UDP), summed over all configured servers.
@@ -149,13 +219,21 @@ private:
 		double		max_gap_ms		 = 0;
 		double		prev_gap_ms		 = 0;
 		uint64_t	retrans_prev	 = 0;
+		uint64_t	data_prev		 = 0;
+		double		tick_rtt_min_ms	 = 0;
+		double		tick_rtt_max_ms	 = 0;
+		double		tick_max_gap_ms	 = 0;
+		static constexpr size_t kRttBuckets = 6;
+		uint64_t	rtt_hist[kRttBuckets] = {};
+		bool		alert_active[alert_kinds] = {};
+		uint64_t	alert_count[alert_kinds]  = {};
 		std::deque<double> recent_rtt;
 		std::map<uint64_t, Flow> flows;
 		std::chrono::steady_clock::time_point last_in;
 		std::chrono::steady_clock::time_point last_out;
 		bool		has_in	= false;
 		bool		has_out = false;
-		Series		pps_up, pps_down, bps_up, bps_down, rtt, retrans, flows_new, score;
+		Series		pps_up, pps_down, bps_up, bps_down, rtt, rtt_min, rtt_max, retrans, data_pkts, flows_new, score;
 	};
 
 	void capture_loop();
@@ -164,8 +242,45 @@ private:
 	void tick();
 	void reset_locked();
 	void clear_transient_locked();
+	/// Opens the sniff channel for the servers known to the engine and starts the capture thread. Returns false with `error` set on failure.
+	bool start_capture(std::string& error);
+	/// Stops the capture thread and closes the channel.
+	void stop_capture();
+	/// Adds servers that the engine learned about since the last call and restarts the capture so their traffic is seen.
+	void refresh_servers();
+	/// Registers a server for measurement. Requires mutex_.
+	void add_server_locked(const ServerOptions& server);
+	/// Checks the alert thresholds of one server at the end of a tick. Requires mutex_.
+	void evaluate_alerts_locked(const std::string& label, ServerStats& stats);
+	void raise_alert_locked(const std::string& label, ServerStats& stats, AlertKind kind, bool exceeded, const std::string& detail);
+	void add_event_locked(Event::Level level, const std::string& text);
+	/// Notes profile activations and deactivations. Requires mutex_.
+	void track_profiles_locked();
+	/// Every flow of every server, active ones first. Requires mutex_.
+	struct FlowRef
+	{
+		std::string		   address;
+		const ServerStats* stats = nullptr;
+		uint64_t		   key	 = 0;
+		const Flow*		   flow	 = nullptr;
+	};
+	std::vector<FlowRef> sorted_flows_locked() const;
+	void move_flow_selection_locked(int delta);
+	/// Writes the measured window to a CSV and a JSON file and returns a one-line result for the status area. Requires mutex_.
+	std::string export_snapshot_locked();
+	/// Appends the latest second (and new events) to the log file. Requires mutex_.
+	void write_log_locked();
+	/// Opens the log file configured for the view; failures are reported in the status area.
+	void open_log();
+	void close_log();
+	/// Logs how often each server raised an alert while the view was open.
+	void log_alert_summary();
 	/// Lays the view out for a console of the given size (0 when unknown).
 	std::string render_frame(int console_columns, int console_rows);
+	/// The per-flow screen.
+	std::string render_flow_view(int console_columns, int console_rows);
+	/// The first lines shared by every screen.
+	std::string render_header(size_t width, std::vector<std::string>& warnings);
 
 	const PacketEngine&		   engine_;
 	const PacketEngineOptions& options_;
@@ -190,6 +305,12 @@ private:
 	double								  peak_bps_down_			= 0;
 	Series								  queued_;
 	Series								  cpu_, nic_problems_;
+	Series								  profile_active_, alerts_active_;
+	std::vector<bool>					  profile_state_;
+	std::deque<Event>					  events_;
+	View								  view_				  = View::overview;
+	bool								  has_selection_	  = false;
+	FlowId								  selection_;
 	platform::SystemCounters			  system_prev_;
 	bool								  system_has_prev_			= false;
 	double								  peak_pps_					= 0;
@@ -198,10 +319,17 @@ private:
 	ServerStats							  total_;
 	uint64_t							  total_packets_	  = 0;
 	uint64_t							  other_packets_	  = 0;
+	uint64_t							  unparsed_packets_	  = 0;
+	uint64_t							  capture_errors_	  = 0;
 	std::chrono::steady_clock::time_point paused_at_;
 	std::chrono::steady_clock::time_point last_tick_;
 	uint64_t							  elapsed_ticks_	  = 0;
 	std::string							  open_error_;
+	std::chrono::steady_clock::time_point retry_at_;
+	std::string							  capture_description_;
+	std::string							  status_message_;
+	std::chrono::steady_clock::time_point status_until_;
+	std::ofstream						  log_stream_;
 };
 
 #endif  // LAGSW_FEATURE_NET_MONITOR

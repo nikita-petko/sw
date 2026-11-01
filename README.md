@@ -479,12 +479,28 @@ features:
   net_monitor:
     enabled: true
     key: N
+    alert_rtt: 150
+    alert_jitter: 30
+    alert_retransmit: 2
+    alert_stall: 1000
+    export_directory: "netmonitor-exports"
+    log_file: "netmonitor.jsonl"
 ```
 
 | Field | Required | Description |
 | --- | --- | --- |
 | `enabled` | No | Makes the view available. Defaults to `false`. |
-| `key` | No | Key that opens and closes the view. Defaults to `N`. Must not be `q`, `r`, Space, Backspace, Tab, Page Up/Down, the arrow keys, the passive latency `pause_key` or a profile activation key. |
+| `key` | No | Key that opens and closes the view. Defaults to `N`. Must not be `q`, `r`, `f`, `e`, Space, Backspace, Tab, Page Up/Down, the arrow keys, the passive latency `pause_key` or a profile activation key. |
+| `alert_rtt` | No | Latency in milliseconds above which a server raises an alert. Defaults to `150`; `0` disables it. |
+| `alert_jitter` | No | Smoothed RTT jitter in milliseconds above which a server raises an alert. Defaults to `30`; `0` disables it. |
+| `alert_retransmit` | No | Percentage of retransmitted TCP data packets over the last 10 seconds above which a server raises an alert. Defaults to `2`; `0` disables it. |
+| `alert_stall` | No | Inbound silence in milliseconds from a server at or above which an alert is raised. Defaults to `1000`; `0` disables it. |
+| `export_directory` | No | Directory for the CSV and JSON files written by the `e` key. Defaults to a `netmonitor` folder in the per-user data directory. |
+| `log_file` | No | JSON Lines file that receives one record per server and second, plus the events, while the view is open. Disabled when empty. |
+
+While the view is open, `f` switches to a per-flow view (`Up`/`Down` select a flow and show its history), `e` exports
+the measured window and `r` resets it. A server whose alert thresholds are exceeded turns red in the table, and the
+events panel lists alerts, profile activations and servers found by server discovery.
 
 Region enforcement delays TCP PSH packets from configured servers outside the
 currently selected server group. Use the Left and Right arrow keys to change

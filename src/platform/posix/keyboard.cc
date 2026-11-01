@@ -82,8 +82,12 @@ int to_input_code(int code)
 			return KEY_PAGEDOWN;
 		case key::left:
 			return KEY_LEFT;
+		case key::up:
+			return KEY_UP;
 		case key::right:
 			return KEY_RIGHT;
+		case key::down:
+			return KEY_DOWN;
 	}
 	return -1;
 }
@@ -249,6 +253,10 @@ int read_key()
 		return key::none;
 	switch (read_byte())
 	{
+		case 'A':
+			return key::up;
+		case 'B':
+			return key::down;
 		case 'D':
 			return key::left;
 		case 'C':

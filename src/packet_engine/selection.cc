@@ -42,6 +42,12 @@ std::string PacketEngine::current_server() const
 	return "none";
 }
 
+std::vector<ServerOptions> PacketEngine::servers() const
+{
+	std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
+	return options_.servers;
+}
+
 std::string PacketEngine::current_server_region() const
 {
 	std::string address;

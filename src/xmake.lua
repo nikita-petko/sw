@@ -36,6 +36,9 @@ target("lagsw")
 
         -- Link ole32 for per-capture PCAP GUID generation
         add_links("ole32")
+
+        -- Link iphlpapi for the per-interface error and drop counters of the net monitor
+        add_links("iphlpapi")
     elseif is_plat("linux") then
         add_rules("backend.nfqueue")
     else

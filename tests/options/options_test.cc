@@ -125,6 +125,12 @@ features:
   net_monitor:
     enabled: true
     key: m
+    alert_rtt: 120
+    alert_jitter: 0
+    alert_retransmit: 5
+    alert_stall: 750
+    export_directory: "exports"
+    log_file: "logs/net.jsonl"
   pcap_files:
     enabled: true
     output_dir: "caps"
@@ -206,6 +212,9 @@ profiles:
 #endif
 #ifdef LAGSW_FEATURE_NET_MONITOR
 	CHECK(o.features.net_monitor.enabled && o.features.net_monitor.key == 'M');
+	CHECK(o.features.net_monitor.alert_rtt_ms == 120 && o.features.net_monitor.alert_jitter_ms == 0);
+	CHECK(o.features.net_monitor.alert_retransmit_percent == 5 && o.features.net_monitor.alert_stall_ms == 750);
+	CHECK(o.features.net_monitor.export_directory == "exports" && o.features.net_monitor.log_file == "logs/net.jsonl");
 #endif
 #ifdef LAGSW_FEATURE_PCAP_FILES
 	CHECK(o.features.pcap_files.enabled && o.features.pcap_files.output_dir == "caps");
@@ -317,6 +326,9 @@ void test_rejected_files()
 #ifdef LAGSW_FEATURE_NET_MONITOR
 		{"net monitor bad key", "features:\n  net_monitor:\n    key: nonsense\n" + kProfile, "Invalid net_monitor key in"},
 		{"net monitor reserved key", "features:\n  net_monitor:\n    enabled: true\n    key: r\n" + kProfile, "net_monitor key conflicts with a command key"},
+		{"net monitor flow view key", "features:\n  net_monitor:\n    enabled: true\n    key: f\n" + kProfile, "net_monitor key conflicts with a command key"},
+		{"net monitor export key", "features:\n  net_monitor:\n    enabled: true\n    key: e\n" + kProfile, "net_monitor key conflicts with a command key"},
+		{"net monitor bad alert", "features:\n  net_monitor:\n    alert_retransmit: 101\n" + kProfile, "Invalid net_monitor alert_retransmit in"},
 		{"net monitor profile key", "features:\n  net_monitor:\n    enabled: true\n    key: x\n" + kProfile, "conflicts with an activation key of profile 'A'"},
 #endif
 		{"passive latency huge delay", "features:\n  passive_latency:\n    delay_ms: 600001\n" + kProfile, "Invalid passive_latency delay_ms in"},

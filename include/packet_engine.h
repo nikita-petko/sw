@@ -330,6 +330,18 @@ struct NetMonitorOptions
 	bool enabled = false;
 	/// Virtual key that opens and closes the view (upper-case letter, digit or other platform::key code).
 	int key = 'N';
+	/// Latency (ms) above which a server raises an alert; 0 disables the alert.
+	uint32_t alert_rtt_ms = 150;
+	/// Smoothed RTT jitter (ms) above which a server raises an alert; 0 disables the alert.
+	uint32_t alert_jitter_ms = 30;
+	/// Share of retransmitted TCP data packets (percent, over the last 10 seconds) above which a server raises an alert; 0 disables it.
+	uint32_t alert_retransmit_percent = 2;
+	/// Inbound silence (ms) from a server at or above which an alert is raised; 0 disables the alert.
+	uint32_t alert_stall_ms = 1000;
+	/// Directory for the files written by the export key; empty uses a `netmonitor` folder in the per-user data directory.
+	std::string export_directory;
+	/// JSON Lines file that receives one record per server and second while the view is open; empty disables logging.
+	std::string log_file;
 };
 #endif
 
@@ -475,6 +487,8 @@ public:
 #endif
 	/// Returns the currently selected server address.
 	std::string current_server() const;
+	/// Returns a snapshot of the known servers: the configured ones plus those added by server discovery.
+	std::vector<ServerOptions> servers() const;
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	/// Returns the currently selected enforced region.
 	std::string current_enforced_region() const;

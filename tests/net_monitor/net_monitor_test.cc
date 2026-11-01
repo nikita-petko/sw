@@ -5,9 +5,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <deque>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -20,10 +23,9 @@
 #include "support/packets.h"
 #include "support/test.h"
 
-// The tests look at the measured values directly instead of parsing the rendered screen.
-#define private public
+// The tests look at the measured values directly instead of parsing the rendered screen; LAGSW_NET_MONITOR_TESTING makes the
+// internals of NetMonitor public.
 #include "net_monitor.h"
-#undef private
 
 namespace {
 using namespace packets;
@@ -323,6 +325,400 @@ void test_tcp_health_flows_and_path()
 	CHECK(frame.find("burstiness") != std::string::npos);
 	CHECK(monitor.cpu_.values.empty());  // the first sample only sets the baseline
 }
+
+void feed(NetMonitor& monitor, const Bytes& packet)
+{
+	monitor.record(packet.data(), static_cast<uint32_t>(packet.size()));
+}
+
+void test_capture_health_and_warnings()
+{
+	fakes::reset();
+	const PacketEngineOptions options = options_with_server();
+	PacketEngine			  engine(options);
+	NetMonitor				  monitor(engine, options);
+	monitor.toggle();
+	monitor.stop();
+
+	const std::vector<uint8_t> garbage = {0x00, 0x01, 0x02};
+	monitor.record(garbage.data(), static_cast<uint32_t>(garbage.size()));
+	feed(monitor, ipv4_packet(kTcp, tcp_segment(1000, 2000, 1, 1, kAck), kClient, {8, 8, 8, 8}));
+
+	std::lock_guard<std::mutex> lock(monitor.mutex_);
+	CHECK(monitor.unparsed_packets_ == 1 && monitor.other_packets_ == 1);
+	std::string frame = monitor.render_frame(120, 0);
+	CHECK(frame.find("capture ") != std::string::npos && frame.find("unparsed 1") != std::string::npos);
+	CHECK(frame.find("no packets from the configured servers") == std::string::npos);
+	for (int i = 0; i < 5; ++i)
+		monitor.tick();
+	CHECK(monitor.render_frame(120, 0).find("no packets from the configured servers") != std::string::npos);
+}
+
+void test_one_sided_capture_is_called_out()
+{
+	fakes::reset();
+	const PacketEngineOptions options = options_with_server();
+	PacketEngine			  engine(options);
+	NetMonitor				  monitor(engine, options);
+	monitor.toggle();
+	monitor.stop();
+
+	feed(monitor, to_server(1, 1, kAck | kPsh, 10));
+	std::lock_guard<std::mutex> lock(monitor.mutex_);
+	for (int i = 0; i < 10; ++i)
+		monitor.tick();
+	const std::string frame = monitor.render_frame(120, 0);
+	CHECK(frame.find("no inbound ones") != std::string::npos);
+}
+
+void test_resize_is_not_needed_for_the_layout_to_fit()
+{
+	fakes::reset();
+	const PacketEngineOptions options = options_with_server();
+	PacketEngine			  engine(options);
+	engine.cycle_server(1);
+	NetMonitor monitor(engine, options);
+	monitor.toggle();
+	monitor.stop();
+	std::lock_guard<std::mutex> lock(monitor.mutex_);
+	monitor.tick();
+	const auto count_lines = [](const std::string& text) { return std::count(text.begin(), text.end(), '\n'); };
+	for (const int rows : {62, 80, 100})
+		CHECK(count_lines(monitor.render_frame(120, rows)) <= rows - 1);
+	CHECK(count_lines(monitor.render_flow_view(120, 30)) <= 29);
+}
+
+void test_alerts_raise_and_clear()
+{
+	fakes::reset();
+	PacketEngineOptions options = options_with_server();
+	options.features.net_monitor.alert_rtt_ms			 = 100;
+	options.features.net_monitor.alert_jitter_ms		 = 20;
+	options.features.net_monitor.alert_retransmit_percent = 10;
+	options.features.net_monitor.alert_stall_ms			 = 500;
+	PacketEngine engine(options);
+	NetMonitor	 monitor(engine, options);
+	monitor.toggle();
+	monitor.stop();
+
+	std::lock_guard<std::mutex> lock(monitor.mutex_);
+	auto&						stats = monitor.servers_[kServerAddress];
+	stats.rtt_samples	 = 1;
+	stats.tick_rtt_sum_ms = 300;
+	stats.tick_rtt_count = 1;
+	stats.jitter_ms		 = 40;
+	stats.data_up		 = 40;
+	stats.retrans_up	 = 10;
+	stats.tick_max_gap_ms = 900;
+	monitor.tick();
+	for (const auto kind : {NetMonitor::alert_rtt, NetMonitor::alert_jitter, NetMonitor::alert_retransmit, NetMonitor::alert_stall})
+		CHECK(stats.alert_active[kind] && stats.alert_count[kind] == 1);
+	CHECK(monitor.events_.size() == 4 && monitor.events_.back().level == NetMonitor::Event::Level::alert);
+	CHECK(monitor.alerts_active_.values.back() == 4);
+	CHECK(monitor.render_frame(120, 0).find("!Test") != std::string::npos);
+
+	// Staying above the limit does not raise the alert again; dropping below clears it.
+	stats.tick_rtt_sum_ms = 400;
+	stats.tick_rtt_count  = 1;
+	monitor.tick();
+	CHECK(stats.alert_count[NetMonitor::alert_rtt] == 1 && monitor.events_.size() == 5);  // only the stall cleared, as its gap was reset
+	stats.tick_rtt_sum_ms = 40;
+	stats.tick_rtt_count  = 1;
+	stats.jitter_ms		  = 1;
+	monitor.tick();
+	CHECK(!stats.alert_active[NetMonitor::alert_rtt] && !stats.alert_active[NetMonitor::alert_jitter]);
+	CHECK(!stats.alert_active[NetMonitor::alert_stall]);
+	CHECK(monitor.events_.back().level == NetMonitor::Event::Level::ok);
+	CHECK(monitor.alerts_active_.values.back() == 1);  // the retransmit window still covers the earlier burst
+}
+
+void test_alerts_can_be_disabled()
+{
+	fakes::reset();
+	PacketEngineOptions options = options_with_server();
+	options.features.net_monitor.alert_rtt_ms	 = 0;
+	options.features.net_monitor.alert_jitter_ms = 0;
+	options.features.net_monitor.alert_stall_ms	 = 0;
+	PacketEngine engine(options);
+	NetMonitor	 monitor(engine, options);
+	monitor.toggle();
+	monitor.stop();
+
+	std::lock_guard<std::mutex> lock(monitor.mutex_);
+	auto&						stats = monitor.servers_[kServerAddress];
+	stats.rtt_samples	  = 1;
+	stats.tick_rtt_sum_ms = 5000;
+	stats.tick_rtt_count  = 1;
+	stats.jitter_ms		  = 500;
+	stats.tick_max_gap_ms = 9000;
+	monitor.tick();
+	CHECK(monitor.events_.empty());
+}
+
+void test_profile_changes_become_events_and_markers()
+{
+	fakes::reset();
+	const PacketEngineOptions options = options_with_server();
+	PacketEngine			  engine(options);
+	NetMonitor				  monitor(engine, options);
+	monitor.toggle();
+	monitor.stop();
+
+	std::lock_guard<std::mutex> lock(monitor.mutex_);
+	monitor.tick();
+	CHECK(monitor.events_.empty() && monitor.profile_active_.values.back() == 0);
+	// The monitor believed the profile was running; the engine says it is not, so this reads as a deactivation.
+	monitor.profile_state_.assign(1, true);
+	monitor.tick();
+	CHECK(monitor.events_.size() == 1 && monitor.events_.back().text == "profile 'A' deactivated");
+	const std::string frame = monitor.render_frame(120, 0);
+	CHECK(frame.find("profiles active") != std::string::npos && frame.find("profile 'A' deactivated") != std::string::npos);
+}
+
+void test_udp_and_tcp_flows_are_listed()
+{
+	fakes::reset();
+	const PacketEngineOptions options = options_with_server();
+	PacketEngine			  engine(options);
+	NetMonitor				  monitor(engine, options);
+	monitor.toggle();
+	monitor.stop();
+
+	feed(monitor, to_server(100, 0, kSyn, 0));
+	feed(monitor, from_server(500, 101, kSyn | kAck, 0));
+	feed(monitor, ipv4_packet(kUdp, udp_datagram(4000, 3074, 20), kClient, kServer));
+	feed(monitor, ipv4_packet(kUdp, udp_datagram(3074, 4000, 100), kServer, kClient));
+
+	{
+		std::lock_guard<std::mutex> lock(monitor.mutex_);
+		const auto&					stats = monitor.servers_[kServerAddress];
+		CHECK(stats.flows.size() == 2 && stats.flows_opened == 1);
+		const auto udp = stats.flows.find((uint64_t{1} << 32) | (4000u << 16) | 3074);
+		CHECK(udp != stats.flows.end());
+		if (udp != stats.flows.end())
+			CHECK(!udp->second.tcp && udp->second.client_port == 4000 && udp->second.server_port == 3074 && udp->second.packets_up == 1 &&
+				  udp->second.packets_down == 1 && udp->second.bytes_down > udp->second.bytes_up);
+		const auto tcp = stats.flows.find((1000u << 16) | 2000);
+		CHECK(tcp != stats.flows.end());
+		if (tcp != stats.flows.end())
+			CHECK(tcp->second.tcp && tcp->second.packets_up == 1 && tcp->second.packets_down == 1);
+	}
+
+	CHECK(monitor.handle_key('f'));
+	{
+		std::lock_guard<std::mutex> lock(monitor.mutex_);
+		CHECK(monitor.view_ == NetMonitor::View::flows && monitor.has_selection_);
+		const std::string frame = monitor.render_flow_view(120, 0);
+		CHECK(frame.find("Selected flow") != std::string::npos && frame.find("tcp") != std::string::npos && frame.find("udp") != std::string::npos);
+		CHECK(frame.find("connecting") != std::string::npos || frame.find("established") != std::string::npos);
+	}
+	const uint64_t before = [&] {
+		std::lock_guard<std::mutex> lock(monitor.mutex_);
+		return monitor.selection_.key;
+	}();
+	CHECK(monitor.handle_key(platform::key::down));
+	{
+		std::lock_guard<std::mutex> lock(monitor.mutex_);
+		CHECK(monitor.selection_.key != before);
+		// Only the selected flow keeps a history.
+		monitor.tick();
+		int with_history = 0;
+		for (const auto& entry : monitor.servers_[kServerAddress].flows)
+			with_history += entry.second.detail ? 1 : 0;
+		CHECK(with_history == 1);
+		CHECK(monitor.render_flow_view(120, 0).find("collecting") == std::string::npos);
+	}
+	CHECK(monitor.handle_key(platform::key::up));
+	CHECK(monitor.handle_key('f'));
+	CHECK(monitor.view_ == NetMonitor::View::overview);
+	CHECK(!monitor.handle_key('x'));
+}
+
+void test_flow_table_is_bounded_and_prefers_closed_flows_for_eviction()
+{
+	fakes::reset();
+	const PacketEngineOptions options = options_with_server();
+	PacketEngine			  engine(options);
+	NetMonitor				  monitor(engine, options);
+	monitor.toggle();
+	monitor.stop();
+
+	// The first connection is closed by a reset, so it is the one that has to make room.
+	feed(monitor, ipv4_packet(kTcp, tcp_segment(5000, 2000, 1, 1, kRst), kClient, kServer));
+	for (uint16_t port = 6000; port < 6000 + 300; ++port)
+		feed(monitor, ipv4_packet(kUdp, udp_datagram(port, 3074, 10), kClient, kServer));
+	std::lock_guard<std::mutex> lock(monitor.mutex_);
+	const auto&					stats = monitor.servers_[kServerAddress];
+	CHECK(stats.flows.size() == 256);
+	CHECK(stats.flows.count((5000u << 16) | 2000) == 0);
+}
+
+void test_rtt_spread_is_recorded_and_drawn()
+{
+	fakes::reset();
+	const PacketEngineOptions options = options_with_server();
+	PacketEngine			  engine(options);
+	engine.cycle_server(1);
+	NetMonitor monitor(engine, options);
+	monitor.toggle();
+	monitor.stop();
+
+	feed(monitor, to_server(100, 1, kAck | kPsh, 10));
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+	feed(monitor, from_server(1, 110, kAck, 0));
+	std::lock_guard<std::mutex> lock(monitor.mutex_);
+	auto&						stats = monitor.servers_[kServerAddress];
+	uint64_t					samples = 0;
+	for (const uint64_t count : stats.rtt_hist)
+		samples += count;
+	CHECK(samples == 1 && stats.tick_rtt_min_ms >= 25 && stats.tick_rtt_max_ms == stats.tick_rtt_min_ms);
+	monitor.tick();
+	CHECK(stats.rtt_min.values.size() == 1 && stats.rtt_max.values.size() == 1 && stats.rtt_min.values[0] == stats.rtt_max.values[0]);
+	stats.rtt.values.push_back(80);
+	stats.rtt_min.values.push_back(20);
+	stats.rtt_max.values.push_back(200);
+	const std::string frame = monitor.render_frame(140, 120);
+	CHECK(frame.find("RTT spread") != std::string::npos);
+	CHECK(frame.find("▓") != std::string::npos || frame.find("│") != std::string::npos);
+}
+
+void test_gateway_forwarded_traffic_is_requested()
+{
+	fakes::reset();
+	const PacketEngineOptions options = options_with_server();
+	PacketEngine			  engine(options);
+	NetMonitor				  monitor(engine, options);
+	monitor.toggle();
+	CHECK(fakes::channel(0)->options.include_forward && fakes::channel(0)->options.sniff);
+	monitor.stop();
+}
+
+std::filesystem::path scratch_directory(const char* name)
+{
+	const std::filesystem::path path = std::filesystem::temp_directory_path() / (std::string("lagsw_net_monitor_") + name);
+	std::filesystem::remove_all(path);
+	return path;
+}
+
+std::string read_file(const std::filesystem::path& path)
+{
+	std::ifstream		file(path);
+	std::ostringstream	text;
+	text << file.rdbuf();
+	return text.str();
+}
+
+void test_export_writes_csv_and_json()
+{
+	fakes::reset();
+	const std::filesystem::path directory = scratch_directory("export");
+	PacketEngineOptions			options	  = options_with_server();
+	options.features.net_monitor.export_directory = (directory / "nested").string();
+	PacketEngine engine(options);
+	NetMonitor	 monitor(engine, options);
+	monitor.toggle();
+	monitor.stop();
+
+	feed(monitor, to_server(1, 1, kAck | kPsh, 10));
+	{
+		std::lock_guard<std::mutex> lock(monitor.mutex_);
+		monitor.tick();
+		monitor.tick();
+	}
+	CHECK(monitor.handle_key('e'));
+	std::string message;
+	{
+		std::lock_guard<std::mutex> lock(monitor.mutex_);
+		message = monitor.status_message_;
+	}
+	CHECK(message.rfind("exported to ", 0) == 0);
+
+	std::filesystem::path csv, json;
+	for (const auto& entry : std::filesystem::directory_iterator(directory / "nested"))
+		(entry.path().extension() == ".csv" ? csv : json) = entry.path();
+	CHECK(!csv.empty() && !json.empty());
+	const std::string csv_text	= read_file(csv);
+	const std::string json_text = read_file(json);
+	CHECK(csv_text.rfind("second,server,address,", 0) == 0);
+	CHECK(csv_text.find("\"Test\",192.168.1.20,") != std::string::npos);
+	CHECK(std::count(csv_text.begin(), csv_text.end(), '\n') == 3);  // the header and one row per second and server
+	CHECK(json_text.find("\"address\":\"192.168.1.20\"") != std::string::npos && json_text.find("\"series\"") != std::string::npos);
+	CHECK(json_text.find("\"flows\"") != std::string::npos && json_text.find("\"events\"") != std::string::npos);
+
+	// A second export in the same second must not overwrite the first.
+	CHECK(monitor.handle_key('E'));
+	size_t files = 0;
+	for (const auto& entry : std::filesystem::directory_iterator(directory / "nested"))
+		files += entry.is_regular_file() ? 1 : 0;
+	CHECK(files == 4);
+	std::filesystem::remove_all(directory);
+}
+
+void test_log_file_keeps_history_after_the_view_closes()
+{
+	fakes::reset();
+	const std::filesystem::path directory = scratch_directory("log");
+	PacketEngineOptions			options	  = options_with_server();
+	options.features.net_monitor.log_file = (directory / "logs" / "net.jsonl").string();
+	PacketEngine engine(options);
+	NetMonitor	 monitor(engine, options);
+	monitor.toggle();
+	{
+		std::lock_guard<std::mutex> lock(monitor.mutex_);
+		monitor.add_event_locked(NetMonitor::Event::Level::alert, "a \"quoted\" event");
+		monitor.tick();
+	}
+	monitor.stop();
+
+	const std::string text = read_file(directory / "logs" / "net.jsonl");
+	CHECK(text.find("net monitor opened") != std::string::npos && text.find("net monitor closed") != std::string::npos);
+	CHECK(text.find("\"server\":\"192.168.1.20\"") != std::string::npos);
+	CHECK(text.find("\"text\":\"a \\\"quoted\\\" event\"") != std::string::npos);
+	std::filesystem::remove_all(directory);
+}
+
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+void test_discovered_servers_are_added_and_captured()
+{
+	fakes::reset();
+	PacketEngineOptions options = options_with_server();
+	options.features.server_discovery.enabled	 = true;
+	options.features.server_discovery.port		 = 55000;
+	options.features.server_discovery.window_ms = 60000;
+	PacketEngine engine(options);
+	engine.start_workers();
+	const auto discovery = fakes::channel_with_filter("port:55000");
+	CHECK(discovery != nullptr);
+	if (!discovery)
+		return;
+
+	NetMonitor monitor(engine, options);
+	monitor.toggle();
+	const size_t before = fakes::channels().size();
+	const auto	 first	= fakes::channel(before - 1);
+	CHECK(first->options.sniff);
+	discovery->inject(ipv4_packet(kTcp, tcp_segment(40000, 55000, 1, 1, kAck), kClient, {34, 0, 0, 1}));
+	CHECK(wait_until([&] { return engine.servers().size() == 2; }));
+
+	// The render thread notices the new server and reopens the capture with a filter that includes it.
+	CHECK(wait_until([&] { return fakes::channels().size() == before + 1; }));
+	CHECK(first->closed());
+	CHECK(fakes::last_profile_spec().server_addresses.size() == 2);
+	{
+		std::lock_guard<std::mutex> lock(monitor.mutex_);
+		CHECK(monitor.servers_.count("34.0.0.1") == 1 && monitor.server_order_.size() == 2);
+		CHECK(!monitor.events_.empty() && monitor.events_.back().text.find("34.0.0.1") != std::string::npos);
+	}
+	const auto second = fakes::channel(before);
+	second->inject(ipv4_packet(kTcp, tcp_segment(1000, 2000, 1, 1, kAck), kClient, {34, 0, 0, 1}), 1, true);
+	CHECK(wait_until([&] {
+		std::lock_guard<std::mutex> lock(monitor.mutex_);
+		return monitor.servers_["34.0.0.1"].up.packets == 1;
+	}));
+	monitor.stop();
+	CHECK(second->closed());
+}
+#endif
 }  // namespace
 
 int main(int argc, char** argv)
@@ -339,6 +735,21 @@ int main(int argc, char** argv)
 		{"charts_and_frame_render", test_charts_and_frame_render},
 		{"ports_sizes_and_handshakes", test_ports_sizes_and_handshakes},
 		{"tcp_health_flows_and_path", test_tcp_health_flows_and_path},
+		{"capture_health_and_warnings", test_capture_health_and_warnings},
+		{"one_sided_capture_is_called_out", test_one_sided_capture_is_called_out},
+		{"layout_fits_the_console", test_resize_is_not_needed_for_the_layout_to_fit},
+		{"alerts_raise_and_clear", test_alerts_raise_and_clear},
+		{"alerts_can_be_disabled", test_alerts_can_be_disabled},
+		{"profile_changes_become_events_and_markers", test_profile_changes_become_events_and_markers},
+		{"udp_and_tcp_flows_are_listed", test_udp_and_tcp_flows_are_listed},
+		{"flow_table_is_bounded", test_flow_table_is_bounded_and_prefers_closed_flows_for_eviction},
+		{"rtt_spread_is_recorded_and_drawn", test_rtt_spread_is_recorded_and_drawn},
+		{"gateway_forwarded_traffic_is_requested", test_gateway_forwarded_traffic_is_requested},
+		{"export_writes_csv_and_json", test_export_writes_csv_and_json},
+		{"log_file_keeps_history_after_the_view_closes", test_log_file_keeps_history_after_the_view_closes},
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+		{"discovered_servers_are_added_and_captured", test_discovered_servers_are_added_and_captured},
+#endif
 	};
 	return test::run_tests("net_monitor", cases, argc, argv);
 }

@@ -1,24 +1,43 @@
 # Net monitor PoC
 
-A full-screen view, opened with the configured key (`features.net_monitor.key`, default `N`), that shows live network statistics for the configured servers. Nothing is
-captured or drawn until the view is opened; closing it stops both. `Space` pauses/resumes the measurement while the
-view is open, `r` resets the statistics, the configured key closes the view.
+A full-screen view, opened with the configured key (`features.net_monitor.key`, default `N`), that shows live network statistics for the known servers. Nothing is
+captured or drawn until the view is opened; closing it stops both. While the view is open:
+
+| Key | Action |
+|---|---|
+| `Space` | pause/resume the measurement |
+| `r` | reset the statistics |
+| `f` | switch between the overview and the per-flow view |
+| `Up` / `Down` | select a flow (flow view) |
+| `e` | export the measured window as CSV and JSON |
+| the configured key | close the view |
 
 Enable it in the profile file with `features: net_monitor: {enabled: true, key: N}`; the code is compiled in by the
-`net_monitor` build feature (`xmake f --net_monitor=y|n`, default `y`).
+`net_monitor` build feature (`xmake f --net_monitor=y|n`, default `y`). The alert thresholds, the export directory and
+the log file are further keys of the same block, see the README.
 
 ## How it works
 
-- `NetMonitor` (`include/net_monitor.h`, `src/net_monitor/net_monitor.cc`) opens its own **sniff** channel when the view
-  opens. The filter is `profile()` with `tcp or udp` plus bare ACKs, restricted to every configured server address in
-  both directions, so it never delays or alters traffic and is closed again when the view closes.
+- `NetMonitor` (`include/net_monitor.h`, `src/net_monitor/net_monitor.cc`, `src/net_monitor/export.cc`) opens its own
+  **sniff** channel when the view opens. The filter is `profile()` with `tcp or udp` plus bare ACKs, restricted to every
+  known server address in both directions, so it never delays or alters traffic and is closed again when the view
+  closes. It asks for forwarded traffic as well (`include_forward`), so a gateway sees routed packets: WinDivert opens a
+  second handle on the forward layer, nfqueue hooks the forward chain.
+- Servers that server discovery adds while the view is open are picked up by the render thread, which reopens the
+  capture with a filter that includes them.
 - The layout fills the terminal: charts are as wide as the window and grow taller with spare rows (history of up to
-  10 minutes is kept for wide terminals); table columns scale with the width.
+  10 minutes is kept for wide terminals); table columns scale with the width. A console resize wipes the screen before
+  the next frame, so the old layout never lingers.
 - A capture thread feeds `record()`; a render thread ticks the one-second buckets and redraws about 5 times a second.
   The view uses the terminal's alternate screen. `logging::set_suspended()` holds log lines and the status line back
   while it is shown and replays them afterwards.
 - While paused, packets are still read (so nothing queues up in the kernel) but ignored; on resume, in-flight RTT
   state is dropped so a pause is never counted as latency.
+- The header shows the capture backend and what it covers (for example `WinDivert (network + forward layers)`), how many
+  packets matched a server, matched none, could not be parsed, and capture errors. It warns when nothing, or only one
+  direction, is being captured.
+- Windows may hand outbound packets to the capture with large send offload, which leaves the IP length field at 0; the
+  parser takes the captured length in that case, otherwise every such outbound packet would be dropped.
 
 ### What is measured today
 
@@ -34,7 +53,7 @@ Enable it in the profile file with `features: net_monitor: {enabled: true, key: 
 | burstiness and up/down ratio | peak versus average packets/s, and the up/down byte ratio |
 | path watch (selected server) | TTL of inbound packets with an estimated hop count, TTL changes as a route-change hint, DSCP value and changes, ECN-CE marks |
 | stability score | 0-100 from retransmit %, jitter, arrival jitter, stalls and resets since the view opened, with a trend arrow; shown per server |
-| this machine | CPU use of lagsw and NIC errors+drops per second (Linux: /proc/net/dev; shows n/a where unavailable, e.g. NIC counters on Windows) |
+| this machine | CPU use of lagsw and NIC errors+drops per second (Linux: /proc/net/dev; Windows: `GetIfTable2`, interfaces that are up and not loopback; shows n/a where unavailable) |
 | lagsw effect | packets held by the engine over time, queue peak, active profiles, next release and the passive latency setting |
 | latency (RTT) | passive: time between an outbound TCP data segment and the first ACK that covers it. Segments that were retransmitted never produce a sample (Karn's rule) |
 | RTT min/avg/p50/p95/max | all samples / last 256 samples |
@@ -48,12 +67,37 @@ Enable it in the profile file with `features: net_monitor: {enabled: true, key: 
 
 - Latency is only measured for TCP; a UDP-only server shows arrival jitter and gaps but no RTT. See below for an
   active probe option.
-- The server list is the configured one; servers added by discovery at runtime are not monitored.
 - Only IPv4/IPv6 packets with plain TCP/UDP headers are understood (no IPv6 extension headers).
-- The layout adapts to the terminal size, but the minimum is about 25 lines (and 60 columns); below that the view scrolls.
-  It is not redrawn on a resize until the next frame (200 ms).
-- The key must differ from `q`, `r`, Space, the navigation keys, the passive latency pause key and every profile key
-  (checked at startup).
+- The overview needs about 62 lines (and 60 columns); below that it scrolls. A console resize is noticed within one
+  frame (200 ms).
+- Alerts are evaluated per second from what was measured since the view opened. The stall alert uses the gap between
+  two inbound packets, so it is reported when traffic resumes, and an idle server can trip it.
+- The flow view keeps at most 256 flows per server (closed ones are dropped first) and the history of the selected flow
+  only. UDP flows are keyed by the client and server port; they have no RTT or state beyond active/idle.
+- The key must differ from `q`, `r`, `f`, `e`, Space, the navigation keys, the passive latency pause key and every
+  profile key (checked at startup). `r`, `f` and `e` are not checked against profile keys, so a profile bound to one of
+  them also triggers the view action while it is open.
+
+### Alerts, events, flows and export
+
+- **Alerts**: per server, `alert_rtt` (ms, one second's mean RTT), `alert_jitter` (ms, smoothed RTT jitter),
+  `alert_retransmit` (percent of data packets over the last 10 seconds, needs at least 20 of them) and `alert_stall`
+  (ms of inbound silence); 0 disables one. A raised alert turns the server's table row red and is added to the events
+  panel, and the cleared state is added too. When the view closes, a warning line summarises how often each server
+  raised each alert.
+- **Events** (last four shown, 200 kept): alerts, profiles switching on or off, servers added by discovery. The
+  `profiles active` and `alerts` rows under the charts mark the seconds in which a profile was active or an alert was
+  raised, aligned with the time axis of the charts above them.
+- **RTT spread**: the RTT charts show a darker bar up to the lowest RTT of each second, the mean above it and a thin line
+  up to the highest (needs a chart taller than one row; a short terminal shows the mean only). The selected server also
+  gets an RTT histogram (`<25`, `25-49`, `50-99`, `100-199`, `200-499`, `>=500 ms`).
+- **Flow view** (`f`): one row per TCP connection or UDP port pair with state, bytes, RTT and idle time; `Up`/`Down`
+  select one and show its bytes/s and RTT history.
+- **Export** (`e`): writes `netmonitor-<date>-<time>.csv` (one row per server and second) and `.json` (totals, RTT
+  statistics and histogram, alert counts, series, events, flows) to `export_directory` (default: a `netmonitor` folder in
+  the per-user data directory).
+- **Log** (`log_file`): a JSON Lines file that receives one record per server and second plus the events while the view
+  is open, so the history outlives the view.
 
 ## Proposed additions
 
@@ -61,23 +105,13 @@ Measured without extra traffic:
 
 - **Loss and quality**: estimated loss from sequence gaps (SACK/dup-ACK counts for TCP, RTP-style sequence numbers
   where the game protocol has them), reordering rate, duplicate packets, out-of-window packets.
-- **Per-flow view**: one row per 5-tuple with state (SYN/established/closing), bytes, RTT and a drill-down chart.
-- **TCP health**: advertised receive window and zero-window events, estimated bytes in flight, MSS, ECN marks,
-  time-to-first-byte of new connections and connect (SYN to SYN-ACK) time, which gives a second, cleaner RTT.
-- **Burstiness**: packet size histogram, inter-packet gap histogram, microburst detection and a "stall" counter
-  (inbound silence over 250 ms) with a timeline of when stalls happened.
-- **Throughput**: peak and 95th percentile rate, goodput versus retransmitted bytes, protocol-overhead share.
-- **Distribution charts**: RTT histogram and a time/value scatter instead of only the mean line, plus min/max bands
-  on the sparkline.
+- **TCP health**: estimated bytes in flight, MSS, time-to-first-byte of new connections.
+- **Burstiness**: inter-packet gap histogram, microburst detection and a timeline of when stalls happened.
+- **Throughput**: 95th percentile rate, goodput versus retransmitted bytes, protocol-overhead share.
 - **Heatmap of RTT per server over the last few minutes** for spotting a server that degrades at certain times.
-- **Alerts**: configurable thresholds (RTT, jitter, retransmit %, stall) that turn the row red and log a line when the
-  view closes. Useful to confirm a lag-switch activation or its effect: mark profile activations on the time axis.
-- **Engine overlay**: show the active profiles and the held-packet count next to the charts so the effect of a profile
-  on RTT and packets/s is visible; also the passive-latency delay in force and the measured RTT with and without it.
-- **Interface and system**: per-interface counters (drops, errors), NFQUEUE backlog and drop counters from the
-  netfilter monitor, process CPU use and capture thread lag so you can tell when the monitor itself is the bottleneck.
-- **Recording**: `e` to export the current window as CSV/JSON, and a `--netmonitor-log` option to keep the history
-  after the view closes.
+- **Engine overlay**: the measured RTT with and without the passive-latency delay.
+- **Interface and system**: NFQUEUE backlog and drop counters from the netfilter monitor, capture thread lag so you can
+  tell when the monitor itself is the bottleneck.
 
 Needs extra traffic (opt-in):
 
@@ -87,5 +121,5 @@ Needs extra traffic (opt-in):
 - **DNS and region lookup time** for the server regions already resolved by the tool.
 - **Jitter buffer estimate** for the game flow based on arrival jitter and gap percentiles.
 
-Next steps for a real implementation: configurable history length and thresholds,
-terminal height handling, scrolling per-server table, per-flow drill-down and a view for each profile.
+Next steps for a real implementation: configurable history length, a scrolling per-server table and a view for each
+profile.

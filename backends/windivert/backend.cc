@@ -57,8 +57,10 @@ IoStatus classify_failure(std::string& error)
 class WinDivertChannel final : public PacketChannel
 {
 public:
-	explicit WinDivertChannel(HANDLE handle) : handle_(handle) {}
+	WinDivertChannel(HANDLE handle, std::string description) : handle_(handle), description_(std::move(description)) {}
 	~WinDivertChannel() override { close(); }
+
+	std::string description() const override { return description_; }
 
 	IoStatus recv(uint8_t* buffer, uint32_t capacity, uint32_t& length, PacketMeta& meta, std::string& error) override
 	{
@@ -100,7 +102,8 @@ public:
 	}
 
 private:
-	HANDLE handle_;
+	HANDLE		handle_;
+	std::string description_;
 };
 
 /// Combines a local-traffic channel and a forwarded-traffic channel into one. WinDivert handles are bound to a single
@@ -117,6 +120,8 @@ public:
 		pumps_.emplace_back(&MultiLayerChannel::pump, this, forwarded_.get());
 	}
 	~MultiLayerChannel() override { close(); }
+
+	std::string description() const override { return "network + forward layers"; }
 
 	IoStatus recv(uint8_t* buffer, uint32_t capacity, uint32_t& length, PacketMeta& meta, std::string& error) override
 	{
@@ -240,7 +245,7 @@ std::unique_ptr<PacketChannel> open_layer(const OpenOptions& options, WINDIVERT_
 	}
 	WinDivertSetParam(handle, WINDIVERT_PARAM_QUEUE_LENGTH, kQueueLength);
 	WinDivertSetParam(handle, WINDIVERT_PARAM_QUEUE_TIME, kQueueTimeMs);
-	return std::make_unique<WinDivertChannel>(handle);
+	return std::make_unique<WinDivertChannel>(handle, layer == WINDIVERT_LAYER_NETWORK_FORWARD ? "forward layer" : "network layer");
 }
 
 

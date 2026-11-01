@@ -310,7 +310,7 @@
         },
         "net_monitor": {
           "type": "object",
-          "description": "Full-screen network statistics view with charts (packets/s, latency, retransmits, jitter per server). Measures only while the view is open; Space pauses, r resets.",
+          "description": "Full-screen network statistics view with charts (packets/s, latency, retransmits, jitter per server). Measures only while the view is open; Space pauses, r resets, f switches to the per-flow view (Up/Down select a flow), e exports the current window.",
           "properties": {
             "enabled": {
               "type": "boolean",
@@ -320,7 +320,43 @@
             "key": {
               "type": ["string", "integer"],
               "default": "N",
-              "description": "Key that opens and closes the view. Must not be a command key (q, r, Space, Backspace, Tab, Page Up/Down, Left, Right) or another configured key."
+              "description": "Key that opens and closes the view. Must not be a command key (q, r, f, e, Space, Backspace, Tab, Page Up/Down, Left, Right, Up, Down) or another configured key."
+            },
+            "alert_rtt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 60000,
+              "default": 150,
+              "description": "Latency in milliseconds above which a server raises an alert. 0 disables the alert."
+            },
+            "alert_jitter": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 60000,
+              "default": 30,
+              "description": "Smoothed RTT jitter in milliseconds above which a server raises an alert. 0 disables the alert."
+            },
+            "alert_retransmit": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100,
+              "default": 2,
+              "description": "Percentage of retransmitted TCP data packets over the last 10 seconds above which a server raises an alert. 0 disables the alert."
+            },
+            "alert_stall": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 600000,
+              "default": 1000,
+              "description": "Inbound silence in milliseconds from a server at or above which an alert is raised. 0 disables the alert."
+            },
+            "export_directory": {
+              "type": "string",
+              "description": "Directory for the CSV and JSON files written by the export key. Defaults to a netmonitor folder in the per-user data directory."
+            },
+            "log_file": {
+              "type": "string",
+              "description": "JSON Lines file that receives one record per server and second (plus events) while the view is open. Disabled when empty."
             }
           },
           "additionalProperties": false

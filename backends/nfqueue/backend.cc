@@ -198,6 +198,10 @@ public:
 			LOG_ERROR("channel %u: failed to drop packet id %u: %s", channel_id_, packet_id, std::strerror(errno));
 	}
 
+	std::string description() const override { return description_; }
+
+	void set_description(std::string description) { description_ = std::move(description); }
+
 	void shutdown_recv() override
 	{
 		shutdown_.store(true);
@@ -289,6 +293,7 @@ private:
 
 	const bool				sniff_;
 	const uint32_t			channel_id_;
+	std::string				description_;
 	nfq_handle*				handle_	  = nullptr;
 	nfq_q_handle*			queue_	  = nullptr;
 	int						fd_		  = -1;
@@ -358,6 +363,7 @@ std::unique_ptr<PacketChannel> open(const OpenOptions& options, std::string& err
 	const uint32_t channel_id	= next_channel_id.fetch_add(1);
 	const int	   priority		= kBasePriority - static_cast<int>(options.priority);
 	auto		   channel		= std::make_unique<NfqChannel>(options.sniff, channel_id);
+	channel->set_description(options.forward ? "forward hook" : options.include_forward ? "input/output + forward hooks" : "input/output hooks");
 	if (!channel->start(static_cast<uint16_t>(kFirstQueueNumber + channel_id), priority, rules, error))
 	{
 		LOG_ERROR("nfqueue: channel %u failed to start: %s", channel_id, error.c_str());

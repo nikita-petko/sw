@@ -22,7 +22,9 @@ inline constexpr int space	   = 0x20;
 inline constexpr int page_up   = 0x21;
 inline constexpr int page_down = 0x22;
 inline constexpr int left	   = 0x25;
+inline constexpr int up		   = 0x26;
 inline constexpr int right	   = 0x27;
+inline constexpr int down	   = 0x28;
 }  // namespace key
 
 /// Monotonic milliseconds since an arbitrary point (system boot on Windows).

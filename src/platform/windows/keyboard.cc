@@ -23,6 +23,10 @@ int read_key()
 		return value;
 	switch (_getch())
 	{
+		case 0x48:
+			return key::up;
+		case 0x50:
+			return key::down;
 		case 0x4B:
 			return key::left;
 		case 0x4D:

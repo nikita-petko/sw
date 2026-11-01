@@ -9,6 +9,7 @@ if has_config("net_monitor") then
         add_files("../../src/net_monitor/*.cc")
         add_files("../../src/log.cc", "../../src/format.cc", "../../src/packet_headers.cc", "../../src/packet_mode/*.cc", "../../src/passive_latency/*.cc", "../../src/packet_engine/*.cc")
         add_includedirs("../../include", "../../src", "..", "../engine")
+        add_defines("LAGSW_NET_MONITOR_TESTING")
         add_options("server_discovery", "region_enforcement", "passive_latency", "pcap_files", "desync_countdown", "forwarded_address_discovery", "netfilter_monitor", "net_monitor")
         if not is_plat("windows") then
             add_syslinks("pthread")

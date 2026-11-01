@@ -69,12 +69,8 @@ KeyAction handle_command_key(PacketEngine& engine, int key)
 		net_monitor.toggle();
 		return KeyAction::handled;
 	}
-	if (net_monitor.active())
-	{
-		net_monitor.handle_key(key);
-		if (key == platform::key::space || key == 'r' || key == 'R')
-			return KeyAction::handled;
-	}
+	if (net_monitor.active() && net_monitor.handle_key(key))
+		return KeyAction::handled;
 #endif
 	if (key == platform::key::page_up)
 		engine.cycle_server(-1);

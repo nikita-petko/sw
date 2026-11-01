@@ -83,6 +83,8 @@ public:
 	/// Tells the backend a received packet is intentionally never sent. Backends that hold packets until a
 	/// verdict (for example NFQUEUE) must release it as dropped; capture-and-reinject backends need nothing.
 	virtual void	 discard(const PacketMeta& meta) { (void)meta; }
+	/// Short human-readable summary of what the channel covers (for example "network + forward layers"); empty when unknown.
+	virtual std::string description() const { return {}; }
 	/// Unblocks pending and future recv() calls.
 	virtual void	 shutdown_recv() = 0;
 	/// Releases the channel. Safe to call more than once.

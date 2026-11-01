@@ -4,7 +4,15 @@
 
 #include "platform.h"
 
+#include <winsock2.h>
+#include <ws2ipdef.h>
 #include <windows.h>
+// The SDK's NDIS headers behind netioapi.h trip the strict warning level.
+#pragma warning(push)
+#pragma warning(disable : 4668)
+#include <iphlpapi.h>
+#include <netioapi.h>
+#pragma warning(pop)
 #include <objbase.h>
 #include <timeapi.h>
 #include <cstdio>
@@ -108,6 +116,21 @@ SystemCounters system_counters()
 		const auto to_100ns = [](const FILETIME& time) { return (static_cast<uint64_t>(time.dwHighDateTime) << 32) | time.dwLowDateTime; };
 		counters.cpu_seconds   = static_cast<double>(to_100ns(kernel) + to_100ns(user)) / 1e7;
 		counters.cpu_available = true;
+	}
+	// Interface counters are cumulative; loopback and interfaces that are down are left out.
+	PMIB_IF_TABLE2 table = nullptr;
+	if (GetIfTable2(&table) == NO_ERROR && table != nullptr)
+	{
+		for (ULONG index = 0; index < table->NumEntries; ++index)
+		{
+			const MIB_IF_ROW2& row = table->Table[index];
+			if (row.Type == IF_TYPE_SOFTWARE_LOOPBACK || row.OperStatus != IfOperStatusUp)
+				continue;
+			counters.nic_errors += row.InErrors + row.OutErrors;
+			counters.nic_drops += row.InDiscards + row.OutDiscards;
+			counters.nic_available = true;
+		}
+		FreeMibTable(table);
 	}
 	return counters;
 }

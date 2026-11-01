@@ -636,6 +636,25 @@ private:
 			monitor.key = *parsed;
 			return Status::ok;
 		}
+		if (key == "alert_rtt")
+			return to_status(assign_number<uint32_t>(context_, parse_ulong(unquote(value), 0, 60000), monitor.alert_rtt_ms, "net_monitor alert_rtt"));
+		if (key == "alert_jitter")
+			return to_status(assign_number<uint32_t>(context_, parse_ulong(unquote(value), 0, 60000), monitor.alert_jitter_ms, "net_monitor alert_jitter"));
+		if (key == "alert_retransmit")
+			return to_status(
+				assign_number<uint32_t>(context_, parse_ulong(unquote(value), 0, 100), monitor.alert_retransmit_percent, "net_monitor alert_retransmit"));
+		if (key == "alert_stall")
+			return to_status(assign_number<uint32_t>(context_, parse_ulong(unquote(value), 0, 600000), monitor.alert_stall_ms, "net_monitor alert_stall"));
+		if (key == "export_directory")
+		{
+			monitor.export_directory = unquote(value);
+			return Status::ok;
+		}
+		if (key == "log_file")
+		{
+			monitor.log_file = unquote(value);
+			return Status::ok;
+		}
 		return Status::unhandled;
 	}
 #endif
