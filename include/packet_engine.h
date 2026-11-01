@@ -184,6 +184,25 @@ struct RegionEnforcementOptions
 };
 #endif
 
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+/// Settings for an always-on baseline delay applied to filtered packets, independent of profile activation.
+/// See pocs/passive_latency.md. Phase 1 only supports a single fixed delay applied to both directions; modes,
+/// per-direction overrides, and the pause key are added in later phases.
+struct PassiveLatencyOptions
+{
+	/// Enables passive latency.
+	bool enabled = false;
+	/// Baseline delay applied to every filtered packet, in milliseconds.
+	int32_t delay_ms = 0;
+	/// Upper clamp applied after the delay is computed. Defaults to delay_ms when left at 0.
+	int32_t max_delay_ms = 0;
+	/// Capture filter in the active backend's syntax. Defaults to global_filter when unset.
+	std::optional<std::string> filter;
+	/// Safety bound on queued packets; packets are released immediately (not dropped) past this bound.
+	uint32_t max_queued_packets = 4096;
+};
+#endif
+
 #ifdef LAGSW_FEATURE_PCAP_FILES
 /// Settings for optional per-profile PCAP capture files.
 struct PcapFilesOptions
@@ -260,6 +279,10 @@ struct FeaturesOptions
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	/// Region-enforcement feature settings.
 	RegionEnforcementOptions region_enforcement;
+#endif
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+	/// Passive-latency feature settings.
+	PassiveLatencyOptions passive_latency;
 #endif
 #ifdef LAGSW_FEATURE_PCAP_FILES
 	/// PCAP-capture feature settings.
@@ -349,6 +372,10 @@ public:
 	/// Returns the current region-enforcement status text.
 	std::string region_enforcement_status() const;
 #endif
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+	/// Returns whether passive latency is configured as enabled.
+	bool is_passive_latency_enabled() const;
+#endif
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	/// Returns whether forwarded-address discovery is configured as enabled.
 	bool is_forwarded_address_discovery_enabled() const;
@@ -419,6 +446,18 @@ private:
 	void handle_probe_packet(const uint8_t* packet_data, uint32_t length, const backend::PacketMeta& meta);
 	/// Logs a server that was probed for the first time in the current window.
 	void log_probed_server(const std::string& server_address);
+#endif
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+	/// Opens the passive-latency capture channel and starts its workers.
+	void start_passive_latency();
+	/// Stops passive-latency workers, flushing queued packets, and closes their handle.
+	void stop_passive_latency();
+	/// Receives packets and schedules their delayed release.
+	void passive_latency_recv();
+	/// Waits until passive-latency packets are due and sends them.
+	void passive_latency_send();
+	/// Sends every packet still queued by passive latency, unconditionally.
+	void flush_passive_latency_queue();
 #endif
 #ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 	/// Resolves and stores a server region.

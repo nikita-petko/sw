@@ -3,7 +3,8 @@
 ## 0. Implementation status
 
 - Phase 0 (delay model): done. [delay_model.h](../src/passive_latency/delay_model.h) / [delay_model.cc](../src/passive_latency/delay_model.cc) implement `fixed`/`uniform`/`normal`, per-direction parameters, clamping, a seeded RNG, and per-direction order preservation. Covered by `delay_model_*` cases in `tests/modes/modes_test.cc`.
-- Phases 1-4: not started.
+- Phase 1 (single fixed delay, both directions): done. Feature-gated behind `LAGSW_FEATURE_PASSIVE_LATENCY` (`--passive_latency=y|n`, default `y`). Adds an always-on capture channel ([passive_latency.cc](../src/packet_engine/passive_latency.cc)) opened with a `fixed` `DelayModel` using the same `delay_ms`/`max_delay_ms` for both directions, options parsing and validation (`src/options/profiles.cc`, `src/options/validate.cc`, `src/options/filters.cc`), the `passive_latency`/`passive_latency.packet` log groups, the schema block, README docs, and the `passive_latency_test` suite (`tests/passive_latency/`). Deliberately out of scope for Phase 1: `mode`/`jitter`, per-direction values, `pause_key`, a status line, and the nested `capture_options` block from §6.1 below (the profiles parser does not support a subsection inside a feature block; `filter` is a flat string key instead). The queue-overflow warning (§8.4) is logged on every overflow rather than rate-limited.
+- Phases 2-4: not started.
 
 ## 1. Summary
 
@@ -30,7 +31,7 @@ This is a packet-scheduling feature, not a stream proxy. It does not terminate, 
 - **Passive latency**: a delay applied to every filtered packet regardless of profile activation.
 - **Baseline delay**: the per-packet delay drawn from the configured delay model, before any profile adds its own.
 - **Delay model**: the function that turns a configured value into a per-packet delay (`fixed`, `uniform`, `normal`).
-- **Stage**: one capture channel in the ordered chain of channels a packet passes through (passive, region enforcement, profiles). Lower backend `priority` runs first (see [packet_backend.h](../include/packet_backend.h)).
+- **Stage**: one capture channel in the ordered chain of channels a packet passes through (passive, region enforcement, profiles). Higher backend `priority` runs first (see [packet_backend.h](../include/packet_backend.h)).
 - **Proxy-client**: the external tool this feature replaces; delay is a side effect of routing through it, not something it controls. The ones operators mainly use are FlClash, Clash Forge and Proton VPN. FlClash and Clash Forge are Clash-based and route by rule, so they give fine-grained control over which traffic goes through the proxy. Proton VPN is a plain VPN with coarser routing control. In all cases the added latency comes from the physical distance and load of the chosen exit node, not from a configured value.
 - **Ping / RTT**: round-trip time. A delay `d_out` on outbound and `d_in` on inbound packets adds `d_out + d_in` to the observed RTT.
 
@@ -113,6 +114,8 @@ features:
 
 Validation lives with the other option checks in `src/options/validate.cc`, and the block is added to [profiles.schema.json](../schemas/profiles.schema.json) and the README option tables. A disabled compile-time feature ignores the block with a warning, like every other optional feature.
 
+> **Phase 1 note:** the shipped parser (`src/options/profiles.cc`) only supports a flat key list inside a feature block, not a nested subsection, so `capture_options` as shown above is not parseable yet. Phase 1 therefore only implements `enabled`, `delay_ms`, `max_delay_ms`, `filter`, and `max_queued_packets`; `mode`, `jitter_ms`, `direction`, `inbound_delay_ms`/`outbound_delay_ms`, `preserve_order`, `capture_options`, and `pause_key` are deferred to Phases 2-3 (and `capture_options` needs either a parser change or a flattened key scheme, see §14).
+
 ### 6.2 Direction and RTT
 
 An observed RTT increase is the sum of both directions. For an RTT floor of 120 ms, use `direction: both` with `delay_ms: 60`, or `outbound_delay_ms: 120` with `inbound_delay_ms: 0`. The second form leaves server-to-client latency untouched, which matters when the analysis is about *outbound* withholding (analysis §2) and inbound timing must stay realistic. Both forms must be expressible; hence the per-direction overrides.
@@ -150,14 +153,15 @@ Model it on [region_enforcement.cc](../src/packet_engine/region_enforcement.cc):
 - New `src/packet_engine/passive_latency.cc`, compiled only under `LAGSW_FEATURE_PASSIVE_LATENCY`, with `start_passive_latency()`, `stop_passive_latency()`, `passive_latency_recv()`, `passive_latency_send()`, and state in `PacketEngine::State` (next to the `region_enforcement_*` members in [internal.h](../src/packet_engine/internal.h)).
 - Reuse `PacketNode`, `PacketQueue`, `make_packet_node`, `collect_due_packets`, and `destroy_packet_node` from [packet_mode.h](../src/packet_mode/packet_mode.h) rather than the ad hoc `DelayedEnforcementPacket` vector, so the queue ordering rules (release time, then receive order) are shared.
 - New xmake feature entry `passive_latency` (default `true`) in the root [xmake.lua](../xmake.lua) feature table, and `add_options("passive_latency")` for the engine target and tests.
+- The delay model itself lives in `src/passive_latency/` (not `src/packet_mode/`, since it is not a packet-scheduling mode) and is compiled into any target that needs it.
 
 ### 8.2 Stage ordering
 
-The passive channel opens with a priority lower than every other channel so it sees a packet first and releases it into the later stages:
+The passive channel opens with a priority higher than every other channel so it sees a packet first and releases it into the later stages:
 
 | Stage | `priority` |
 | --- | --- |
-| Passive latency | `-200` |
+| Passive latency | `100` |
 | Region enforcement | `-100` (existing) |
 | Profiles | `0` (existing) |
 
@@ -165,7 +169,7 @@ Consequences, which are intended:
 
 - A packet delayed by a profile has already been delayed by the baseline: total delay = passive + profile.
 - Profile timing (`now` at capture, `release_at`, `send_all_after_delay` batch timers, `from_timestamp`) is measured from the post-passive arrival, so existing profile semantics are unchanged; only the arrival time shifts uniformly.
-- On nfqueue each priority is its own nft chain with its own queue number, and a verdict (`NF_ACCEPT`) hands the packet to the next chain, so there is no re-capture loop (see §8.6 of [linux_nfqueue_backend.md](linux_nfqueue_backend.md)). On WinDivert, reinjection at priority `-200` is seen by handles with higher priority numbers only, again without a loop.
+- On nfqueue each priority is its own nft chain with its own queue number, and a verdict (`NF_ACCEPT`) hands the packet to the next chain, so there is no re-capture loop (see §8.6 of [linux_nfqueue_backend.md](linux_nfqueue_backend.md)): `chain priority = -150 - options.priority`, so `priority = 100` maps to nft chain priority `-250`, ahead of conntrack (`-200`) and every other stage. On WinDivert, `priority` is passed straight through and a higher value is handled first, so `100` is seen before region enforcement's `-100` and the profiles' `0`, again without a loop.
 
 ### 8.3 Receive / release
 
@@ -179,7 +183,7 @@ The send loop sleeps on a condition variable with a deadline, not a polling tick
 
 ### 8.4 Bounds and failure behavior
 
-- `max_queued_packets` caps memory. On overflow the packet is released immediately (fail-open) and a rate-limited warning is logged; the feature must never become an accidental packet black hole.
+- `max_queued_packets` caps memory. On overflow the packet is released immediately (fail-open) and a warning is logged on every overflow in Phase 1 (not rate-limited); the feature must never become an accidental packet black hole.
 - nfqueue: the kernel holds a packet until a verdict, so the queue length (`NFQA_CFG_QUEUE_MAXLEN`) must cover `max_delay_ms x peak packets/s`. Startup computes a recommended minimum from `max_delay_ms` and warns when `max_queued_packets` is below it (see §8.3 of the nfqueue PoC).
 - If the capture channel cannot be opened, log an error and continue without passive latency (the same behavior as region enforcement), unless a future `required: true` key is set.
 
@@ -256,9 +260,9 @@ Run the weapon-swap procedure over N attempts at three baselines (native RTT, mi
 
 `delay_model.{h,cc}` with `fixed`/`uniform`/`normal`, clamp, seeded RNG, and unit tests. No engine changes.
 
-### Phase 1: single-direction fixed delay
+### Phase 1: single fixed delay (both directions)
 
-Feature flag, config block, schema, validation, `passive_latency.cc` with a `fixed` delay, `direction: both`, queue bounds, teardown flush, engine tests.
+Feature flag, config block, schema, validation, `passive_latency.cc` with a `fixed` delay applied the same to both directions, queue bounds, teardown flush, engine and options tests. Status: done (§0).
 
 ### Phase 2: modes, direction, order
 

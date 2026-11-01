@@ -206,6 +206,8 @@ const std::vector<group_info>& groups()
 		{group::region_client, "Client region lookup"},
 		{group::enforcement, "Region enforcement decisions"},
 		{group::enforcement_packet, "Every packet delayed or sent by region enforcement", false},
+		{group::passive_latency, "Passive latency lifecycle and configuration"},
+		{group::passive_latency_packet, "Every packet delayed or sent by passive latency", false},
 	};
 	return registry;
 }

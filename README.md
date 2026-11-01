@@ -75,6 +75,7 @@ profiles file is skipped with a warning. Toggle them when configuring:
 | --- | --- | --- |
 | `server_discovery` | `--server_discovery=y\|n` | `y` |
 | `region_enforcement` | `--region_enforcement=y\|n` | `y` |
+| `passive_latency` | `--passive_latency=y\|n` | `y` |
 | `pcap_files` | `--pcap_files=y\|n` | `n` |
 | `desync_countdown` | `--desync_countdown=y\|n` | `y` |
 | `forwarded_address_discovery` | `--forwarded_address_discovery=y\|n` | `y` |
@@ -104,6 +105,7 @@ xmake build packet_test && xmake run packet_test visible   # only cases whose na
 | `region_test` | region lookup helpers: response parsing, server naming, the on-disk cache and rate-limit retries (HTTPS, sleep and data directory are faked) |
 | `engine_test` | `PacketEngine` with its real worker threads against an in-memory capture backend: profile lifecycle, packet release and flushing, server selection, server and forwarded-address discovery, region resolution, desync countdown and the state report |
 | `region_enforcement_test` | region enforcement on the same in-memory backend: enforced-region cycle, which servers are delayed, delayed release and flushing, probe detection (only built with `--region_enforcement=y`) |
+| `passive_latency_test` | passive latency on the same in-memory backend: channel setup and priority, delayed release, ordering, overflow fail-open, teardown flushing (only built with `--passive_latency=y`) |
 | `format_test` | text formatting of profile options |
 | `nfqueue_filter_test` | capture-filter to nftables compiler (not built on Windows) |
 
@@ -474,6 +476,39 @@ features:
 | --- | --- | --- |
 | `enabled` | No | Enables region enforcement. Defaults to `false`. |
 | `probe_port` | Yes when enabled | Port (1-65535) used to observe region-probe traffic. |
+
+Passive latency applies an always-on baseline delay to every packet matched by
+its filter, independent of any profile's activation state. It exists to
+replace an external proxy client (FlClash, Clash Forge, Proton VPN, and
+similar) previously used only to add artificial latency: some packet-timing
+methods (see [`research/division1_lag_switch_weapon_swap_analysis.md`](research/division1_lag_switch_weapon_swap_analysis.md))
+are more consistent with a bit of added delay, and a low-ping connection can
+actually make them less reliable. Unlike a proxy client, the delay here is a
+precise, directly configured value instead of an indirect and only loosely
+tunable side effect of routing, and it has no recurring cost. It runs on its
+own capture channel that is processed before profiles and region enforcement,
+so a profile's own delay (if any) is added on top. Phase 1 supports only a
+single fixed delay applied to both directions; see
+[`pocs/passive_latency.md`](pocs/passive_latency.md) for the full design and
+later phases (configurable delay modes, per-direction values, a pause key,
+and a status line).
+
+```yaml
+features:
+  passive_latency:
+    enabled: true
+    delay_ms: 60
+    max_delay_ms: 60
+    filter: "tcp"
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `enabled` | No | Enables passive latency. Defaults to `false`. |
+| `delay_ms` | Yes when enabled | Baseline delay applied to every filtered packet, in milliseconds. |
+| `max_delay_ms` | No | Upper clamp applied after the delay is computed. `0` (the default) uses `delay_ms`. |
+| `max_queued_packets` | No | Safety bound on queued packets; packets past this bound are released immediately instead of being dropped. Defaults to `4096`. |
+| `filter` | No | Capture filter in the active backend's syntax. Defaults to `global_filter` when unset. |
 
 Forwarded address discovery dynamically finds the client addresses used to
 filter packets when lagsw runs on a PC that shares its internet connection

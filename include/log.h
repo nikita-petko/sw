@@ -84,6 +84,8 @@ inline constexpr const char* region				 = "region";			  ///< Server region looku
 inline constexpr const char* region_client		 = "region.client";		  ///< Client region lookup.
 inline constexpr const char* enforcement		 = "enforcement";		  ///< Region enforcement decisions.
 inline constexpr const char* enforcement_packet	 = "enforcement.packet";  ///< Every packet delayed or sent by region enforcement.
+inline constexpr const char* passive_latency		 = "passive_latency";	  ///< Passive latency lifecycle and configuration.
+inline constexpr const char* passive_latency_packet = "passive_latency.packet"; ///< Every packet delayed or sent by passive latency.
 }  // namespace group
 
 /// A registered log group.

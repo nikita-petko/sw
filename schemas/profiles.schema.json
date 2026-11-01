@@ -94,6 +94,41 @@
           ],
           "additionalProperties": false
         },
+        "passive_latency": {
+          "type": "object",
+          "description": "Always-on baseline delay applied to every filtered packet, independent of profile activation. Phase 1 supports only a single fixed delay applied to both directions; see pocs/passive_latency.md.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Whether passive latency is enabled."
+            },
+            "delay_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Baseline delay applied to every filtered packet, in milliseconds."
+            },
+            "max_delay_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Upper clamp applied after the delay is computed. 0 (the default) uses delay_ms."
+            },
+            "max_queued_packets": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 4096,
+              "description": "Safety bound on queued packets; packets past this bound are released immediately instead of being dropped."
+            },
+            "filter": {
+              "type": "string",
+              "description": "Capture filter in the active backend's syntax. Defaults to global_filter when unset."
+            }
+          },
+          "required": [
+            "enabled",
+            "delay_ms"
+          ],
+          "additionalProperties": false
+        },
         "pcap_files": {
           "type": "object",
           "description": "Debug PCAP capture settings. A PCAP file is written for each enabled profile activation.",

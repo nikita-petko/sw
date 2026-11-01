@@ -397,6 +397,11 @@ private:
 #else
 			{"region_enforcement", disabled},
 #endif
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+			{"passive_latency", {&ProfilesParser::parse_passive_latency, true}},
+#else
+			{"passive_latency", disabled},
+#endif
 #ifdef LAGSW_FEATURE_PCAP_FILES
 			{"pcap_files", {&ProfilesParser::parse_pcap_files, true}},
 #else
@@ -506,6 +511,29 @@ private:
 			return to_status(assign_bool(context_, value, region.enabled));
 		if (key == "probe_port")
 			return to_status(assign_number<uint16_t>(context_, parse_ulong(unquote(value), 1, kMaxPort), region.probe_port, "probe_port"));
+		return Status::unhandled;
+	}
+#endif
+
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+	Status parse_passive_latency(const std::string& key, const std::string& value, int)
+	{
+		PassiveLatencyOptions& passive = options_.features.passive_latency;
+		if (key == "enabled")
+			return to_status(assign_bool(context_, value, passive.enabled));
+		if (key == "delay_ms")
+			return to_status(assign_number<int32_t>(context_, parse_long(unquote(value), 0, kMaxI32), passive.delay_ms, "passive_latency delay_ms"));
+		if (key == "max_delay_ms")
+			return to_status(
+				assign_number<int32_t>(context_, parse_long(unquote(value), 0, kMaxI32), passive.max_delay_ms, "passive_latency max_delay_ms"));
+		if (key == "max_queued_packets")
+			return to_status(assign_number<uint32_t>(
+				context_, parse_ulong(unquote(value), 1, kMaxU32), passive.max_queued_packets, "passive_latency max_queued_packets"));
+		if (key == "filter")
+		{
+			passive.filter = unquote(value);
+			return Status::ok;
+		}
 		return Status::unhandled;
 	}
 #endif

@@ -52,6 +52,7 @@ set_symbols("debug")
 local features = {
     {name = "server_discovery",            default = true,  description = "Discover the authoritative server from observed traffic"},
     {name = "region_enforcement",          default = true,  description = "Delay packets from servers outside the enforced region"},
+    {name = "passive_latency",             default = true,  description = "Apply a configurable baseline delay to filtered packets regardless of profile activation"},
     {name = "pcap_files",                  default = false, description = "Write per-activation PCAP capture files (debugging aid)"},
     {name = "desync_countdown",            default = true,  description = "Show the estimated post-deactivation desync countdown"},
     {name = "forwarded_address_discovery", default = true,  description = "Discover client addresses of forwarded (shared) traffic"},
@@ -76,6 +77,7 @@ includes("tests/modes")
 includes("tests/region")
 includes("tests/engine")
 includes("tests/region_enforcement")
+includes("tests/passive_latency")
 includes("tests/nfqueue_filter")
 if is_plat("windows") then
     includes("pocs/tcp_tls_proxy")

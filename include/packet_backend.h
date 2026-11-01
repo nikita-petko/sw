@@ -65,7 +65,7 @@ struct OpenOptions
 	bool		include_forward = false;
 	/// Observe packets without removing them from the network path.
 	bool		sniff	 = false;
-	/// Relative priority; lower values are processed first by the backend.
+	/// Relative priority; higher values are processed first by the backend.
 	int16_t		priority = 0;
 };
 

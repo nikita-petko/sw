@@ -109,6 +109,12 @@ features:
   region_enforcement:
     enabled: true
     probe_port: 8080
+  passive_latency:
+    enabled: true
+    delay_ms: 50
+    max_delay_ms: 75
+    max_queued_packets: 2048
+    filter: "udp"
   pcap_files:
     enabled: true
     output_dir: "caps"
@@ -178,6 +184,10 @@ profiles:
 #endif
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	CHECK(o.features.region_enforcement.enabled && o.features.region_enforcement.probe_port == 8080);
+#endif
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+	CHECK(o.features.passive_latency.enabled && o.features.passive_latency.delay_ms == 50 && o.features.passive_latency.max_delay_ms == 75);
+	CHECK(o.features.passive_latency.max_queued_packets == 2048 && o.features.passive_latency.filter == "udp");
 #endif
 #ifdef LAGSW_FEATURE_PCAP_FILES
 	CHECK(o.features.pcap_files.enabled && o.features.pcap_files.output_dir == "caps");
@@ -269,6 +279,14 @@ void test_rejected_files()
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 		{"region enforcement without port", "features:\n  region_enforcement:\n    enabled: true\n" + kProfile, "probe_port is missing or invalid"},
 #endif
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+		{"passive latency without delay", "features:\n  passive_latency:\n    enabled: true\n" + kProfile, "delay_ms must be positive"},
+		{"passive latency negative delay", "features:\n  passive_latency:\n    delay_ms: -1\n" + kProfile, "Invalid passive_latency delay_ms in"},
+		{"passive latency max below delay", "features:\n  passive_latency:\n    enabled: true\n    delay_ms: 50\n    max_delay_ms: 10\n" + kProfile,
+		 "max_delay_ms must be 0 or greater than or equal to delay_ms"},
+		{"passive latency zero max queued", "features:\n  passive_latency:\n    max_queued_packets: 0\n" + kProfile,
+		 "Invalid passive_latency max_queued_packets in"},
+#endif
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 		{"same interfaces", "features:\n  forwarded_address_discovery:\n    enabled: true\n    port: 1\n    inbound: 2\n    outbound: 2\n" + kProfile,
 		 "different interfaces"},
@@ -316,6 +334,11 @@ void test_disabled_features_are_ignored()
 		{"region_enforcement", true},
 #else
 		{"region_enforcement", false},
+#endif
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+		{"passive_latency", true},
+#else
+		{"passive_latency", false},
 #endif
 #ifdef LAGSW_FEATURE_PCAP_FILES
 		{"pcap_files", true},

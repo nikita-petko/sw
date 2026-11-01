@@ -4,6 +4,9 @@ void PacketEngine::start_workers()
 {
 	if (options_.resolve_region)
 		resolve_client_region();
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+	start_passive_latency();
+#endif
 #ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 	if (options_.features.server_discovery.enabled)
 		start_discovery_worker();
@@ -35,6 +38,9 @@ void PacketEngine::stop_workers()
 #endif
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	stop_region_enforcement();
+#endif
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+	stop_passive_latency();
 #endif
 	teardown();
 	for (std::thread& cleanup_thread : state_->cleanup_threads)

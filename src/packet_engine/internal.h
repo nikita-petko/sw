@@ -23,6 +23,9 @@
 #include "packet_engine_util.h"
 #include "region_lookup.h"
 #include "../packet_mode/packet_mode.h"
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+#include "../passive_latency/delay_model.h"
+#endif
 
 /// Runtime resources and packet queues owned by one active profile.
 struct PacketEngine::Session
@@ -116,6 +119,18 @@ struct PacketEngine::State
 		uint64_t			 release_at = 0;
 	};
 	std::vector<DelayedEnforcementPacket> enforcement_queue;
+#endif
+
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+	std::unique_ptr<backend::PacketChannel> passive_latency_handle;
+	std::thread						passive_latency_recv_thread;
+	std::thread						passive_latency_send_thread;
+	std::mutex						passive_latency_mutex;
+	std::condition_variable			passive_latency_changed;
+	std::atomic<bool>				passive_latency_stopping = false;
+	std::unique_ptr<DelayModel>		passive_latency_model;
+	uint64_t						passive_latency_next_receive_order = 0;
+	PacketQueue						passive_latency_queue;
 #endif
 
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY

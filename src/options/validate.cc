@@ -160,6 +160,28 @@ bool validate_region_enforcement(const char* path, const RegionEnforcementOption
 }
 #endif
 
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+bool validate_passive_latency(const char* path, const PassiveLatencyOptions& passive)
+{
+	if (!passive.enabled)
+		return true;
+	if (passive.delay_ms <= 0)
+	{
+		LOG_ERROR("Feature passive_latency is enabled but delay_ms must be positive in %s", path);
+		return false;
+	}
+	if (passive.max_delay_ms != 0 && passive.max_delay_ms < passive.delay_ms)
+	{
+		LOG_ERROR("Feature passive_latency max_delay_ms must be 0 or greater than or equal to delay_ms in %s", path);
+		return false;
+	}
+	const int32_t effective_max = passive.max_delay_ms != 0 ? passive.max_delay_ms : passive.delay_ms;
+	if (effective_max > 200)
+		LOG_WARN("Feature passive_latency delay of %d ms in %s is high enough to noticeably affect responsiveness", effective_max, path);
+	return true;
+}
+#endif
+
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 bool validate_forwarded_address_discovery(const char* path, const ForwardedAddressDiscoveryOptions& discovery)
 {
@@ -221,6 +243,10 @@ bool validate_features([[maybe_unused]] const char* path, [[maybe_unused]] const
 #endif
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	if (!validate_region_enforcement(path, options.features.region_enforcement))
+		return false;
+#endif
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+	if (!validate_passive_latency(path, options.features.passive_latency))
 		return false;
 #endif
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY

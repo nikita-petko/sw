@@ -55,6 +55,22 @@ bool validate_forwarded_address_filter(const PacketEngineOptions& options)
 }
 #endif
 
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+bool validate_passive_latency_filter(const PacketEngineOptions& options)
+{
+	const PassiveLatencyOptions& passive = options.features.passive_latency;
+	const std::string			  filter  = passive.filter.value_or(options.global_filter);
+	std::string					  error;
+	uint32_t					  error_position = 0;
+	if (!backend::validate_filter(filter, false, error, error_position))
+	{
+		LOG_ERROR("Invalid filter for passive_latency: %s", describe(error));
+		return false;
+	}
+	return true;
+}
+#endif
+
 /// Validates the capture filter of a profile for every server the user can select (and for no server).
 bool validate_profile_filters(const char* path, const PacketEngineOptions& options, const ProfileOptions& profile)
 {
@@ -109,6 +125,10 @@ bool validate_filters(const char* path, const PacketEngineOptions& options)
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	if (options.features.forwarded_address_discovery.enabled && options.features.forwarded_address_discovery.port != 0 &&
 		!validate_forwarded_address_filter(options))
+		return false;
+#endif
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+	if (options.features.passive_latency.enabled && !validate_passive_latency_filter(options))
 		return false;
 #endif
 	for (const ProfileOptions& profile : options.profiles)
