@@ -424,6 +424,11 @@ private:
 #else
 			{"netfilter_monitor", disabled},
 #endif
+#ifdef LAGSW_FEATURE_NET_MONITOR
+			{"net_monitor", {&ProfilesParser::parse_net_monitor, true}},
+#else
+			{"net_monitor", disabled},
+#endif
 		};
 		return table;
 	}
@@ -613,6 +618,24 @@ private:
 			return to_status(assign_number<uint64_t>(context_, parse_ullong(unquote(value), 100), monitor.interval_ms, "netfilter_monitor interval"));
 		if (key == "backlog_threshold")
 			return to_status(assign_number<uint32_t>(context_, parse_ulong(unquote(value), 1, 1000000), monitor.backlog_threshold, "netfilter_monitor backlog_threshold"));
+		return Status::unhandled;
+	}
+#endif
+
+#ifdef LAGSW_FEATURE_NET_MONITOR
+	Status parse_net_monitor(const std::string& key, const std::string& value, int)
+	{
+		NetMonitorOptions& monitor = options_.features.net_monitor;
+		if (key == "enabled")
+			return to_status(assign_bool(context_, value, monitor.enabled));
+		if (key == "key")
+		{
+			const auto parsed = parse_key(value);
+			if (!parsed)
+				return to_status(invalid(context_, "net_monitor key"));
+			monitor.key = *parsed;
+			return Status::ok;
+		}
 		return Status::unhandled;
 	}
 #endif

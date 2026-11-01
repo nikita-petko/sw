@@ -57,6 +57,7 @@ local features = {
     {name = "desync_countdown",            default = true,  description = "Show the estimated post-deactivation desync countdown"},
     {name = "forwarded_address_discovery", default = true,  description = "Discover client addresses of forwarded (shared) traffic"},
     {name = "netfilter_monitor",           default = true,  description = "Show NFQUEUE/nftables health on an extra status line (Linux nfqueue backend)"},
+    {name = "net_monitor",                 default = true,  description = "Full-screen network statistics view (packets/s, latency, retransmits, charts) opened with a key"},
 }
 for _, feature in ipairs(features) do
     option(feature.name)
@@ -78,6 +79,7 @@ includes("tests/region")
 includes("tests/engine")
 includes("tests/region_enforcement")
 includes("tests/passive_latency")
+includes("tests/net_monitor")
 includes("tests/nfqueue_filter")
 if is_plat("windows") then
     includes("pocs/tcp_tls_proxy")

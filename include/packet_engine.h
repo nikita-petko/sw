@@ -322,6 +322,17 @@ struct NetfilterMonitorOptions
 };
 #endif
 
+#ifdef LAGSW_FEATURE_NET_MONITOR
+/// Settings for the full-screen network statistics view, see pocs/net_monitor.md.
+struct NetMonitorOptions
+{
+	/// Enables the view and its key.
+	bool enabled = false;
+	/// Virtual key that opens and closes the view (upper-case letter, digit or other platform::key code).
+	int key = 'N';
+};
+#endif
+
 /// Optional packet-engine features and their configuration. Only the features compiled into the build are present.
 struct FeaturesOptions
 {
@@ -352,6 +363,10 @@ struct FeaturesOptions
 #ifdef LAGSW_FEATURE_NETFILTER_MONITOR
 	/// Netfilter-monitor feature settings.
 	NetfilterMonitorOptions netfilter_monitor;
+#endif
+#ifdef LAGSW_FEATURE_NET_MONITOR
+	/// Net-monitor feature settings.
+	NetMonitorOptions net_monitor;
 #endif
 };
 

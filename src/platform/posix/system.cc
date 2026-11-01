@@ -7,12 +7,15 @@
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <thread>
 
@@ -78,6 +81,51 @@ int console_width()
 	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) != 0)
 		return 0;
 	return size.ws_col;
+}
+
+int console_height()
+{
+	winsize size = {};
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) != 0)
+		return 0;
+	return size.ws_row;
+}
+
+SystemCounters system_counters()
+{
+	SystemCounters counters;
+	rusage		   usage = {};
+	if (getrusage(RUSAGE_SELF, &usage) == 0)
+	{
+		counters.cpu_seconds = static_cast<double>(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) +
+							   static_cast<double>(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1e6;
+		counters.cpu_available = true;
+	}
+#ifdef __linux__
+	// /proc/net/dev: "iface: rx_bytes rx_packets rx_errs rx_drop ... tx_bytes tx_packets tx_errs tx_drop ..."
+	std::ifstream file("/proc/net/dev");
+	std::string	  text;
+	while (std::getline(file, text))
+	{
+		const size_t colon = text.find(':');
+		if (colon == std::string::npos)
+			continue;
+		std::string name = text.substr(0, colon);
+		name.erase(0, name.find_first_not_of(' '));
+		if (name == "lo")
+			continue;
+		std::istringstream		fields(text.substr(colon + 1));
+		unsigned long long		value[16] = {};
+		for (unsigned long long& field : value)
+			fields >> field;
+		if (fields.fail())
+			continue;
+		counters.nic_errors += value[2] + value[10];
+		counters.nic_drops += value[3] + value[11];
+		counters.nic_available = true;
+	}
+#endif
+	return counters;
 }
 
 bool acquire_single_instance()

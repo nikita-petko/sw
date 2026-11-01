@@ -80,6 +80,7 @@ profiles file is skipped with a warning. Toggle them when configuring:
 | `desync_countdown` | `--desync_countdown=y\|n` | `y` |
 | `forwarded_address_discovery` | `--forwarded_address_discovery=y\|n` | `y` |
 | `netfilter_monitor` | `--netfilter_monitor=y\|n` | `y` |
+| `net_monitor` | `--net_monitor=y\|n` | `y` |
 
 ```powershell
 xmake f -m release --pcap_files=y --region_enforcement=n
@@ -106,6 +107,7 @@ xmake build packet_test && xmake run packet_test visible   # only cases whose na
 | `engine_test` | `PacketEngine` with its real worker threads against an in-memory capture backend: profile lifecycle, packet release and flushing, server selection, server and forwarded-address discovery, region resolution, desync countdown and the state report |
 | `region_enforcement_test` | region enforcement on the same in-memory backend: enforced-region cycle, which servers are delayed, delayed release and flushing, probe detection (only built with `--region_enforcement=y`) |
 | `passive_latency_test` | passive latency on the same in-memory backend: channel setup and priority, delayed release, ordering, overflow fail-open, teardown flushing (only built with `--passive_latency=y`) |
+| `net_monitor_test` | net monitor on the same in-memory backend: sniff channel setup, passive RTT and retransmission measurement, pause/reset, ports, packet sizes, handshakes, TCP health, flows, chart and frame rendering |
 | `format_test` | text formatting of profile options |
 | `nfqueue_filter_test` | capture-filter to nftables compiler (not built on Windows) |
 
@@ -259,6 +261,12 @@ While the program is running:
   Press it again to deactivate the profile.
 - Activate a `hold` profile by holding its configured key or combination.
   Releasing the key deactivates it.
+- Press the configured `net_monitor` key (when the feature is enabled) to open
+  the net monitor, a full-screen view with live network statistics and charts
+  for the configured servers (see [`pocs/net_monitor.md`](pocs/net_monitor.md)).
+  Measuring only happens while the view is open: `Space` pauses/resumes, `r`
+  resets, the same key closes it. Log output is held back while it is open and
+  printed when it closes.
 - Press `Tab` to print packet and activation statistics.
   When discovery is enabled, it also prints the current authoritative server
   and a packet-ranked list for the active discovery window. A final `log groups`
@@ -458,6 +466,25 @@ features:
 | `enabled` | No | Shows the extra status line. Defaults to `false`. |
 | `interval` | No | Minimum time between samples in milliseconds. Defaults to `1000`; minimum `100`. |
 | `backlog_threshold` | No | Waiting packets in the kernel queue at which the line is flagged. Defaults to `1000`. |
+
+The optional `net_monitor` feature adds a full-screen network statistics view
+(packets/s and throughput up/down, latency, jitter, retransmits, per-server
+table, all with mini charts). The view opens and closes with the configured key;
+it only captures traffic (through its own sniff channel, which never delays
+packets) while it is open, and `Space` pauses the measurement. See
+[`pocs/net_monitor.md`](pocs/net_monitor.md). It is disabled by default.
+
+```yaml
+features:
+  net_monitor:
+    enabled: true
+    key: N
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `enabled` | No | Makes the view available. Defaults to `false`. |
+| `key` | No | Key that opens and closes the view. Defaults to `N`. Must not be `q`, `r`, Space, Backspace, Tab, Page Up/Down, the arrow keys, the passive latency `pause_key` or a profile activation key. |
 
 Region enforcement delays TCP PSH packets from configured servers outside the
 currently selected server group. Use the Left and Right arrow keys to change

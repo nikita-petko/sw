@@ -47,6 +47,22 @@ void ignore_interrupt();
 bool acquire_single_instance();
 /// Width of the console in columns, or 0 when unknown.
 int	 console_width();
+/// Height of the console in rows, or 0 when unknown.
+int	 console_height();
+
+/// Host counters sampled by the net monitor.
+struct SystemCounters
+{
+	/// Receive/transmit errors and drops summed over all non-loopback interfaces; valid when `nic_available`.
+	uint64_t nic_errors		= 0;
+	uint64_t nic_drops		= 0;
+	bool	 nic_available	= false;
+	/// CPU time used by this process so far, in seconds; valid when `cpu_available`.
+	double	 cpu_seconds	= 0;
+	bool	 cpu_available	= false;
+};
+/// Reads the host counters; unavailable ones are flagged instead of reported as zero.
+SystemCounters system_counters();
 
 /// Per-user directory for lagsw's persistent files (not created); empty when unavailable.
 std::string data_directory();

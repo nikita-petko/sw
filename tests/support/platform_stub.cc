@@ -6,4 +6,12 @@ int console_width()
 {
 	return 0;
 }
+int console_height()
+{
+	return 0;
+}
+SystemCounters system_counters()
+{
+	return {};
+}
 }  // namespace platform

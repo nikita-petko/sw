@@ -122,6 +122,9 @@ features:
     pause_key: p
     max_queued_packets: 2048
     filter: "udp"
+  net_monitor:
+    enabled: true
+    key: m
   pcap_files:
     enabled: true
     output_dir: "caps"
@@ -200,6 +203,9 @@ profiles:
 	CHECK(!o.features.passive_latency.preserve_order && o.features.passive_latency.direction == PassiveLatencyDirection::both);
 	CHECK(o.features.passive_latency.pause_key == 'P');
 	CHECK(o.features.passive_latency.effective_delay_ms(true) == 90 && o.features.passive_latency.effective_max_delay_ms(false) == 120);
+#endif
+#ifdef LAGSW_FEATURE_NET_MONITOR
+	CHECK(o.features.net_monitor.enabled && o.features.net_monitor.key == 'M');
 #endif
 #ifdef LAGSW_FEATURE_PCAP_FILES
 	CHECK(o.features.pcap_files.enabled && o.features.pcap_files.output_dir == "caps");
@@ -308,6 +314,11 @@ void test_rejected_files()
 		{"passive latency bad pause key", "features:\n  passive_latency:\n    pause_key: nonsense\n" + kProfile, "Invalid passive_latency pause_key in"},
 		{"passive latency reserved pause key", "features:\n  passive_latency:\n    enabled: true\n    delay_ms: 50\n    pause_key: q\n" + kProfile,
 		 "pause_key conflicts with a command key"},
+#ifdef LAGSW_FEATURE_NET_MONITOR
+		{"net monitor bad key", "features:\n  net_monitor:\n    key: nonsense\n" + kProfile, "Invalid net_monitor key in"},
+		{"net monitor reserved key", "features:\n  net_monitor:\n    enabled: true\n    key: r\n" + kProfile, "net_monitor key conflicts with a command key"},
+		{"net monitor profile key", "features:\n  net_monitor:\n    enabled: true\n    key: x\n" + kProfile, "conflicts with an activation key of profile 'A'"},
+#endif
 		{"passive latency huge delay", "features:\n  passive_latency:\n    delay_ms: 600001\n" + kProfile, "Invalid passive_latency delay_ms in"},
 		{"passive latency zero max queued", "features:\n  passive_latency:\n    max_queued_packets: 0\n" + kProfile,
 		 "Invalid passive_latency max_queued_packets in"},

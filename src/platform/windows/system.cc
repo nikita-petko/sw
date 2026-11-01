@@ -72,6 +72,28 @@ int console_width()
 	return console_info.srWindow.Right - console_info.srWindow.Left + 1;
 }
 
+int console_height()
+{
+	CONSOLE_SCREEN_BUFFER_INFO console_info;
+	const HANDLE			   output = GetStdHandle(STD_OUTPUT_HANDLE);
+	if (output == INVALID_HANDLE_VALUE || !GetConsoleScreenBufferInfo(output, &console_info))
+		return 0;
+	return console_info.srWindow.Bottom - console_info.srWindow.Top + 1;
+}
+
+SystemCounters system_counters()
+{
+	SystemCounters counters;
+	FILETIME	   created, exited, kernel, user;
+	if (GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user))
+	{
+		const auto to_100ns = [](const FILETIME& time) { return (static_cast<uint64_t>(time.dwHighDateTime) << 32) | time.dwLowDateTime; };
+		counters.cpu_seconds   = static_cast<double>(to_100ns(kernel) + to_100ns(user)) / 1e7;
+		counters.cpu_available = true;
+	}
+	return counters;
+}
+
 bool acquire_single_instance()
 {
 	// the handle is intentionally never closed; the mutex lives until the process exits

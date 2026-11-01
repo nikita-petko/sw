@@ -307,6 +307,23 @@
             }
           },
           "additionalProperties": false
+        },
+        "net_monitor": {
+          "type": "object",
+          "description": "Full-screen network statistics view with charts (packets/s, latency, retransmits, jitter per server). Measures only while the view is open; Space pauses, r resets.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false,
+              "description": "Whether the view is available."
+            },
+            "key": {
+              "type": ["string", "integer"],
+              "default": "N",
+              "description": "Key that opens and closes the view. Must not be a command key (q, r, Space, Backspace, Tab, Page Up/Down, Left, Right) or another configured key."
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

@@ -2,6 +2,7 @@
 
 #include "format.h"
 #include "log.h"
+#include "net_monitor.h"
 #include "options.h"
 #include "packet_backend.h"
 #include "packet_engine.h"
@@ -54,10 +55,27 @@ enum class KeyAction
 	quit,
 };
 
+#ifdef LAGSW_FEATURE_NET_MONITOR
+KeyAction handle_command_key(PacketEngine& engine, NetMonitor& net_monitor, int key)
+#else
 KeyAction handle_command_key(PacketEngine& engine, int key)
+#endif
 {
 	if (key == 'q' || key == 'Q' || key == platform::key::backspace)
 		return KeyAction::quit;
+#ifdef LAGSW_FEATURE_NET_MONITOR
+	if (net_monitor.is_toggle_key(key))
+	{
+		net_monitor.toggle();
+		return KeyAction::handled;
+	}
+	if (net_monitor.active())
+	{
+		net_monitor.handle_key(key);
+		if (key == platform::key::space || key == 'r' || key == 'R')
+			return KeyAction::handled;
+	}
+#endif
 	if (key == platform::key::page_up)
 		engine.cycle_server(-1);
 	else if (key == platform::key::page_down)
@@ -117,11 +135,19 @@ int main(int argc, char* argv[])
 #else
 	const char* region_keys_help = "";
 #endif
-	LOG_INFO("Hold a configured profile key to start/stop packet capture, pgup/pgdn to cycle servers, %s'q' or backspace to quit.",
-			 region_keys_help);
+#ifdef LAGSW_FEATURE_NET_MONITOR
+	const std::string net_monitor_help = options.features.net_monitor.enabled ? format_key(options.features.net_monitor.key) + " for the net monitor, " : "";
+#else
+	const std::string net_monitor_help;
+#endif
+	LOG_INFO("Hold a configured profile key to start/stop packet capture, pgup/pgdn to cycle servers, %s%s'q' or backspace to quit.",
+			 region_keys_help, net_monitor_help.c_str());
 	engine.start_workers();
 	StatusLine		  status_line(engine, options);
 	ProfileController controller(engine, options);
+#ifdef LAGSW_FEATURE_NET_MONITOR
+	NetMonitor		  net_monitor(engine, options);
+#endif
 
 	while (true)
 	{
@@ -129,7 +155,12 @@ int main(int argc, char* argv[])
 		if (key != -1)
 			LOG_DEBUG_GROUP(logging::group::input, "Input received: %d", key);
 
-		const KeyAction action = handle_command_key(engine, key);
+		const KeyAction action = 
+#ifdef LAGSW_FEATURE_NET_MONITOR
+			handle_command_key(engine, net_monitor, key);
+#else
+			handle_command_key(engine, key);
+#endif
 		if (action == KeyAction::quit)
 			break;
 		if (action == KeyAction::handled)
@@ -137,6 +168,9 @@ int main(int argc, char* argv[])
 		controller.update();
 	}
 
+#ifdef LAGSW_FEATURE_NET_MONITOR
+	net_monitor.stop();
+#endif
 	engine.teardown();
 	engine.stop_workers();
 	status_line.stop();

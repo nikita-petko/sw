@@ -260,6 +260,37 @@ bool validate_desync_countdown(const char* path, const PacketEngineOptions& opti
 }
 #endif
 
+#ifdef LAGSW_FEATURE_NET_MONITOR
+bool validate_net_monitor(const char* path, const PacketEngineOptions& options)
+{
+	const NetMonitorOptions& monitor = options.features.net_monitor;
+	if (!monitor.enabled)
+		return true;
+	const int key = monitor.key >= 'a' && monitor.key <= 'z' ? monitor.key - 'a' + 'A' : monitor.key;
+	// Space and R are used inside the view itself.
+	if (key == 'Q' || key == 'R' || key == platform::key::space || key == platform::key::backspace || key == platform::key::tab ||
+		key == platform::key::page_up || key == platform::key::page_down || key == platform::key::left || key == platform::key::right)
+	{
+		LOG_ERROR("Feature net_monitor key conflicts with a command key in %s", path);
+		return false;
+	}
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+	if (options.features.passive_latency.pause_key && *options.features.passive_latency.pause_key == key)
+	{
+		LOG_ERROR("Feature net_monitor key conflicts with the passive_latency pause_key in %s", path);
+		return false;
+	}
+#endif
+	for (const ProfileOptions& profile : options.profiles)
+		if (std::find(profile.keys.begin(), profile.keys.end(), key) != profile.keys.end())
+		{
+			LOG_ERROR("Feature net_monitor key conflicts with an activation key of profile '%s' in %s", profile.name.c_str(), path);
+			return false;
+		}
+	return true;
+}
+#endif
+
 bool validate_features([[maybe_unused]] const char* path, [[maybe_unused]] const PacketEngineOptions& options)
 {
 #ifdef LAGSW_FEATURE_SERVER_DISCOVERY
@@ -272,6 +303,10 @@ bool validate_features([[maybe_unused]] const char* path, [[maybe_unused]] const
 #endif
 #ifdef LAGSW_FEATURE_PASSIVE_LATENCY
 	if (!validate_passive_latency(path, options.features.passive_latency))
+		return false;
+#endif
+#ifdef LAGSW_FEATURE_NET_MONITOR
+	if (!validate_net_monitor(path, options))
 		return false;
 #endif
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY

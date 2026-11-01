@@ -42,6 +42,9 @@ size_t group_index(const char* group_name)
 std::string		 status_line;
 std::string		 status_right_line;
 std::vector<std::string> extra_status_lines;
+bool					 suspended = false;
+std::vector<std::string> suspended_backlog;
+constexpr size_t		 max_suspended_backlog = 500;
 
 void clear_status_line()
 {
@@ -333,11 +336,20 @@ static void write_impl(const char* group_name, level message_level, const char* 
 	char message[max_log_message];
 	std::vsnprintf(message, sizeof(message), format, arguments);
 
-	clear_status_line();
+	std::string line = std::string(color) + "[" + level_name(message_level) + "] ";
 	if (group_name != nullptr && show_groups.load())
-		std::printf("%s[%s] [%s] %s\033[0m\n", color, level_name(message_level), group_name, message);
-	else
-		std::printf("%s[%s] %s\033[0m\n", color, level_name(message_level), message);
+		line += std::string("[") + group_name + "] ";
+	line += message;
+	line += "\033[0m\n";
+	if (suspended)
+	{
+		if (suspended_backlog.size() < max_suspended_backlog)
+			suspended_backlog.push_back(std::move(line));
+		return;
+	}
+
+	clear_status_line();
+	std::fputs(line.c_str(), stdout);
 	if (!status_line.empty())
 		print_status_block(status_line, status_right_line);
 	std::fflush(stdout);
@@ -388,7 +400,8 @@ void set_status(const std::string& status)
 void set_status(const std::string& status, const std::string& right_status)
 {
 	std::lock_guard lock(log_mutex);
-	print_status_block(status, right_status);
+	if (!suspended)
+		print_status_block(status, right_status);
 	status_line		  = status;
 	status_right_line = right_status;
 	std::fflush(stdout);
@@ -400,9 +413,26 @@ void set_extra_status(const std::vector<std::string>& lines)
 	if (lines == extra_status_lines)
 		return;
 	// The block is redrawn by the next set_status(); wipe it first so a changed line count leaves nothing behind.
-	if (lines.size() != extra_status_lines.size())
+	if (!suspended && lines.size() != extra_status_lines.size())
 		clear_status_line();
 	extra_status_lines = lines;
+	std::fflush(stdout);
+}
+
+void set_suspended(bool suspend)
+{
+	std::lock_guard lock(log_mutex);
+	if (suspended == suspend)
+		return;
+	suspended = suspend;
+	if (suspend)
+		return;
+	clear_status_line();
+	for (const std::string& line : suspended_backlog)
+		std::fputs(line.c_str(), stdout);
+	suspended_backlog.clear();
+	if (!status_line.empty())
+		print_status_block(status_line, status_right_line);
 	std::fflush(stdout);
 }
 

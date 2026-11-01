@@ -1,12 +1,12 @@
 target("lagsw")
     set_version("8")
     set_kind("binary")
-    add_files("*.cc", "packet_mode/*.cc", "passive_latency/*.cc", "options/*.cc", "packet_engine/*.cc")
+    add_files("*.cc", "packet_mode/*.cc", "passive_latency/*.cc", "net_monitor/*.cc", "options/*.cc", "packet_engine/*.cc")
 
     add_includedirs("../include")
 
     -- Compile-time feature toggles, defined in the root xmake.lua
-    add_options("server_discovery", "region_enforcement", "passive_latency", "pcap_files", "desync_countdown", "forwarded_address_discovery", "netfilter_monitor")
+    add_options("server_discovery", "region_enforcement", "passive_latency", "pcap_files", "desync_countdown", "forwarded_address_discovery", "netfilter_monitor", "net_monitor")
 
     -- Operating-system services (input, timers, HTTPS, ...), one implementation per platform
     if is_plat("windows") then
