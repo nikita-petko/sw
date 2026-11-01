@@ -15,6 +15,8 @@ namespace {
 constexpr unsigned long kMaxPort = (std::numeric_limits<uint16_t>::max)();
 constexpr unsigned long kMaxU32	 = (std::numeric_limits<uint32_t>::max)();
 constexpr long			kMaxI32	 = (std::numeric_limits<int32_t>::max)();
+/// Largest passive latency delay or jitter (ten minutes); keeps delay + 3 * jitter well within int32.
+constexpr long			kMaxPassiveMs = 600000;
 /// Name of the open `enabled_for:` list while a feature's settings are being read.
 constexpr const char*	kEnabledForList = "enabled_for";
 
@@ -519,13 +521,28 @@ private:
 	Status parse_passive_latency(const std::string& key, const std::string& value, int)
 	{
 		PassiveLatencyOptions& passive = options_.features.passive_latency;
+		auto				   millis  = [&](auto& out, const char* name) {
+			   return to_status(assign_number<int32_t>(context_, parse_long(unquote(value), 0, kMaxPassiveMs), out, std::string("passive_latency ") + name));
+		};
 		if (key == "enabled")
 			return to_status(assign_bool(context_, value, passive.enabled));
+		if (key == "mode")
+			return to_status(assign_enum(context_, value, parse_passive_latency_mode, passive.mode, "passive_latency mode", ": expected fixed, uniform, or normal"));
+		if (key == "direction")
+			return to_status(assign_enum(
+				context_, value, parse_passive_latency_direction, passive.direction, "passive_latency direction", ": expected both, inbound, or outbound"));
 		if (key == "delay_ms")
-			return to_status(assign_number<int32_t>(context_, parse_long(unquote(value), 0, kMaxI32), passive.delay_ms, "passive_latency delay_ms"));
+			return millis(passive.delay_ms, "delay_ms");
+		if (key == "jitter_ms")
+			return millis(passive.jitter_ms, "jitter_ms");
 		if (key == "max_delay_ms")
-			return to_status(
-				assign_number<int32_t>(context_, parse_long(unquote(value), 0, kMaxI32), passive.max_delay_ms, "passive_latency max_delay_ms"));
+			return millis(passive.max_delay_ms, "max_delay_ms");
+		if (key == "inbound_delay_ms")
+			return millis(passive.inbound_delay_ms, "inbound_delay_ms");
+		if (key == "outbound_delay_ms")
+			return millis(passive.outbound_delay_ms, "outbound_delay_ms");
+		if (key == "preserve_order")
+			return to_status(assign_bool(context_, value, passive.preserve_order));
 		if (key == "max_queued_packets")
 			return to_status(assign_number<uint32_t>(
 				context_, parse_ulong(unquote(value), 1, kMaxU32), passive.max_queued_packets, "passive_latency max_queued_packets"));

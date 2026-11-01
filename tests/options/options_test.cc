@@ -111,8 +111,14 @@ features:
     probe_port: 8080
   passive_latency:
     enabled: true
+    mode: normal
     delay_ms: 50
-    max_delay_ms: 75
+    jitter_ms: 8
+    max_delay_ms: 120
+    direction: both
+    inbound_delay_ms: 20
+    outbound_delay_ms: 90
+    preserve_order: false
     max_queued_packets: 2048
     filter: "udp"
   pcap_files:
@@ -186,8 +192,12 @@ profiles:
 	CHECK(o.features.region_enforcement.enabled && o.features.region_enforcement.probe_port == 8080);
 #endif
 #ifdef LAGSW_FEATURE_PASSIVE_LATENCY
-	CHECK(o.features.passive_latency.enabled && o.features.passive_latency.delay_ms == 50 && o.features.passive_latency.max_delay_ms == 75);
+	CHECK(o.features.passive_latency.enabled && o.features.passive_latency.delay_ms == 50 && o.features.passive_latency.max_delay_ms == 120);
 	CHECK(o.features.passive_latency.max_queued_packets == 2048 && o.features.passive_latency.filter == "udp");
+	CHECK(o.features.passive_latency.mode == PassiveLatencyMode::normal && o.features.passive_latency.jitter_ms == 8);
+	CHECK(o.features.passive_latency.inbound_delay_ms == 20 && o.features.passive_latency.outbound_delay_ms == 90);
+	CHECK(!o.features.passive_latency.preserve_order && o.features.passive_latency.direction == PassiveLatencyDirection::both);
+	CHECK(o.features.passive_latency.effective_delay_ms(true) == 90 && o.features.passive_latency.effective_max_delay_ms(false) == 120);
 #endif
 #ifdef LAGSW_FEATURE_PCAP_FILES
 	CHECK(o.features.pcap_files.enabled && o.features.pcap_files.output_dir == "caps");
@@ -280,10 +290,20 @@ void test_rejected_files()
 		{"region enforcement without port", "features:\n  region_enforcement:\n    enabled: true\n" + kProfile, "probe_port is missing or invalid"},
 #endif
 #ifdef LAGSW_FEATURE_PASSIVE_LATENCY
-		{"passive latency without delay", "features:\n  passive_latency:\n    enabled: true\n" + kProfile, "delay_ms must be positive"},
+		{"passive latency without delay", "features:\n  passive_latency:\n    enabled: true\n" + kProfile, "delay_ms must be positive for at least one direction"},
 		{"passive latency negative delay", "features:\n  passive_latency:\n    delay_ms: -1\n" + kProfile, "Invalid passive_latency delay_ms in"},
 		{"passive latency max below delay", "features:\n  passive_latency:\n    enabled: true\n    delay_ms: 50\n    max_delay_ms: 10\n" + kProfile,
-		 "max_delay_ms must be 0 or greater than or equal to delay_ms"},
+		 "max_delay_ms must be 0 or greater than or equal to the delay of each direction"},
+		{"passive latency fixed with jitter", "features:\n  passive_latency:\n    enabled: true\n    delay_ms: 50\n    jitter_ms: 5\n" + kProfile,
+		 "jitter_ms requires mode uniform or normal"},
+		{"passive latency uniform without jitter", "features:\n  passive_latency:\n    enabled: true\n    mode: uniform\n    delay_ms: 50\n" + kProfile,
+		 "requires a positive jitter_ms"},
+		{"passive latency bad mode", "features:\n  passive_latency:\n    mode: gaussian\n" + kProfile, "Invalid passive_latency mode in"},
+		{"passive latency bad direction", "features:\n  passive_latency:\n    direction: up\n" + kProfile, "Invalid passive_latency direction in"},
+		{"passive latency inbound only without inbound delay",
+		 "features:\n  passive_latency:\n    enabled: true\n    direction: outbound\n    inbound_delay_ms: 40\n" + kProfile,
+		 "delay_ms must be positive for at least one direction"},
+		{"passive latency huge delay", "features:\n  passive_latency:\n    delay_ms: 600001\n" + kProfile, "Invalid passive_latency delay_ms in"},
 		{"passive latency zero max queued", "features:\n  passive_latency:\n    max_queued_packets: 0\n" + kProfile,
 		 "Invalid passive_latency max_queued_packets in"},
 #endif

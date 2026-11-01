@@ -38,11 +38,25 @@ void PacketEngine::start_passive_latency()
 		return;
 
 	DelayModelOptions model_options;
-	model_options.kind			  = DelayModelKind::fixed;
-	model_options.preserve_order = true;
-	const int32_t max_delay_ms	  = passive.max_delay_ms > 0 ? passive.max_delay_ms : passive.delay_ms;
-	for (DirectionDelay& direction : model_options.directions)
-		direction = {passive.delay_ms, 0, max_delay_ms};
+	switch (passive.mode)
+	{
+	case PassiveLatencyMode::fixed:
+		model_options.kind = DelayModelKind::fixed;
+		break;
+	case PassiveLatencyMode::uniform:
+		model_options.kind = DelayModelKind::uniform;
+		break;
+	case PassiveLatencyMode::normal:
+		model_options.kind = DelayModelKind::normal;
+		break;
+	}
+	model_options.preserve_order = passive.preserve_order;
+	for (const bool outbound : {false, true})
+	{
+		const DelayDirection direction					  = outbound ? DelayDirection::outbound : DelayDirection::inbound;
+		model_options.directions[static_cast<int>(direction)] = {
+			passive.effective_delay_ms(outbound), passive.effective_jitter_ms(outbound), passive.effective_max_delay_ms(outbound)};
+	}
 	state_->passive_latency_model = std::make_unique<DelayModel>(model_options, std::random_device{}());
 
 	state_->passive_latency_stopping = false;
@@ -56,10 +70,8 @@ void PacketEngine::start_passive_latency()
 		LOG_ERROR("Passive latency setup: failed to open capture channel: %s", open_error.c_str());
 		return;
 	}
-	LOG_INFO("Passive latency active: delay = %dms (max %dms), filter = %s",
-			 passive.delay_ms,
-			 max_delay_ms,
-			 open_options.filter.c_str());
+	LOG_INFO("Passive latency active: %s", describe_passive_latency().c_str());
+	LOG_INFO("Passive latency filter: %s", open_options.filter.c_str());
 	state_->passive_latency_recv_thread = std::thread(&PacketEngine::passive_latency_recv, this);
 	state_->passive_latency_send_thread = std::thread(&PacketEngine::passive_latency_send, this);
 }
@@ -167,6 +179,52 @@ void PacketEngine::flush_passive_latency_queue()
 		send_passive_packet(*state_->passive_latency_handle, node->packet, node->length, *node->address, "flush: sent packet");
 		destroy_packet_node(node);
 	}
+}
+
+std::string PacketEngine::describe_passive_latency() const
+{
+	const PassiveLatencyOptions& passive = options_.features.passive_latency;
+	const char*					 mode	 = passive.mode == PassiveLatencyMode::fixed ? "fixed" : passive.mode == PassiveLatencyMode::uniform ? "uniform" : "normal";
+	std::string					 text	 = mode;
+	for (const bool outbound : {true, false})
+	{
+		const int32_t mean = passive.effective_delay_ms(outbound);
+		text += outbound ? ", out " : ", in ";
+		if (mean == 0)
+		{
+			text += "off";
+			continue;
+		}
+		text += std::to_string(mean) + "ms";
+		if (passive.effective_jitter_ms(outbound) != 0)
+			text += " +/-" + std::to_string(passive.effective_jitter_ms(outbound));
+		text += " (max " + std::to_string(passive.effective_max_delay_ms(outbound)) + ")";
+	}
+	if (!passive.preserve_order)
+		text += ", unordered";
+	return text;
+}
+
+std::string PacketEngine::passive_latency_status() const
+{
+	const PassiveLatencyOptions& passive = options_.features.passive_latency;
+	auto						 part	 = [&](bool outbound) {
+		   const int32_t mean = passive.effective_delay_ms(outbound);
+		   std::string	 text = std::to_string(mean) + "ms";
+		   if (passive.effective_jitter_ms(outbound) != 0)
+			   text += "+/-" + std::to_string(passive.effective_jitter_ms(outbound));
+		   return text;
+	};
+	const bool out_on = passive.effective_delay_ms(true) != 0;
+	const bool in_on  = passive.effective_delay_ms(false) != 0;
+	if (out_on && in_on && part(true) == part(false))
+		return part(true) + " (both)";
+	std::string text;
+	if (out_on)
+		text += part(true) + " out";
+	if (in_on)
+		text += std::string(text.empty() ? "" : ", ") + part(false) + " in";
+	return text;
 }
 
 bool PacketEngine::is_passive_latency_enabled() const

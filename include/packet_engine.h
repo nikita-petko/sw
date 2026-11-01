@@ -185,21 +185,72 @@ struct RegionEnforcementOptions
 #endif
 
 #ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+/// Distribution of the baseline delay, see pocs/passive_latency.md.
+enum class PassiveLatencyMode
+{
+	fixed,
+	uniform,
+	normal,
+};
+
+/// Which packets passive latency delays.
+enum class PassiveLatencyDirection
+{
+	both,
+	inbound,
+	outbound,
+};
+
 /// Settings for an always-on baseline delay applied to filtered packets, independent of profile activation.
-/// See pocs/passive_latency.md. Phase 1 only supports a single fixed delay applied to both directions; modes,
-/// per-direction overrides, and the pause key are added in later phases.
+/// See pocs/passive_latency.md. The pause key and capture options are added in a later phase.
 struct PassiveLatencyOptions
 {
 	/// Enables passive latency.
 	bool enabled = false;
+	/// Delay distribution. Fixed uses delay_ms as is; uniform and normal use it as the mean.
+	PassiveLatencyMode mode = PassiveLatencyMode::fixed;
 	/// Baseline delay applied to every filtered packet, in milliseconds.
 	int32_t delay_ms = 0;
-	/// Upper clamp applied after the delay is computed. Defaults to delay_ms when left at 0.
+	/// Uniform half-range or normal standard deviation, in milliseconds. Must be 0 for the fixed mode.
+	int32_t jitter_ms = 0;
+	/// Upper clamp applied after sampling. 0 means delay + 3 * jitter for each direction.
 	int32_t max_delay_ms = 0;
+	/// Which packets are delayed. Packets of the other direction pass through undelayed.
+	PassiveLatencyDirection direction = PassiveLatencyDirection::both;
+	/// Overrides delay_ms for inbound packets.
+	std::optional<int32_t> inbound_delay_ms;
+	/// Overrides delay_ms for outbound packets.
+	std::optional<int32_t> outbound_delay_ms;
+	/// Never release a packet before an earlier packet of the same direction.
+	bool preserve_order = true;
 	/// Capture filter in the active backend's syntax. Defaults to global_filter when unset.
 	std::optional<std::string> filter;
 	/// Safety bound on queued packets; packets are released immediately (not dropped) past this bound.
 	uint32_t max_queued_packets = 4096;
+
+	/// Mean delay for one direction; 0 when that direction is not delayed.
+	int32_t effective_delay_ms(bool outbound) const
+	{
+		if (direction == PassiveLatencyDirection::inbound && outbound)
+			return 0;
+		if (direction == PassiveLatencyDirection::outbound && !outbound)
+			return 0;
+		const std::optional<int32_t>& override_ms = outbound ? outbound_delay_ms : inbound_delay_ms;
+		return override_ms.value_or(delay_ms);
+	}
+	/// Jitter for one direction; undelayed directions have none.
+	int32_t effective_jitter_ms(bool outbound) const
+	{
+		return mode == PassiveLatencyMode::fixed || effective_delay_ms(outbound) == 0 ? 0 : jitter_ms;
+	}
+	/// Upper clamp for one direction.
+	int32_t effective_max_delay_ms(bool outbound) const
+	{
+		const int32_t mean = effective_delay_ms(outbound);
+		if (mean == 0)
+			return 0;
+		return max_delay_ms > 0 ? max_delay_ms : mean + 3 * effective_jitter_ms(outbound);
+	}
 };
 #endif
 
@@ -375,6 +426,8 @@ public:
 #ifdef LAGSW_FEATURE_PASSIVE_LATENCY
 	/// Returns whether passive latency is configured as enabled.
 	bool is_passive_latency_enabled() const;
+	/// Compact description for the status line, for example "60ms +/-10 (both)".
+	std::string passive_latency_status() const;
 #endif
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	/// Returns whether forwarded-address discovery is configured as enabled.
@@ -449,6 +502,8 @@ private:
 #endif
 #ifdef LAGSW_FEATURE_PASSIVE_LATENCY
 	/// Opens the passive-latency capture channel and starts its workers.
+	/// Mode and per-direction delays for the startup log.
+	std::string describe_passive_latency() const;
 	void start_passive_latency();
 	/// Stops passive-latency workers, flushing queued packets, and closes their handle.
 	void stop_passive_latency();

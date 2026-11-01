@@ -487,26 +487,36 @@ actually make them less reliable. Unlike a proxy client, the delay here is a
 precise, directly configured value instead of an indirect and only loosely
 tunable side effect of routing, and it has no recurring cost. It runs on its
 own capture channel that is processed before profiles and region enforcement,
-so a profile's own delay (if any) is added on top. Phase 1 supports only a
-single fixed delay applied to both directions; see
+so a profile's own delay (if any) is added on top. The delay can be fixed or
+jittered, set per direction, and is shown in the status line. See
 [`pocs/passive_latency.md`](pocs/passive_latency.md) for the full design and
-later phases (configurable delay modes, per-direction values, a pause key,
-and a status line).
+the remaining planned work (pause key, capture options, adaptive target RTT).
 
 ```yaml
 features:
   passive_latency:
     enabled: true
+    mode: uniform
     delay_ms: 60
-    max_delay_ms: 60
+    jitter_ms: 10
+    direction: both
     filter: "tcp"
 ```
+
+To reach an RTT floor of 120 ms either use `delay_ms: 60` with `direction: both`
+or `outbound_delay_ms: 120` with `inbound_delay_ms: 0`. Jitter never reorders
+packets of the same direction unless `preserve_order` is `false`.
 
 | Field | Required | Description |
 | --- | --- | --- |
 | `enabled` | No | Enables passive latency. Defaults to `false`. |
-| `delay_ms` | Yes when enabled | Baseline delay applied to every filtered packet, in milliseconds. |
-| `max_delay_ms` | No | Upper clamp applied after the delay is computed. `0` (the default) uses `delay_ms`. |
+| `mode` | No | `fixed` (default), `uniform` (`delay_ms` +/- `jitter_ms`), or `normal` (`delay_ms` with standard deviation `jitter_ms`). |
+| `delay_ms` | Yes when enabled, unless a direction override is set | Baseline delay in milliseconds (the mean for `uniform` and `normal`); at most `600000`. |
+| `jitter_ms` | Required for `uniform`/`normal` | Jitter in milliseconds; must be `0` or absent for `fixed`. |
+| `max_delay_ms` | No | Upper clamp after sampling. `0` (the default) uses `delay_ms + 3 * jitter_ms` per direction; otherwise it must be at least each direction's delay. |
+| `direction` | No | `both` (default), `inbound`, or `outbound`. Packets of the other direction pass through undelayed. |
+| `inbound_delay_ms`, `outbound_delay_ms` | No | Override `delay_ms` for that direction. |
+| `preserve_order` | No | Never release a packet before an earlier one of the same direction. Defaults to `true`; `false` can reorder TCP packets when jitter is used. |
 | `max_queued_packets` | No | Safety bound on queued packets; packets past this bound are released immediately instead of being dropped. Defaults to `4096`. |
 | `filter` | No | Capture filter in the active backend's syntax. Defaults to `global_filter` when unset. |
 

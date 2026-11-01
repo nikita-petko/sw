@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "support/test.h"
@@ -155,6 +156,80 @@ void test_passive_channel_is_distinct_from_profile_channels()
 	CHECK(fakes::channel_with_filter("profile#0") == nullptr);
 	engine.stop_workers();
 }
+
+void test_inbound_only_leaves_outbound_packets_undelayed()
+{
+	fakes::reset();
+	PacketEngineOptions options				  = passive_options(5000);
+	options.features.passive_latency.direction = PassiveLatencyDirection::inbound;
+	PacketEngine engine(options);
+	engine.start_workers();
+	const auto channel = fakes::channel_with_filter("tcp");
+
+	channel->inject(tcp_packet(1, 1, kAck), 1, true);	// outbound: passes through at once
+	CHECK(wait_until([&] { return channel->sent_count() == 1; }, std::chrono::milliseconds(1000)));
+	channel->inject(tcp_packet(2, 1, kAck), 2, false);	// inbound: held
+	CHECK(wait_until([&] { return channel->consumed() == 2; }));
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	CHECK(channel->sent_count() == 1);
+
+	engine.stop_workers();
+	CHECK(channel->sent_count() == 2);
+}
+
+void test_per_direction_overrides()
+{
+	fakes::reset();
+	PacketEngineOptions options					  = passive_options(5000);
+	options.features.passive_latency.outbound_delay_ms = 0;
+	options.features.passive_latency.inbound_delay_ms  = 5000;
+	PacketEngine engine(options);
+	engine.start_workers();
+	const auto channel = fakes::channel_with_filter("tcp");
+
+	channel->inject(tcp_packet(1, 1, kAck), 1, true);
+	CHECK(wait_until([&] { return channel->sent_count() == 1; }, std::chrono::milliseconds(1000)));
+	engine.stop_workers();
+}
+
+void test_jitter_modes_preserve_order()
+{
+	for (const PassiveLatencyMode mode : {PassiveLatencyMode::uniform, PassiveLatencyMode::normal})
+	{
+		fakes::reset();
+		PacketEngineOptions options				= passive_options(60);
+		options.features.passive_latency.mode	= mode;
+		options.features.passive_latency.jitter_ms = 50;
+		PacketEngine engine(options);
+		engine.start_workers();
+		const auto channel = fakes::channel_with_filter("tcp");
+
+		for (int64_t id = 1; id <= 20; ++id)
+			channel->inject(tcp_packet(static_cast<uint32_t>(id), 1, kAck), id, true);
+		CHECK(wait_until([&] { return channel->sent_count() == 20; }, std::chrono::milliseconds(3000)));
+		const auto sent = channel->sent_packets();
+		for (size_t i = 0; i < sent.size(); ++i)
+			CHECK(sent[i].meta.timestamp == static_cast<int64_t>(i + 1));
+		engine.stop_workers();
+	}
+}
+
+void test_status_text()
+{
+	PacketEngineOptions options = passive_options(60);
+	CHECK(PacketEngine(options).passive_latency_status() == "60ms (both)");
+
+	options.features.passive_latency.mode		= PassiveLatencyMode::uniform;
+	options.features.passive_latency.jitter_ms = 10;
+	CHECK(PacketEngine(options).passive_latency_status() == "60ms+/-10 (both)");
+
+	options.features.passive_latency.direction = PassiveLatencyDirection::outbound;
+	CHECK(PacketEngine(options).passive_latency_status() == "60ms+/-10 out");
+
+	options.features.passive_latency.direction		   = PassiveLatencyDirection::both;
+	options.features.passive_latency.inbound_delay_ms = 20;
+	CHECK(PacketEngine(options).passive_latency_status() == "60ms+/-10 out, 20ms+/-10 in");
+}
 }  // namespace
 
 int main(int argc, char** argv)
@@ -169,6 +244,10 @@ int main(int argc, char** argv)
 		{"overflow_releases_packets_immediately", test_overflow_releases_packets_immediately},
 		{"stopping_the_workers_flushes_and_closes_the_channel", test_stopping_the_workers_flushes_and_closes_the_channel},
 		{"passive_channel_is_distinct_from_profile_channels", test_passive_channel_is_distinct_from_profile_channels},
+		{"inbound_only_leaves_outbound_packets_undelayed", test_inbound_only_leaves_outbound_packets_undelayed},
+		{"per_direction_overrides", test_per_direction_overrides},
+		{"jitter_modes_preserve_order", test_jitter_modes_preserve_order},
+		{"status_text", test_status_text},
 	};
 	return test::run_tests("passive_latency", cases, argc, argv);
 }

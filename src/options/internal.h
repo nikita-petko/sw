@@ -40,6 +40,10 @@ std::optional<PacketGroupOrder>				parse_packet_group_order(const std::string& v
 #ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
 std::optional<DesyncCountdownDisplay>		parse_countdown_display(const std::string& value);
 #endif
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+std::optional<PassiveLatencyMode>			parse_passive_latency_mode(const std::string& value);
+std::optional<PassiveLatencyDirection>		parse_passive_latency_direction(const std::string& value);
+#endif
 /// Parses a key name (single character, alt, ctrl, shift, space, VK_* names) or a number into a virtual-key code.
 std::optional<int>							parse_key(std::string value);
 

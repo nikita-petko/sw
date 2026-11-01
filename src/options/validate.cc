@@ -165,19 +165,33 @@ bool validate_passive_latency(const char* path, const PassiveLatencyOptions& pas
 {
 	if (!passive.enabled)
 		return true;
-	if (passive.delay_ms <= 0)
+	const int32_t out_delay = passive.effective_delay_ms(true);
+	const int32_t in_delay	= passive.effective_delay_ms(false);
+	if (out_delay <= 0 && in_delay <= 0)
 	{
-		LOG_ERROR("Feature passive_latency is enabled but delay_ms must be positive in %s", path);
+		LOG_ERROR("Feature passive_latency is enabled but delay_ms must be positive for at least one direction in %s", path);
 		return false;
 	}
-	if (passive.max_delay_ms != 0 && passive.max_delay_ms < passive.delay_ms)
+	if (passive.mode == PassiveLatencyMode::fixed && passive.jitter_ms != 0)
 	{
-		LOG_ERROR("Feature passive_latency max_delay_ms must be 0 or greater than or equal to delay_ms in %s", path);
+		LOG_ERROR("Feature passive_latency jitter_ms requires mode uniform or normal in %s", path);
 		return false;
 	}
-	const int32_t effective_max = passive.max_delay_ms != 0 ? passive.max_delay_ms : passive.delay_ms;
+	if (passive.mode != PassiveLatencyMode::fixed && passive.jitter_ms <= 0)
+	{
+		LOG_ERROR("Feature passive_latency mode uniform or normal requires a positive jitter_ms in %s", path);
+		return false;
+	}
+	if (passive.max_delay_ms != 0 && (passive.max_delay_ms < out_delay || passive.max_delay_ms < in_delay))
+	{
+		LOG_ERROR("Feature passive_latency max_delay_ms must be 0 or greater than or equal to the delay of each direction in %s", path);
+		return false;
+	}
+	const int32_t effective_max = (std::max)(passive.effective_max_delay_ms(true), passive.effective_max_delay_ms(false));
 	if (effective_max > 200)
-		LOG_WARN("Feature passive_latency delay of %d ms in %s is high enough to noticeably affect responsiveness", effective_max, path);
+		LOG_WARN("Feature passive_latency delay of up to %d ms in %s is high enough to noticeably affect responsiveness", effective_max, path);
+	if (!passive.preserve_order && passive.mode != PassiveLatencyMode::fixed)
+		LOG_WARN("Feature passive_latency preserve_order is false; jitter can reorder TCP packets in %s", path);
 	return true;
 }
 #endif

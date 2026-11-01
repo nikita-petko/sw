@@ -137,6 +137,22 @@ std::optional<DesyncCountdownDisplay> parse_countdown_display(const std::string&
 }
 #endif
 
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+std::optional<PassiveLatencyMode> parse_passive_latency_mode(const std::string& value)
+{
+	static const std::pair<const char*, PassiveLatencyMode> table[] = {
+		{"fixed", PassiveLatencyMode::fixed}, {"uniform", PassiveLatencyMode::uniform}, {"normal", PassiveLatencyMode::normal}};
+	return lookup(value, table);
+}
+
+std::optional<PassiveLatencyDirection> parse_passive_latency_direction(const std::string& value)
+{
+	static const std::pair<const char*, PassiveLatencyDirection> table[] = {
+		{"both", PassiveLatencyDirection::both}, {"inbound", PassiveLatencyDirection::inbound}, {"outbound", PassiveLatencyDirection::outbound}};
+	return lookup(value, table);
+}
+#endif
+
 std::optional<int> parse_key(std::string value)
 {
 	value = unquote(trim(value));

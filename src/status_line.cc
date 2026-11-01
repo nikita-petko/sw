@@ -115,6 +115,10 @@ std::string describe_server(const PacketEngine& engine)
 			server_status += " (" + re_status + ")";
 	}
 #endif
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+	if (engine.is_passive_latency_enabled())
+		server_status += " | passive: " + engine.passive_latency_status();
+#endif
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	if (engine.is_forwarded_address_discovery_enabled())
 		server_status += " | fad: " + engine.forwarded_address_discovery_status();

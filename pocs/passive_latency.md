@@ -4,7 +4,8 @@
 
 - Phase 0 (delay model): done. [delay_model.h](../src/passive_latency/delay_model.h) / [delay_model.cc](../src/passive_latency/delay_model.cc) implement `fixed`/`uniform`/`normal`, per-direction parameters, clamping, a seeded RNG, and per-direction order preservation. Covered by `delay_model_*` cases in `tests/modes/modes_test.cc`.
 - Phase 1 (single fixed delay, both directions): done. Feature-gated behind `LAGSW_FEATURE_PASSIVE_LATENCY` (`--passive_latency=y|n`, default `y`). Adds an always-on capture channel ([passive_latency.cc](../src/packet_engine/passive_latency.cc)) opened with a `fixed` `DelayModel` using the same `delay_ms`/`max_delay_ms` for both directions, options parsing and validation (`src/options/profiles.cc`, `src/options/validate.cc`, `src/options/filters.cc`), the `passive_latency`/`passive_latency.packet` log groups, the schema block, README docs, and the `passive_latency_test` suite (`tests/passive_latency/`). Deliberately out of scope for Phase 1: `mode`/`jitter`, per-direction values, `pause_key`, a status line, and the nested `capture_options` block from §6.1 below (the profiles parser does not support a subsection inside a feature block; `filter` is a flat string key instead). The queue-overflow warning (§8.4) is logged on every overflow rather than rate-limited.
-- Phases 2-4: not started.
+- Phase 2 (modes, direction, order): done. `mode` (`fixed`/`uniform`/`normal`), `jitter_ms`, `direction`, `inbound_delay_ms`/`outbound_delay_ms` and `preserve_order` are parsed, validated (jitter required for jittered modes and rejected for `fixed`; delays capped at 600000 ms; `max_delay_ms` must cover each direction; at least one direction must be delayed), mapped onto the `DelayModel` (per-direction `effective_*` helpers on `PassiveLatencyOptions`), logged at startup (`describe_passive_latency()`), and shown in the status line (`passive: 60ms+/-10 (both)`, `passive: 60ms out, 20ms in`). An undelayed direction still passes through the queue with zero delay, so order against earlier same-direction packets holds. Covered by new engine, options and status-text cases.
+- Phases 3-4: not started (`pause_key`, `capture_options`, probe-port exclusion, profile composition tests, `div1.sw.yml` docs and the migration note, `target_rtt`).
 
 ## 1. Summary
 
@@ -114,7 +115,7 @@ features:
 
 Validation lives with the other option checks in `src/options/validate.cc`, and the block is added to [profiles.schema.json](../schemas/profiles.schema.json) and the README option tables. A disabled compile-time feature ignores the block with a warning, like every other optional feature.
 
-> **Phase 1 note:** the shipped parser (`src/options/profiles.cc`) only supports a flat key list inside a feature block, not a nested subsection, so `capture_options` as shown above is not parseable yet. Phase 1 therefore only implements `enabled`, `delay_ms`, `max_delay_ms`, `filter`, and `max_queued_packets`; `mode`, `jitter_ms`, `direction`, `inbound_delay_ms`/`outbound_delay_ms`, `preserve_order`, `capture_options`, and `pause_key` are deferred to Phases 2-3 (and `capture_options` needs either a parser change or a flattened key scheme, see §14).
+> **Phase 1-2 note:** the shipped parser (`src/options/profiles.cc`) only supports a flat key list inside a feature block, not a nested subsection, so `capture_options` as shown above is not parseable yet. Phases 1-2 implement every key above except `capture_options` and `pause_key`, which are deferred to Phase 3 (`capture_options` needs either a parser change or a flattened key scheme, see §14). Delays and jitter are capped at 600000 ms, `max_delay_ms` is applied per direction, and `delay_ms` may be omitted when a per-direction override supplies the delay. `preserve_order: false` with a jittered mode logs a warning rather than being rejected.
 
 ### 6.2 Direction and RTT
 
@@ -266,7 +267,7 @@ Feature flag, config block, schema, validation, `passive_latency.cc` with a `fix
 
 ### Phase 2: modes, direction, order
 
-`uniform`/`normal`, per-direction overrides, order clamp, status line segment, startup log.
+`uniform`/`normal`, per-direction overrides, order clamp, status line segment, startup log. Status: done (§0).
 
 ### Phase 3: runtime control and composition
 

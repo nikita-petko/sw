@@ -96,21 +96,58 @@
         },
         "passive_latency": {
           "type": "object",
-          "description": "Always-on baseline delay applied to every filtered packet, independent of profile activation. Phase 1 supports only a single fixed delay applied to both directions; see pocs/passive_latency.md.",
+          "description": "Always-on baseline delay applied to filtered packets, independent of profile activation; see pocs/passive_latency.md.",
           "properties": {
             "enabled": {
               "type": "boolean",
               "description": "Whether passive latency is enabled."
             },
+            "mode": {
+              "type": "string",
+              "enum": ["fixed", "uniform", "normal"],
+              "default": "fixed",
+              "description": "Delay distribution. fixed uses delay_ms; uniform adds U(-jitter_ms, +jitter_ms); normal adds N(0, jitter_ms)."
+            },
             "delay_ms": {
               "type": "integer",
               "minimum": 0,
-              "description": "Baseline delay applied to every filtered packet, in milliseconds."
+              "maximum": 600000,
+              "description": "Baseline delay in milliseconds (the mean for uniform and normal)."
+            },
+            "jitter_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 600000,
+              "description": "Uniform half-range or normal standard deviation. Required for uniform and normal; must be 0 for fixed."
             },
             "max_delay_ms": {
               "type": "integer",
               "minimum": 0,
-              "description": "Upper clamp applied after the delay is computed. 0 (the default) uses delay_ms."
+              "maximum": 600000,
+              "description": "Upper clamp after sampling. 0 (the default) uses delay + 3 * jitter per direction."
+            },
+            "direction": {
+              "type": "string",
+              "enum": ["both", "inbound", "outbound"],
+              "default": "both",
+              "description": "Which packets are delayed; the other direction passes through undelayed."
+            },
+            "inbound_delay_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 600000,
+              "description": "Overrides delay_ms for inbound packets."
+            },
+            "outbound_delay_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 600000,
+              "description": "Overrides delay_ms for outbound packets."
+            },
+            "preserve_order": {
+              "type": "boolean",
+              "default": true,
+              "description": "Never release a packet before an earlier packet of the same direction."
             },
             "max_queued_packets": {
               "type": "integer",
@@ -124,8 +161,7 @@
             }
           },
           "required": [
-            "enabled",
-            "delay_ms"
+            "enabled"
           ],
           "additionalProperties": false
         },
