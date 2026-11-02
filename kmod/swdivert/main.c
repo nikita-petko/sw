@@ -43,6 +43,7 @@ static int swdiv_open(struct inode *inode, struct file *file)
 	}
 	mutex_init(&handle->lock);
 	init_waitqueue_head(&handle->wq);
+	swdiv_wake_timer_init(handle);
 	handle->net = get_net(net);
 	file->private_data = handle;
 	return 0;
@@ -54,6 +55,8 @@ static int swdiv_release(struct inode *inode, struct file *file)
 
 	if (handle->started)
 		swdiv_hook_stop(handle);
+	/* The hook is gone, so nothing can arm the timer any more; a callback that is already running finishes first */
+	swdiv_wake_timer_cancel(handle);
 	if (handle->ring_ready)
 		swdiv_ring_free(&handle->ring);
 	put_net(handle->net);
@@ -147,6 +150,7 @@ static long swdiv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			stats.copied += cs->copied;
 			stats.dropped_full += cs->dropped_full;
 			stats.truncated += cs->truncated;
+			stats.wakeups += cs->wakeups;
 		}
 		if (copy_to_user(argp, &stats, sizeof(stats)))
 			ret = -EFAULT;

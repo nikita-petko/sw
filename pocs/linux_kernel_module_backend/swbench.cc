@@ -208,15 +208,19 @@ struct SniffResult
 	uint64_t captured = 0;
 	uint64_t dropped  = 0;
 	uint64_t bytes	  = 0;
+	uint64_t polls	  = 0; // poll() calls that had to wait, i.e. how often the reader went to sleep
+	uint64_t wakeups  = 0; // kernel-side wake_up() calls (swdivert only)
 };
 
 void print_result(const SniffResult& result, double cpu_ms)
 {
-	std::printf("captured=%llu dropped=%llu bytes=%llu cpu_ms=%.1f\n",
+	std::printf("captured=%llu dropped=%llu bytes=%llu cpu_ms=%.1f polls=%llu wakeups=%llu\n",
 				static_cast<unsigned long long>(result.captured),
 				static_cast<unsigned long long>(result.dropped),
 				static_cast<unsigned long long>(result.bytes),
-				cpu_ms);
+				cpu_ms,
+				static_cast<unsigned long long>(result.polls),
+				static_cast<unsigned long long>(result.wakeups));
 }
 
 // The ring: poll() to sleep, then drain everything that is published
@@ -272,6 +276,7 @@ int sniff_swdiv(const Args& args)
 		{
 			pollfd pfd = {fd, POLLIN, 0};
 			poll(&pfd, 1, 100);
+			++result.polls;
 			continue;
 		}
 		volatile unsigned char sink = 0;
@@ -294,6 +299,7 @@ int sniff_swdiv(const Args& args)
 	ioctl(fd, SWDIVERT_IOC_STATS, &stats);
 	ioctl(fd, SWDIVERT_IOC_STOP);
 	result.dropped = stats.dropped_full;
+	result.wakeups = stats.wakeups;
 	print_result(result, cpu_ms_self());
 	return 0;
 }
@@ -374,6 +380,7 @@ int sniff_afpacket(const Args& args)
 	{
 		pollfd pfd = {fd, POLLIN | POLLERR, 0};
 		poll(&pfd, 1, 100);
+		++result.polls;
 		drain();
 	}
 	drain();
@@ -436,6 +443,7 @@ int sniff_nfq(const Args& args)
 		pollfd pfd = {fd, POLLIN, 0};
 		if (poll(&pfd, 1, 100) <= 0)
 			continue;
+		++state.result.polls;
 		const ssize_t count = recv(fd, buffer.data(), buffer.size(), MSG_DONTWAIT);
 		if (count > 0)
 			nfq_handle_packet(handle, buffer.data(), static_cast<int>(count));

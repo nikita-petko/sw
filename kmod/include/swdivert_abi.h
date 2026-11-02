@@ -41,6 +41,7 @@ struct swdiv_stats {
 	__u64	copied;		/* ... and were published to the ring */
 	__u64	dropped_full;	/* matched but the ring had no free slot */
 	__u64	truncated;	/* copied with caplen < len */
+	__u64	wakeups;	/* wake_up() calls made for the reader (batched: far fewer than `copied`) */
 };
 
 #define SWDIVERT_IOC_VERSION	_IOR('s', 0x10, __u32)

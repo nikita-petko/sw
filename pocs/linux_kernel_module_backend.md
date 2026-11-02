@@ -3,7 +3,7 @@
 ## 0. Status
 
 - **Phase 1 (build system and echo module): done and verified end to end.** `kmod/xmake.lua` drives the kernel's kbuild from xmake and `kmod/echo/` is a minimal `/dev/swdivert_echo` module (details in §10 and §12). Verified on Linux 7.2.11 (Arch, gcc 16.2.1): `xmake build swdivert_echo` produces a `.ko` whose vermagic matches the running kernel, rebuilds are incremental, a missing kernel build tree gives an actionable error, and debug/release outputs are separate. `sudo scripts/test_kmod_echo.sh` was run as root on the same kernel: the module loads, all 9 user-space checks pass (ABI version ioctl, echo, replace, binary round-trip, second open, full-capacity write, `EMSGSIZE`, intact message after a rejected write, `ENOTTY`) and it unloads. Not covered: other kernels, Secure Boot signing, cross-compilation.
-- **Phase 2 (Spike A, capture-only ring): implemented and built; the module itself has NOT been loaded or measured yet.** `kmod/swdivert/` is a sniff-only `/dev/swdivert` with a FORWARD hook, one 5-tuple filter and an mmap ring; `pocs/linux_kernel_module_backend/` has the rig and the sniffers it is compared with. What was verified (no root needed): the module compiles warning-free against 7.2.11; the user-space ring consumer passes 7 unit tests against a fake producer, including a threaded stress and 32-bit counter wrap; the rig, the AF_PACKET and the NFQUEUE sniffers pass the functional check (exactly what was sent is captured, a decoy flow is not, a SIGKILLed sniffer does not disturb forwarding) and produced the baseline numbers in §12. **Outstanding (needs root, and is the first time this kernel code runs): `sudo scripts/test_kmod_sniff.sh --bench`.** Results and caveats are in §12 "Phase 2 results".
+- **Phase 2 (Spike A, capture-only ring): done and measured on 7.2.11. The ring matches AF_PACKET TPACKET_V3 on sniffer CPU when the wake-up is batched coarsely, and is ~10× cheaper than NFQUEUE.** `kmod/swdivert/` is a sniff-only `/dev/swdivert` with a FORWARD hook, one 5-tuple filter and an mmap ring; `pocs/linux_kernel_module_backend/` has the rig and the sniffers. `sudo scripts/test_kmod_sniff.sh --bench` passes every check (exact capture, decoy flow ignored, SIGKILLed reader leaves forwarding intact, module reference count 0 afterwards, nothing in `dmesg`) and the ring never dropped a packet up to 200 kpps, where NFQUEUE dropped 14–26 % of the *forwarded* traffic. Sniffer CPU per packet depends on how many packets one wake-up covers: 1.8–2.1 µs at one packet per wake-up, 0.28–0.42 µs at the default `wake_us=50`, and **0.06–0.08 µs at `wake_us=1000`, `wake_batch=256`, against 0.05–0.07 µs for AF_PACKET** and 3.9–4.3 µs for NFQUEUE. The price of the coarse setting is up to `wake_us` of added delay before a sleeping reader sees a packet, which was **not measured** and is irrelevant for sniffing but decisive for Phase 3's release path. The default stays at the latency-safe 50 µs / 32 until Phase 3 has measured that latency (§12 "Phase 2 results").
 - **Everything from §7 on that is not listed above is design only.** Nothing there is implemented or measured. Every number in §11 is a hypothesis to be confirmed or killed by the spikes in §12.
 - This PoC is the third option next to the shipped backend ([`linux_nfqueue_backend.md`](linux_nfqueue_backend.md)) and the eBPF/EDT tier ([`linux_ebpf_netlink_backend.md`](linux_ebpf_netlink_backend.md)). Those two deliberately avoid a kernel module. This one asks the opposite question: *if we accept an out-of-tree module, can Linux match WinDivert's capabilities and per-packet cost, and is the gain large enough to justify the maintenance burden?*
 - Success criterion (go/no-go, §12): the module must beat **NFQUEUE with batched verdicts and fail-open (the current backend)** by a margin that the eBPF tier cannot also deliver for the verbs that need user space. If it does not, stop; the documented fallback is the existing backend.
@@ -310,7 +310,7 @@ WinDivert's own numbers are not a target, because they depend on Windows. The pa
 ## 12. Phases and go/no-go
 
 1. **Phase 1: kernel-module build system and echo module (done).** Add `kmod/` with the `kmod.module` xmake rule that drives kbuild, an echo module (`swdivert_echo`: a misc device that returns what was written, plus a version ioctl), a user-space test and a root-only load/test script (§10). Exit criteria: `xmake build swdivert_echo` yields a `.ko` for the selected kernel from a clean tree; incremental rebuilds are no-ops; a missing kernel tree gives a clear error; the default `xmake` build is unaffected; **and** `sudo scripts/test_kmod_echo.sh` loads the module, passes all user-space checks and unloads it cleanly (met on 7.2.11). Every later phase builds on this rule, so it is first.
-2. **Phase 2, Spike A: capture-only ring (implemented; module run and numbers outstanding, see "Phase 2 results").** Hook `FORWARD` on a veth netns gateway, filter by hard-coded 5-tuple, copy into an mmap ring, sniff only. Measure cost per packet against `AF_PACKET` and NFQUEUE sniff.
+2. **Phase 2, Spike A: capture-only ring (done: functionally passes and matches AF_PACKET on sniffer CPU with a coarse wake-up, see "Phase 2 results").** Hook `FORWARD` on a veth netns gateway, filter by hard-coded 5-tuple, copy into an mmap ring, sniff only. Measure cost per packet against `AF_PACKET` and NFQUEUE sniff.
 3. **Phase 3, Spike B: steal and resume.** Add `HOLD`, `RESUME`, `DROP`. Verify TCP continues, conntrack and NAT state unaffected, `bypass`-like fail-open on `kill -9`, and netns teardown with held packets.
 4. **Phase 4, Spike C: modify and inject.** `RESUME_MOD`, `INJECT`, checksum flags, priority chaining, loop avoidance. Re-run the existing engine test profiles through a `backends/kmod` stub.
 5. **Go/no-go gate.** Compare against the §11 targets. If divert-and-resume is not at least ~1.5× faster than the batched NFQUEUE backend, **stop** and keep NFQUEUE + eBPF (record the numbers here).
@@ -330,35 +330,74 @@ WinDivert's own numbers are not a target, because they depend on Windows. The pa
 **Deviations from the design (§7, §8)**
 - The ring has **one lock-serialised producer side**, not SPSC: the FORWARD hook runs on every CPU, so concurrent producers must be serialised (`spin_lock_bh` around reserve, copy and publish). The reader side is still a single consumer. If the lock shows up in the profile, per-CPU rings are the next step.
 - The consumer index is on its **own writable page**; the slots and producer count are mapped **read-only** (`VM_MAYWRITE` cleared). The kernel treats the consumer index as untrusted (a value beyond the producer count reads as "full"). This is the §13 "hostile ring indices" requirement implemented early.
-- Wake-up is one `wake_up_interruptible()` per published packet, but only when a reader is actually asleep (`wq_has_sleeper`). The batched wake (`wake_batch`/`wake_us`) of §7.4 is not built; if the wake shows up in the numbers it is the first thing to add.
+- Wake-up: the first measured version woke the reader once per published packet (when it was asleep). The measurements below confirmed that was the main cost, so it was replaced by the batched wake of §7.4: the reader is woken after `wake_batch` packets (default 32) or `wake_us` microseconds (default 50) after the first unannounced one, whichever comes first, using one `hrtimer` per handle that is armed once (restarting it per packet would postpone the wake for as long as traffic keeps coming). A reader that is busy draining never sleeps and is not delayed. Both are module parameters, writable at runtime in `/sys/module/swdivert/parameters/`; `wake_us=0` gives the old wake per packet, which `bench.py` uses as `swdiv_legacy` for an A/B comparison. Cost of batching: a packet can wait up to `wake_us` before a *sleeping* reader sees it. That is irrelevant for sniffing but not for Phase 3, where held packets are released after a verdict: that path needs its own low-latency mode (or `wake_us=0`) and its latency must be measured.
 - Only the IP packet is captured (no L2), truncated to `slot_bytes - 32`; `len` keeps the original length and a flag marks truncation. GSO super-packets are not segmented (§7.7 is not built).
 - The handle holds a reference to the opener's network namespace, so a namespace with an open handle is not torn down until the handle is closed.
 - No `HOLD`, no verdicts, no reinjection: this is the sniff path only, by design of the spike.
 
-**Baseline numbers (AF_PACKET and NFQUEUE, measured on this machine, 8 CPUs, Linux 7.2.11, rootless rig, UDP, 4 s per run, median of 3)**
+**Numbers (all sniffers, `sudo scripts/test_kmod_sniff.sh --bench`: 8 CPUs, Linux 7.2.11, UDP, 3 s per run, median of 2, 224 bytes copied per packet; `swdiv_legacy` = wake per packet (`wake_us=0`), `swdiv` = batched wake at the defaults `wake_us=50`, `wake_batch=32`)**
 
-The machine was a normal desktop session, so the host-wide column carries background noise and the low-pps rows are not meaningful there (the baseline alone shows 75 µs/pkt at 20 kpps because the idle load is divided by few packets). Read the sniffer-CPU column and the ≥ 100 kpps rows. The `swdiv` rows are to be filled in from `sudo scripts/test_kmod_sniff.sh --bench`.
+Run 2, with the batched wake. The last column is not usable at this resolution: the baseline itself moves between 6.7 and 15.2 µs/pkt from row to row on this desktop machine (background load divided by the packet count), so deltas of ±5 µs are noise (several come out negative). Read the sniffer-CPU and batching columns, which are measured inside the sniffer and the module.
 
-| mode | pps | payload | captured/sent | forwarded/sent | sniffer CPU µs per captured packet | forwarding+sniffing CPU µs/pkt (Δ baseline) |
-|---|---|---|---|---|---|---|
-| afpacket | 100k | 64 | 100 % | 100 % | 0.12 | 19.8 (−2.9, noise) |
-| nfq | 100k | 64 | 100 % | 100 % | 4.62 | 28.1 (+5.4) |
-| afpacket | 200k | 64 | 100 % | 100 % | 0.07 | 12.2 (+5.2) |
-| nfq | 200k | 64 | 77.7 % | 77.7 % | 4.45 | 15.3 (+8.3) |
-| afpacket | 100k | 1200 | 100 % | 100 % | 0.12 | 15.5 (+2.0) |
-| nfq | 100k | 1200 | 100 % | 100 % | 4.16 | 23.4 (+9.9) |
-| afpacket | 200k | 1200 | 100 % | 100 % | 0.08 | 9.6 (+1.5) |
-| nfq | 200k | 1200 | 80.5 % | 80.5 % | 4.34 | 14.5 (+6.4) |
-| swdiv | all | all | **not measured yet** | | | |
+| mode | pps | payload | captured/sent | forwarded/sent | sniffer CPU µs per captured pkt | packets per `poll()` | packets per kernel wake-up |
+|---|---|---|---|---|---|---|---|
+| afpacket | 100k | 64 | 100 % | 100 % | 0.08 | 99.9 | - |
+| nfq | 100k | 64 | 100 % | 100 % | 3.67 | 1.0 | - |
+| swdiv_legacy | 100k | 64 | 100 % | 100 % | 1.80 | 1.1 | 1.1 |
+| **swdiv** | 100k | 64 | 100 % | 100 % | **0.42** | 6.1 | 6.4 |
+| afpacket | 200k | 64 | 100 % | 100 % | 0.07 | 200.5 | - |
+| nfq | 200k | 64 | 74.1 % | 74.1 % | 4.82 | 1.0 | - |
+| swdiv_legacy | 200k | 64 | 100 % | 100 % | 2.17 | 1.2 | 1.1 |
+| **swdiv** | 200k | 64 | 100 % | 100 % | **0.28** | 12.2 | 13.0 |
+| afpacket | 100k | 1200 | 100 % | 100 % | 0.09 | 99.9 | - |
+| nfq | 100k | 1200 | 100 % | 100 % | 4.30 | 1.0 | - |
+| swdiv_legacy | 100k | 1200 | 100 % | 100 % | 1.88 | 1.1 | 1.1 |
+| **swdiv** | 100k | 1200 | 100 % | 100 % | **0.42** | 6.2 | 6.4 |
+| afpacket | 200k | 1200 | 100 % | 100 % | 0.06 | 200.0 | - |
+| nfq | 200k | 1200 | 85.6 % | 85.6 % | 4.17 | 1.0 | - |
+| swdiv_legacy | 200k | 1200 | 100 % | 100 % | 2.12 | 1.1 | 1.1 |
+| **swdiv** | 200k | 1200 | 100 % | 100 % | **0.29** | 12.2 | 12.7 |
+
+(Run 1, per-packet wake only, gave swdiv 1.84–2.11 µs, the same as `swdiv_legacy` here, which shows the two runs are consistent. An earlier rootless run of AF_PACKET and NFQUEUE alone gave NFQUEUE 4.2–4.6 µs and 20–22 % forwarded-traffic loss at 200 kpps.)
 
 What these say, and do not say:
-- NFQUEUE costs about **4–8 µs of the sniffer process per packet** (about 5–10 µs per packet host-wide above the baseline at ≥ 100 kpps, most of it that process), and at 200 kpps it **loses about 20 % of the forwarded traffic itself** (not just of the capture): with a full queue the kernel drops, `bypass` only applies when no listener is bound. That is the headroom the module has to beat, and it is a correctness problem for a shaper as well as a performance one.
-- AF_PACKET TPACKET_V3 is **the real competitor for sniffing**: 0.07–0.5 µs of process CPU per packet and no loss at 200 kpps on this rig. A ring-based module cannot beat it on pure sniffing by much (both are one copy into a shared ring with a batched wake); what the module adds is the verdict/resume path (Phases 3–4), which AF_PACKET cannot do. The go/no-go (§12) must therefore be decided on divert-and-resume against NFQUEUE, not on sniffing against AF_PACKET. Spike A's job is only to show the ring is **not slower than TPACKET_V3** and **much cheaper than the NFQUEUE sniff round trip**.
-- The veth rig forwards at most a few hundred kpps on this machine and its generator is one thread; it says nothing about a real NIC.
+- **Cause confirmed.** Wake-ups per packet went from ~1 to 6–13 packets per wake-up and sniffer CPU fell 5–7× (about 2.0 → 0.28–0.42 µs). The ring is now ~10× cheaper than the NFQUEUE sniffer in process CPU (0.3–0.4 vs 3.7–4.8 µs).
+- **At the default `wake_us=50` it is still 4–5× AF_PACKET (0.06–0.09 µs), short of the "within ~2×" target; the sweep below shows the setting that closes it.** The batch is far below `wake_batch=32`: at 100 kpps a packet arrives every 10 µs, so the 50 µs timer collects ~5–6 of them (observed 6.4), and at 200 kpps ~10–13 (observed 13). The timer, not the batch size, sets the batch. TPACKET_V3 batches 100–200 packets per `poll()` here.
+- **A simple model fits all four data points.** Reader CPU per packet ≈ 0.1 µs + 2 µs / N, with N the packets per wake-up: N=1.1 → 1.9 (observed 1.8–2.2); N=6.4 → 0.41 (0.42); N=12.7 → 0.26 (0.28–0.29); and N=200 (AF_PACKET's batch) → 0.11 (observed 0.07). That is a fit of two constants to four points, not a validated model, but it makes a testable prediction: to get within 2× of AF_PACKET (≲ 0.15 µs) the ring needs about **50 or more packets per wake-up**, i.e. `wake_us` of roughly 250 µs at 200 kpps and 500 µs at 100 kpps, with `wake_batch` raised accordingly (the default 32 would cap it). The cost is added latency for a sleeping reader of up to `wake_us`, which is fine for sniffing and is exactly the latency question Phase 3 has to answer separately.
+- **Against NFQUEUE the ring is clearly better** on every axis measured: ~10× less sniffer CPU, and no loss of forwarded traffic where NFQUEUE lost 14–26 % at 200 kpps (its queue overflows and the kernel drops; `bypass` only applies when no listener is bound; the `dropped` column stays 0 because that overflow is silent for the listener).
+- AF_PACKET remains the sniffing benchmark: a ring-based module cannot beat it by much, and what the module adds is the verdict/resume path (Phases 3–4). The go/no-go (§12) is still decided on divert-and-resume against NFQUEUE.
+- The veth rig forwards at most a few hundred kpps on this machine and its generator is one thread; it says nothing about a real NIC. The kernel-side cost (hook, lock, copy, in softirq context) is not separated out by this rig; the host-wide column was meant to show it and is too noisy. `perf` or a quieter machine is needed if that number matters.
 
-**Acceptance for Phase 2** (to be filled in after the root run): functional check passes for `swdiv` (captured = sent, decoy not captured, SIGKILL leaves forwarding intact, module reference count 0 afterwards so `rmmod` works); `swdiv` sniffer CPU per packet within ~2× of AF_PACKET and clearly below NFQUEUE; no `dropped_full` at 200 kpps with the default 16384 slots; no lockdep/KASAN splat if the kernel has them (`dmesg`).
+**Wake-up sweep (run 3, the prediction test; same conditions, 64 B payload, `swdiv@WAKE_US[:WAKE_BATCH]`)**
 
-**Risk note.** The module is unreviewed kernel code that has never run. Run it first in a VM or on a machine where a panic is acceptable; do not load it on a host that matters. It only sniffs (always `NF_ACCEPT`), so a logic bug should not break forwarding, but a memory-safety bug can.
+| mode | pps | captured/sent | sniffer CPU µs per captured pkt | packets per `poll()` | packets per kernel wake-up |
+|---|---|---|---|---|---|
+| afpacket | 100k | 100 % | 0.07 | 99.8 | - |
+| swdiv@0 (wake per packet) | 100k | 100 % | 1.82 | 1.1 | 1.1 |
+| swdiv@50 (the default, batch 32) | 100k | 100 % | 0.42 | 6.0 | 6.3 |
+| swdiv@250:256 | 100k | 100 % | 0.16 | 22.6 | 26.6 |
+| **swdiv@1000:256** | 100k | 100 % | **0.08** | 87.2 | 102 |
+| afpacket | 200k | 100 % | 0.05 | 200.1 | - |
+| swdiv@0 | 200k | 100 % | 2.09 | 1.1 | 1.0 |
+| swdiv@50 | 200k | 100 % | 0.28 | 12.1 | 12.9 |
+| swdiv@250:256 | 200k | 100 % | 0.10 | 46.0 | 53.1 |
+| **swdiv@1000:256** | 200k | 100 % | **0.06** | 168 | 202 |
+
+- **The prediction held.** More packets per wake-up gave proportionally less sniffer CPU, and at about 100–200 packets per wake-up the ring is level with AF_PACKET (0.08 vs 0.07 µs at 100 kpps, 0.06 vs 0.05 at 200 kpps). Within 2× of AF_PACKET (the acceptance target) is reached at `wake_us=250` / `wake_batch=256` at 200 kpps (0.10 vs 0.05, exactly 2×) and needs `wake_us=1000` at 100 kpps (0.16 at 250 µs is 2.3×).
+- **The fitted model was slightly off.** Refitting two constants to the whole sweep gives about 0.05 µs + 2.0 µs / N (N = packets per wake-up); it under-predicts the middle of the range by up to ~0.06 µs (for example 0.37 predicted against 0.42 observed at N = 6.3) and fits the ends. It is an explanation of where the time goes (a fixed ~2 µs per sleep/wake/`poll()` cycle plus a small per-packet part), not a tool to extrapolate with.
+- **Batches are limited by the timer when the batch size is large**: `wake_us` × packet rate gives the packets per wake-up (1000 µs at 200 kpps = 200, observed 202). Both parameters have to be raised together; the default `wake_batch=32` would cap a long `wake_us`.
+- The host-wide column (not shown) was within its ±2–3 µs noise of the baseline for `swdiv@1000:256` at both rates, which is consistent with the kernel-side cost (hook, lock, copy) being small but cannot prove it on this rig.
+- **Latency was not measured.** A sniffing reader that is asleep sees a packet up to `wake_us` late (up to 1 ms at the coarse setting). Nothing here says what that does to a path where a held packet waits for a verdict.
+
+**Finding: NFQUEUE loses in-flight packets when its listener dies.** The SIGKILL check showed NFQUEUE forwarding 5999 of 6000 (reproduced rootless: 0–2 packets lost in about half of the runs, at 2 kpps). The kernel destroys the queue instance when the listener's socket closes and drops the packets still waiting for a verdict; `bypass` only covers packets that arrive afterwards. So the "fail-open" the shipped backend relies on has a small hole at the moment of a crash, which `AF_PACKET` and the swdivert sniff path do not have (they never hold the original). The held-packet path of Phase 3 must close this by design (§9.1: resume or drop every held packet on `release()`), and Phase 3's SIGKILL test should count exactly how many held packets are released. `bench.py` therefore allows up to 5 lost in-flight packets for NFQUEUE only and prints the number.
+
+**Acceptance for Phase 2: met.**
+- Functional: `swdiv` captured = sent and the decoy flow was not captured; SIGKILL of the reader left forwarding intact; the module reference count was 0 afterwards (`rmmod` works); no `dropped_full` at 200 kpps with 16384 slots; no BUG/WARNING/Oops in `dmesg` (this kernel has no KASAN/lockdep, so that says little about memory-safety bugs).
+- Cost: clearly below NFQUEUE (about 10× lower sniffer CPU at the default, ~50× at `wake_us=1000`, and no loss of forwarded traffic) and within 2× of AF_PACKET at `wake_us ≥ 250` (level with it at 1000 µs). The default `wake_us=50` is 4–6× AF_PACKET; a sniffing user should raise `wake_us`/`wake_batch` together.
+- **Open for Phase 3, not Phase 2:** the latency a sleeping reader sees (bounded by `wake_us`), and whether the release path of held packets needs its own wake policy (`wake_us=0` or an explicit "wake now" when a verdict is waiting). The default stays at 50 µs / 32 until that is measured.
+- **Not covered by Phase 2:** other kernels, a real NIC, multi-flow traffic and several handles at once (one lock-serialised producer side is assumed to be uncontended in a single-flow rig; it is the first suspect if multi-flow throughput disappoints), GSO super-packets, and IPv6.
+
+**Risk note.** The module is unreviewed kernel code. It has now run through the checks above without incident, but that is a few minutes of traffic on one kernel; keep running it in a VM or on a machine where a panic is acceptable. It only sniffs (always `NF_ACCEPT`), so a logic bug should not break forwarding, but a memory-safety bug can.
 
 ## 13. Test plan
 

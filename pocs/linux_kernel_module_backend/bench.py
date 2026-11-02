@@ -132,7 +132,30 @@ table ip swb {
 """
 
 
+PARAMS = "/sys/module/swdivert/parameters/"
+SWDIV_MODE = re.compile(r"^swdiv(?:_legacy|@(\d+)(?::(\d+))?)?$")
+
+
+def set_param(path, value):
+    with open(path, "w") as f:
+        f.write(str(value))
+
+
 def run_once(rig, mode, pps, size, seconds, snap=224, slots=16384, decoy=False):
+    # swdiv@US[:BATCH] is the ring sniffer with module parameters wake_us=US (and wake_batch=BATCH) for that run only;
+    # swdiv_legacy is swdiv@0, the wake-up per packet. Plain `swdiv` uses whatever the module currently has.
+    match = SWDIV_MODE.match(mode)
+    if match and mode != "swdiv":
+        wake_us = 0 if mode == "swdiv_legacy" else int(match.group(1))
+        saved = {name: open(PARAMS + name).read().strip() for name in ("wake_us", "wake_batch")}
+        set_param(PARAMS + "wake_us", wake_us)
+        if match.group(2):
+            set_param(PARAMS + "wake_batch", match.group(2))
+        try:
+            return run_once(rig, "swdiv", pps, size, seconds, snap, slots, decoy)
+        finally:
+            for name, value in saved.items():
+                set_param(PARAMS + name, value)
     sink = rig.popen("server", rig.swbench, "sink", "--port", str(PORT))
     wait_ready(sink, "sink")
     sniffer = None
@@ -209,13 +232,23 @@ def check_killed_sniffer(rig, mode):
             subprocess.run(["nft", "delete", "table", "ip", "swb"], check=False)
     sink.send_signal(2)
     received = parse_kv(sink.communicate(timeout=10)[0]).get("received", 0)
-    ok = sent > 0 and received == sent
-    print(f"{'ok  ' if ok else 'FAIL'} {mode} killed with SIGKILL while forwarding: sent={int(sent)} forwarded={int(received)}")
+    # NFQUEUE holds the packet until a verdict: when the listener dies, the kernel drops the packets that were waiting for one
+    # (`bypass` only covers packets that arrive afterwards). A few in flight at 2 kpps is expected there; the sniff-only
+    # paths never hold the original, so they must lose nothing.
+    allowed = 5 if mode == "nfq" else 0
+    lost = sent - received
+    ok = sent > 0 and 0 <= lost <= allowed
+    note = f" (in flight when the listener died: {int(lost)}, expected for NFQUEUE)" if mode == "nfq" and lost else ""
+    print(f"{'ok  ' if ok else 'FAIL'} {mode} killed with SIGKILL while forwarding: sent={int(sent)} forwarded={int(received)}{note}")
     return not ok
 
 
 def bench(rig, modes, pps_list, sizes, seconds, runs, snap, slots):
-    rows = []
+    cells = len(modes) * len(pps_list) * len(sizes)
+    print(f"# {cells} rows, {runs} run(s) of {seconds} s each: about {int(cells * runs * (seconds + 1.6) / 60) + 1} min. Rows are printed as they finish.", file=sys.stderr)
+    print("| mode | pps | size | sent | forwarded | captured | captured/sent | dropped | sniffer CPU us/captured pkt | packets per poll() | packets per kernel wake-up | forwarding+sniffing CPU us/pkt | vs baseline us/pkt |")
+    print("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+    sys.stdout.flush()
     for size in sizes:
         for pps in pps_list:
             base = None
@@ -230,19 +263,20 @@ def bench(rig, modes, pps_list, sizes, seconds, runs, snap, slots):
                 host_us = (med("busy_ms") - med("flood_cpu_ms") - med("sink_cpu_ms")) * 1000.0 / max(sent, 1)
                 if mode == "baseline":
                     base = host_us
-                rows.append((mode, pps, size, sent, recv, captured, med("dropped"), med("cpu_ms") * 1000.0 / captured if captured else 0.0,
-                             host_us, host_us - base if base is not None else float("nan")))
-    print("| mode | pps | size | sent | forwarded | captured | captured/sent | dropped | sniffer CPU us/captured pkt | forwarding+sniffing CPU us/pkt | vs baseline us/pkt |")
-    print("|---|---|---|---|---|---|---|---|---|---|---|")
-    for mode, pps, size, sent, recv, captured, dropped, sniff_us, host_us, delta in rows:
-        ratio = f"{100.0 * captured / sent:.1f}%" if mode != "baseline" and sent else "-"
-        print(f"| {mode} | {pps} | {size} | {int(sent)} | {int(recv)} | {int(captured)} | {ratio} | {int(dropped)} | "
-              f"{sniff_us:.2f} | {host_us:.2f} | {delta:+.2f} |")
+                sniff_us = med("cpu_ms") * 1000.0 / captured if captured else 0.0
+                delta = host_us - base if base is not None else float("nan")
+                ratio = f"{100.0 * captured / sent:.1f}%" if mode != "baseline" and sent else "-"
+                polls, wakeups = med("polls"), med("wakeups")
+                per_poll = f"{captured / polls:.1f}" if polls else "-"
+                per_wake = f"{captured / wakeups:.1f}" if wakeups else "-"
+                print(f"| {mode} | {pps} | {size} | {int(sent)} | {int(recv)} | {int(captured)} | {ratio} | {int(med('dropped'))} | "
+                      f"{sniff_us:.2f} | {per_poll} | {per_wake} | {host_us:.2f} | {delta:+.2f} |")
+                sys.stdout.flush()
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--modes", default="baseline,afpacket,nfq,swdiv")
+    parser.add_argument("--modes", default="baseline,afpacket,nfq,swdiv_legacy,swdiv", help="swdiv@US[:BATCH] sets the module's wake_us/wake_batch for that run; swdiv_legacy = swdiv@0 (wake per packet); plain swdiv uses the current values")
     parser.add_argument("--pps", default="20000,100000")
     parser.add_argument("--sizes", default="64,1200", help="UDP payload bytes")
     parser.add_argument("--seconds", type=int, default=5)
@@ -257,12 +291,15 @@ def main():
         reexec_in_namespaces()
 
     modes = args.modes.split(",")
-    if "swdiv" in modes and not os.path.exists("/dev/swdivert"):
-        print("note: /dev/swdivert not found, skipping swdiv (load the module first)", file=sys.stderr)
-        modes.remove("swdiv")
-    if "swdiv" in modes and os.geteuid() != 0:
-        print("note: swdiv needs real root, skipping it", file=sys.stderr)
-        modes.remove("swdiv")
+    for swdiv_mode in [m for m in modes if m.startswith("swdiv")]:
+        if not SWDIV_MODE.match(swdiv_mode):
+            sys.exit(f"unknown mode {swdiv_mode}: use swdiv, swdiv_legacy or swdiv@WAKE_US[:WAKE_BATCH]")
+        if not os.path.exists("/dev/swdivert"):
+            print(f"note: /dev/swdivert not found, skipping {swdiv_mode} (load the module first)", file=sys.stderr)
+            modes.remove(swdiv_mode)
+        elif os.geteuid() != 0:
+            print(f"note: {swdiv_mode} needs real root, skipping it", file=sys.stderr)
+            modes.remove(swdiv_mode)
 
     rig = Rig(find_swbench(args.swbench))
     try:

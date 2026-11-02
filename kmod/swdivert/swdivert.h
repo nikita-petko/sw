@@ -2,6 +2,8 @@
 #ifndef SWDIVERT_INTERNAL_H_
 #define SWDIVERT_INTERNAL_H_
 
+#include <linux/atomic.h>
+#include <linux/hrtimer.h>
 #include <linux/mutex.h>
 #include <linux/netfilter.h>
 #include <linux/percpu.h>
@@ -19,6 +21,7 @@ struct swdiv_cpu_stats {
 	u64 copied;
 	u64 dropped_full;
 	u64 truncated;
+	u64 wakeups;
 };
 
 /* The shared ring. Producers (the hook, on any CPU) are serialised by `lock`; the one consumer is user space. */
@@ -44,6 +47,10 @@ struct swdiv_handle {
 	struct swdiv_tuple	tuple;
 	struct nf_hook_ops	ops;
 	wait_queue_head_t	wq;
+	/* Batched reader wake-up (see swdiv_notify) */
+	struct hrtimer		wake_timer;
+	atomic_t		wake_armed;
+	atomic_t		unwoken;	/* packets published since the last wake-up */
 	struct swdiv_cpu_stats __percpu *stats;
 };
 
@@ -52,6 +59,11 @@ void swdiv_ring_free(struct swdiv_ring *ring);
 /* Publishes one packet. Returns 0, -ENOSPC when the ring is full. `*truncated` tells whether the copy was cut short. */
 int  swdiv_ring_push(struct swdiv_ring *ring, const struct sk_buff *skb, const struct nf_hook_state *state, bool *truncated);
 bool swdiv_ring_nonempty(struct swdiv_ring *ring);
+
+/* Called after each published packet: wakes the reader now or schedules the wake-up (module parameters wake_batch, wake_us). */
+void swdiv_notify(struct swdiv_handle *handle);
+void swdiv_wake_timer_init(struct swdiv_handle *handle);
+void swdiv_wake_timer_cancel(struct swdiv_handle *handle);
 
 int  swdiv_hook_start(struct swdiv_handle *handle);
 void swdiv_hook_stop(struct swdiv_handle *handle);
