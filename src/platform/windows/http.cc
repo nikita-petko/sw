@@ -1,5 +1,5 @@
 #ifndef _WIN32
-#error "platform/windows/http.cc must only be built on Windows"
+#	error "platform/windows/http.cc must only be built on Windows"
 #endif
 
 #include "platform.h"
@@ -21,7 +21,7 @@ HttpResponse https_get(const std::string& host, const std::string& path)
 	const std::wstring wide_host(host.begin(), host.end());
 	const std::wstring wide_path(path.begin(), path.end());
 	HttpResponse	   result;
-	HINTERNET		   session = WinHttpOpen(L"lagsw/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+	HINTERNET session = WinHttpOpen(L"lagsw/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
 	if (!session)
 	{
 		LOG_DEBUG("https_get: WinHttpOpen failed %lu", GetLastError());

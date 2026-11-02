@@ -26,53 +26,53 @@ struct TestCase
 };
 
 namespace detail {
-struct Running
-{
-	std::atomic<const char*> suite{nullptr};
-	std::atomic<const char*> name{nullptr};
-	std::atomic<long long>	 started_ms{0};
-};
+	struct Running
+	{
+		std::atomic<const char*> suite{nullptr};
+		std::atomic<const char*> name{nullptr};
+		std::atomic<long long>	 started_ms{0};
+	};
 
-inline Running& running()
-{
-	static Running state;
-	return state;
-}
+	inline Running& running()
+	{
+		static Running state;
+		return state;
+	}
 
-inline long long now_ms()
-{
-	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
-}
+	inline long long now_ms()
+	{
+		return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+	}
 
-/// Ends the process when one test runs longer than LAGSW_TEST_TIMEOUT_S seconds (default 120), naming the test. A deadlocked
-/// worker thread would otherwise hang the whole run silently, and a killed process loses its buffered output.
-inline void start_watchdog()
-{
-	static const bool started = [] {
-		const char*		  text	   = std::getenv("LAGSW_TEST_TIMEOUT_S");
-		const long long	  seconds  = text != nullptr && std::atoll(text) > 0 ? std::atoll(text) : 120;
-		const long long	  limit_ms = seconds * 1000;
-		std::thread([limit_ms] {
-			for (;;)
-			{
-				std::this_thread::sleep_for(std::chrono::milliseconds(200));
-				const char* name = running().name.load();
-				if (name != nullptr && now_ms() - running().started_ms.load() > limit_ms)
+	/// Ends the process when one test runs longer than LAGSW_TEST_TIMEOUT_S seconds (default 120), naming the test. A deadlocked
+	/// worker thread would otherwise hang the whole run silently, and a killed process loses its buffered output.
+	inline void start_watchdog()
+	{
+		static const bool started = [] {
+			const char*		text	 = std::getenv("LAGSW_TEST_TIMEOUT_S");
+			const long long seconds	 = text != nullptr && std::atoll(text) > 0 ? std::atoll(text) : 120;
+			const long long limit_ms = seconds * 1000;
+			std::thread([limit_ms] {
+				for (;;)
 				{
-					std::fprintf(stderr, "%s::%s: TIMEOUT after %lld s, giving up\n", running().suite.load(), name, limit_ms / 1000);
-					std::fflush(stderr);
-					std::_Exit(124);
+					std::this_thread::sleep_for(std::chrono::milliseconds(200));
+					const char* name = running().name.load();
+					if (name != nullptr && now_ms() - running().started_ms.load() > limit_ms)
+					{
+						std::fprintf(stderr, "%s::%s: TIMEOUT after %lld s, giving up\n", running().suite.load(), name, limit_ms / 1000);
+						std::fflush(stderr);
+						std::_Exit(124);
+					}
 				}
-			}
-		}).detach();
-		return true;
-	}();
-	(void)started;
-}
+			}).detach();
+			return true;
+		}();
+		(void)started;
+	}
 }  // namespace detail
 
 /// Runs the cases whose name contains argv[1] (all of them without an argument) and returns the process exit code.
-template <size_t N>
+template<size_t N>
 int run_tests(const char* suite, const TestCase (&cases)[N], int argc, char** argv)
 {
 	detail::start_watchdog();
@@ -82,10 +82,10 @@ int run_tests(const char* suite, const TestCase (&cases)[N], int argc, char** ar
 	{
 		if (filter != nullptr && std::strstr(test_case.name, filter) == nullptr)
 			continue;
-		const int before = failure_count();
-		detail::running().suite		= suite;
+		const int before			 = failure_count();
+		detail::running().suite		 = suite;
 		detail::running().started_ms = detail::now_ms();
-		detail::running().name		= test_case.name;
+		detail::running().name		 = test_case.name;
 		test_case.run();
 		detail::running().name = nullptr;
 		std::printf("[%s] %s::%s\n", failure_count() == before ? " ok " : "FAIL", suite, test_case.name);

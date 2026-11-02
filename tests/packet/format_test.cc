@@ -66,9 +66,9 @@ void test_format_capture_options()
 	profile.capture_options.sniff	= true;
 	profile.capture_options.forward = false;
 	CHECK(format_capture_options(profile) == "sniff=true, forward=false");
-	profile.capture_options.outbound					  = true;
-	profile.capture_options.client_address_enforcement	  = CaptureOptions::ClientAddressEnforcement::both;
-	profile.capture_options.server_direction			  = CaptureOptions::ServerDirection::source;
+	profile.capture_options.outbound				   = true;
+	profile.capture_options.client_address_enforcement = CaptureOptions::ClientAddressEnforcement::both;
+	profile.capture_options.server_direction		   = CaptureOptions::ServerDirection::source;
 	CHECK(format_capture_options(profile) == "sniff=true, forward=false, outbound=true, client_addr=both, server_dir=source");
 }
 

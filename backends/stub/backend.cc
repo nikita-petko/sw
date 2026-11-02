@@ -11,7 +11,7 @@ LOG_DEFAULT_GROUP(logging::group::backend)
 
 namespace backend {
 namespace {
-constexpr const char* kNotImplemented = "packet capture is not implemented on this platform (stub backend)";
+	constexpr const char* kNotImplemented = "packet capture is not implemented on this platform (stub backend)";
 }
 
 const char* name()
@@ -66,37 +66,38 @@ void calc_checksums(uint8_t* packet, uint32_t length)
 }
 
 namespace filters {
-std::string profile(const ProfileFilter& spec)
-{
-	std::ostringstream out;
-	out << "stub-profile(" << (spec.user_filter.empty() ? "true" : spec.user_filter) << ")";
-	for (const std::string& address : spec.server_addresses)
-		out << " server=" << address;
-	return out.str();
-}
+	std::string profile(const ProfileFilter& spec)
+	{
+		std::ostringstream out;
+		out << "stub-profile(" << (spec.user_filter.empty() ? "true" : spec.user_filter) << ")";
+		for (const std::string& address : spec.server_addresses)
+			out << " server=" << address;
+		return out.str();
+	}
 
-std::string port(uint16_t port)
-{
-	return "stub-port(" + std::to_string(port) + ")";
-}
+	std::string port(uint16_t port)
+	{
+		return "stub-port(" + std::to_string(port) + ")";
+	}
 
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
-std::string syn_probe(uint16_t port)
-{
-	return "stub-syn(" + std::to_string(port) + ")";
-}
+	std::string syn_probe(uint16_t port)
+	{
+		return "stub-syn(" + std::to_string(port) + ")";
+	}
 
-std::string region_enforcement(const std::vector<std::string>& server_addresses, uint16_t port)
-{
-	return "stub-region(" + std::to_string(server_addresses.size()) + "," + std::to_string(port) + ")";
-}
+	std::string region_enforcement(const std::vector<std::string>& server_addresses, uint16_t port)
+	{
+		return "stub-region(" + std::to_string(server_addresses.size()) + "," + std::to_string(port) + ")";
+	}
 #endif
 
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
-std::string forwarded_address(uint32_t inbound_if_index, uint32_t outbound_if_index, uint16_t port)
-{
-	return "stub-forwarded(" + std::to_string(inbound_if_index) + "," + std::to_string(outbound_if_index) + "," + std::to_string(port) + ")";
-}
+	std::string forwarded_address(uint32_t inbound_if_index, uint32_t outbound_if_index, uint16_t port)
+	{
+		return "stub-forwarded(" + std::to_string(inbound_if_index) + "," + std::to_string(outbound_if_index) + "," + std::to_string(port) +
+			   ")";
+	}
 #endif
 }  // namespace filters
 #ifdef LAGSW_FEATURE_NETFILTER_MONITOR

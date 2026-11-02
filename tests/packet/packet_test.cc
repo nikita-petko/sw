@@ -50,7 +50,7 @@ void test_parsed_pointers_alias_the_buffer()
 	parsed.tcp->AckNum = swap_u32(99);
 	CHECK(packet[28] == 0 && packet[31] == 99);
 
-	const Bytes constant = packet;
+	const Bytes	 constant = packet;
 	ParsedPacket from_const;
 	CHECK(parse_packet(constant.data(), static_cast<uint32_t>(constant.size()), from_const));
 	CHECK(from_const.tcp != nullptr && swap_u32(from_const.tcp->AckNum) == 99u);
@@ -75,7 +75,7 @@ void test_ipv4_without_a_known_transport()
 
 void test_ipv4_fragments_have_no_transport()
 {
-	const Bytes segment = tcp_segment(1, 2, 3, 4, 0x10);
+	const Bytes	 segment = tcp_segment(1, 2, 3, 4, 0x10);
 	ParsedPacket parsed;
 
 	Bytes dont_fragment = ipv4_packet(kTcp, segment, {1, 1, 1, 1}, {2, 2, 2, 2}, 0x4000);
@@ -124,7 +124,7 @@ void test_malformed_ipv4_is_rejected()
 	CHECK(!parse(version5, parsed));
 
 	Bytes header_words_too_small = valid;
-	header_words_too_small[0]	= 0x44;
+	header_words_too_small[0]	 = 0x44;
 	CHECK(!parse(header_words_too_small, parsed));
 
 	Bytes header_longer_than_packet = valid;
@@ -157,12 +157,12 @@ void test_truncated_or_invalid_tcp_header()
 	CHECK(parse(short_segment, parsed) && parsed.ipv4 != nullptr && parsed.tcp == nullptr);
 
 	// A data offset below 5 words is invalid.
-	Bytes small_offset = ipv4_packet(kTcp, tcp_segment(1, 2, 3, 4, 0x10, 4));
+	Bytes small_offset	  = ipv4_packet(kTcp, tcp_segment(1, 2, 3, 4, 0x10, 4));
 	small_offset[20 + 12] = 0x40;
 	CHECK(parse(small_offset, parsed) && parsed.tcp == nullptr);
 
 	// A data offset that reaches past the end of the packet.
-	Bytes large_offset = ipv4_packet(kTcp, tcp_segment(1, 2, 3, 4, 0x10));
+	Bytes large_offset	  = ipv4_packet(kTcp, tcp_segment(1, 2, 3, 4, 0x10));
 	large_offset[20 + 12] = 0xF0;
 	CHECK(parse(large_offset, parsed) && parsed.tcp == nullptr);
 
@@ -231,11 +231,11 @@ void test_malformed_ipv6_is_rejected()
 
 void test_packet_addresses()
 {
-	Bytes		 v4 = ipv4_packet(kTcp, tcp_segment(1, 2, 3, 4, 0x10), {10, 0, 0, 1}, {192, 168, 1, 20});
+	Bytes			v4		  = ipv4_packet(kTcp, tcp_segment(1, 2, 3, 4, 0x10), {10, 0, 0, 1}, {192, 168, 1, 20});
 	PacketAddresses addresses = packet_addresses(v4.data(), static_cast<uint32_t>(v4.size()));
 	CHECK(addresses.source == "10.0.0.1" && addresses.destination == "192.168.1.20");
 
-	Bytes v6 = ipv6_packet(kUdp, udp_datagram(1, 2, 0));
+	Bytes v6  = ipv6_packet(kUdp, udp_datagram(1, 2, 0));
 	addresses = packet_addresses(v6.data(), static_cast<uint32_t>(v6.size()));
 	CHECK(addresses.source == "2001:0000:0000:0000:0000:0000:0000:0001");
 	CHECK(addresses.destination == "2001:0000:0000:0000:0000:0000:0000:0002");
@@ -273,12 +273,12 @@ void test_format_tcp_flags()
 
 void test_format_addresses()
 {
-	const uint8_t  loopback[4] = {127, 0, 0, 1};
-	uint32_t	   value;
+	const uint8_t loopback[4] = {127, 0, 0, 1};
+	uint32_t	  value;
 	std::memcpy(&value, loopback, sizeof(value));
 	CHECK(format_ipv4_address(value) == "127.0.0.1");
 
-	const uint8_t  limits[4] = {0, 255, 0, 255};
+	const uint8_t limits[4] = {0, 255, 0, 255};
 	std::memcpy(&value, limits, sizeof(value));
 	CHECK(format_ipv4_address(value) == "0.255.0.255");
 

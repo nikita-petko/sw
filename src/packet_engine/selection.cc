@@ -8,7 +8,7 @@ LOG_DEFAULT_GROUP(logging::group::server)
 
 backend::ProfileFilter PacketEngine::server_filter(const ProfileOptions& profile) const
 {
-	const size_t		  server_index = server_index_.load();
+	const size_t		   server_index = server_index_.load();
 	backend::ProfileFilter spec;
 	spec.user_filter		= profile.filter.value_or(options_.global_filter);
 	spec.include_bare_acks	= profile.ack_restoration;

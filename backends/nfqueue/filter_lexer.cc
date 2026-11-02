@@ -10,7 +10,7 @@ std::vector<Token> tokenize(const std::string& text)
 	std::vector<Token> tokens;
 	size_t			   index = 0;
 	auto			   push	 = [&](TokenKind kind, std::string value, size_t start) {
-		   tokens.push_back({kind, std::move(value), static_cast<uint32_t>(start)});
+		tokens.push_back({kind, std::move(value), static_cast<uint32_t>(start)});
 	};
 	while (index < text.size())
 	{

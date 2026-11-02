@@ -35,16 +35,16 @@ public:
 	/// Makes subsequent send() calls fail.
 	void fail_sends(bool fail);
 
-	size_t				   sent_count() const;
+	size_t sent_count() const;
 	/// Sizes of the send_batch() calls the engine made, in order (single sends are not counted).
-	std::vector<size_t>	   batch_sizes() const;
+	std::vector<size_t>		batch_sizes() const;
 	std::vector<SentPacket> sent_packets() const;
 	/// Timestamps (ids) of the packets the engine discarded.
-	std::vector<int64_t>   discarded() const;
+	std::vector<int64_t> discarded() const;
 	/// Number of injected packets the engine has taken so far.
-	size_t				   consumed() const;
-	bool				   closed() const;
-	bool				   recv_shut_down() const;
+	size_t consumed() const;
+	bool   closed() const;
+	bool   recv_shut_down() const;
 
 	backend::OpenOptions options;
 	std::string			 filter;
@@ -62,10 +62,10 @@ private:
 	std::vector<SentPacket> sent_;
 	std::vector<int64_t>	discarded_;
 	std::vector<size_t>		batch_sizes_;
-	size_t					consumed_		  = 0;
-	bool					recv_shutdown_	  = false;
-	bool					closed_			  = false;
-	bool					fail_sends_		  = false;
+	size_t					consumed_	   = 0;
+	bool					recv_shutdown_ = false;
+	bool					closed_		   = false;
+	bool					fail_sends_	   = false;
 };
 
 /// Forgets every channel and recorded call; run at the start of each test.
@@ -75,13 +75,13 @@ void reset();
 std::vector<std::shared_ptr<ChannelState>> channels();
 std::shared_ptr<ChannelState>			   channel(size_t index);
 /// The most recently opened channel whose filter equals `filter`, or null.
-std::shared_ptr<ChannelState>			   channel_with_filter(const std::string& filter);
+std::shared_ptr<ChannelState> channel_with_filter(const std::string& filter);
 /// Makes the next backend::open() fail with `message`.
-void									   fail_next_open(const std::string& message);
+void fail_next_open(const std::string& message);
 
 /// Profile filter specifications in the order filters::profile() was called; a profile channel's filter is "profile#<index>".
 std::vector<backend::ProfileFilter> profile_specs();
-backend::ProfileFilter			   last_profile_spec();
+backend::ProfileFilter				last_profile_spec();
 
 /// A kernel-shaping stage the engine opened through backend::open_shape_stage(). The engine owns the stage object; this is the
 /// test-visible record of it.

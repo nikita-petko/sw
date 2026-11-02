@@ -21,7 +21,7 @@ struct Compiled
 /// Rules are rendered as "<hook>: <match>" so expectations read like the nft output.
 Compiled compile(const std::string& filter, bool forward = false, bool include_forward = false)
 {
-	Compiled					result;
+	Compiled					   result;
 	std::vector<nfq::CompiledRule> rules;
 	result.ok = nfq::compile_filter(filter, forward, rules, result.error, result.position, include_forward);
 	for (const nfq::CompiledRule& rule : rules)
@@ -63,11 +63,13 @@ void test_empty_and_constant_filters()
 void test_protocols_ports_and_directions()
 {
 	CHECK(rules_of("tcp") == (Rules{"input: " + kIp + " ip protocol tcp", "output: " + kIp + " ip protocol tcp"}));
-	CHECK(rules_of("udp.DstPort == 53") == (Rules{"input: " + kIp + " ip protocol udp udp dport 53", "output: " + kIp + " ip protocol udp udp dport 53"}));
+	CHECK(rules_of("udp.DstPort == 53") ==
+		  (Rules{"input: " + kIp + " ip protocol udp udp dport 53", "output: " + kIp + " ip protocol udp udp dport 53"}));
 	CHECK(rules_of("tcp.SrcPort == 443 and outbound") == (Rules{"output: " + kIp + " ip protocol tcp tcp sport 443"}));
 	CHECK(rules_of("inbound") == (Rules{"input: " + kIp}));
 	CHECK(rules_of("outbound") == (Rules{"output: " + kIp}));
-	CHECK(rules_of("tcp.DstPort != 80") == (Rules{"input: " + kIp + " ip protocol tcp tcp dport != 80", "output: " + kIp + " ip protocol tcp tcp dport != 80"}));
+	CHECK(rules_of("tcp.DstPort != 80") ==
+		  (Rules{"input: " + kIp + " ip protocol tcp tcp dport != 80", "output: " + kIp + " ip protocol tcp tcp dport != 80"}));
 	CHECK(rules_of("tcp.DstPort == 0x50") == rules_of("tcp.DstPort == 80"));
 	CHECK(rules_of("tcp.DstPort == 65535").size() == 2);
 }
@@ -81,7 +83,8 @@ void test_symbolic_operators_match_the_words()
 void test_precedence_and_parentheses()
 {
 	// `and` binds tighter than `or`.
-	CHECK(rules_of("tcp or udp and outbound") == (Rules{"input: " + kIp + " ip protocol tcp", "output: " + kIp + " ip protocol tcp", "output: " + kIp + " ip protocol udp"}));
+	CHECK(rules_of("tcp or udp and outbound") ==
+		  (Rules{"input: " + kIp + " ip protocol tcp", "output: " + kIp + " ip protocol tcp", "output: " + kIp + " ip protocol udp"}));
 	CHECK(rules_of("(tcp or udp) and outbound") == (Rules{"output: " + kIp + " ip protocol tcp", "output: " + kIp + " ip protocol udp"}));
 	CHECK(rules_of("((tcp))") == rules_of("tcp"));
 	CHECK(rules_of("not not tcp") == rules_of("tcp"));
@@ -89,9 +92,10 @@ void test_precedence_and_parentheses()
 
 void test_disjunction_expands_to_one_rule_per_clause()
 {
-	CHECK(rules_of("tcp.DstPort == 8080 or tcp.SrcPort == 8080") ==
-		  (Rules{"input: " + kIp + " ip protocol tcp tcp dport 8080", "output: " + kIp + " ip protocol tcp tcp dport 8080",
-				 "input: " + kIp + " ip protocol tcp tcp sport 8080", "output: " + kIp + " ip protocol tcp tcp sport 8080"}));
+	CHECK(rules_of("tcp.DstPort == 8080 or tcp.SrcPort == 8080") == (Rules{"input: " + kIp + " ip protocol tcp tcp dport 8080",
+																		   "output: " + kIp + " ip protocol tcp tcp dport 8080",
+																		   "input: " + kIp + " ip protocol tcp tcp sport 8080",
+																		   "output: " + kIp + " ip protocol tcp tcp sport 8080"}));
 }
 
 void test_negation_uses_de_morgan()
@@ -134,14 +138,16 @@ void test_addresses()
 	CHECK(rules_of("ip.DstAddr == 1.2.3.4 and outbound") == (Rules{"output: " + kIp + " ip daddr { 1.2.3.4 }"}));
 	CHECK(rules_of("ip.SrcAddr != 10.0.0.1 and inbound") == (Rules{"input: " + kIp + " ip saddr != { 10.0.0.1 }"}));
 	// ip.Addr matches either side, so it needs one clause per side.
-	CHECK(rules_of("ip.Addr == 1.2.3.4 and outbound") == (Rules{"output: " + kIp + " ip saddr { 1.2.3.4 }", "output: " + kIp + " ip daddr { 1.2.3.4 }"}));
+	CHECK(rules_of("ip.Addr == 1.2.3.4 and outbound") ==
+		  (Rules{"output: " + kIp + " ip saddr { 1.2.3.4 }", "output: " + kIp + " ip daddr { 1.2.3.4 }"}));
 	CHECK(rules_of("ip.Addr != 1.2.3.4 and outbound") == (Rules{"output: " + kIp + " ip saddr != { 1.2.3.4 } ip daddr != { 1.2.3.4 }"}));
 }
 
 void test_server_lists_become_a_single_set()
 {
 	CHECK(rules_of("(ip.Addr == 1.1.1.1 or ip.Addr == 2.2.2.2 or ip.Addr == 3.3.3.3) and outbound") ==
-		  (Rules{"output: " + kIp + " ip saddr { 1.1.1.1, 2.2.2.2, 3.3.3.3 }", "output: " + kIp + " ip daddr { 1.1.1.1, 2.2.2.2, 3.3.3.3 }"}));
+		  (Rules{"output: " + kIp + " ip saddr { 1.1.1.1, 2.2.2.2, 3.3.3.3 }",
+				 "output: " + kIp + " ip daddr { 1.1.1.1, 2.2.2.2, 3.3.3.3 }"}));
 	// Different sides are not merged.
 	CHECK(rules_of("(ip.SrcAddr == 1.1.1.1 or ip.DstAddr == 2.2.2.2) and outbound") ==
 		  (Rules{"output: " + kIp + " ip saddr { 1.1.1.1 }", "output: " + kIp + " ip daddr { 2.2.2.2 }"}));
@@ -221,8 +227,14 @@ void test_syntax_errors_report_message_and_position()
 		const Compiled result = compile(test_case.filter);
 		if (result.ok || result.error != test_case.message || result.position != test_case.position)
 		{
-			std::fprintf(stderr, "filter '%s': expected error '%s' at %u, got ok=%d error='%s' at %u\n", test_case.filter, test_case.message, test_case.position,
-						 result.ok ? 1 : 0, result.error.c_str(), result.position);
+			std::fprintf(stderr,
+						 "filter '%s': expected error '%s' at %u, got ok=%d error='%s' at %u\n",
+						 test_case.filter,
+						 test_case.message,
+						 test_case.position,
+						 result.ok ? 1 : 0,
+						 result.error.c_str(),
+						 result.position);
 			++test::failure_count();
 		}
 		CHECK(result.rules.empty());
@@ -234,7 +246,12 @@ void test_typed_matches_mirror_the_text()
 	std::vector<nfq::CompiledRule> rules;
 	std::string					   error;
 	uint32_t					   position = 0;
-	CHECK(nfq::compile_filter("(tcp.Syn and not tcp.Ack and tcp.DstPort == 443 or udp.SrcPort != 53) and ip.Addr == 1.1.1.1 and ifIdx != 3", false, rules, error, position, true));
+	CHECK(nfq::compile_filter("(tcp.Syn and not tcp.Ack and tcp.DstPort == 443 or udp.SrcPort != 53) and ip.Addr == 1.1.1.1 and ifIdx != 3",
+							  false,
+							  rules,
+							  error,
+							  position,
+							  true));
 	CHECK(!rules.empty());
 	for (const nfq::CompiledRule& rule : rules)
 	{
@@ -316,10 +333,23 @@ void test_oversized_expansions_are_rejected()
 void test_tokenizer()
 {
 	using nfq::TokenKind;
-	const std::vector<nfq::Token> tokens = nfq::tokenize("a&&b || !c==d!=(e) not and or");
-	const TokenKind expected[]			 = {TokenKind::word,   TokenKind::op_and, TokenKind::word,   TokenKind::op_or, TokenKind::op_not, TokenKind::word,
-											TokenKind::eq,	   TokenKind::word,	  TokenKind::ne,	TokenKind::lparen, TokenKind::word,  TokenKind::rparen,
-											TokenKind::op_not, TokenKind::op_and, TokenKind::op_or, TokenKind::end};
+	const std::vector<nfq::Token> tokens	 = nfq::tokenize("a&&b || !c==d!=(e) not and or");
+	const TokenKind				  expected[] = {TokenKind::word,
+												TokenKind::op_and,
+												TokenKind::word,
+												TokenKind::op_or,
+												TokenKind::op_not,
+												TokenKind::word,
+												TokenKind::eq,
+												TokenKind::word,
+												TokenKind::ne,
+												TokenKind::lparen,
+												TokenKind::word,
+												TokenKind::rparen,
+												TokenKind::op_not,
+												TokenKind::op_and,
+												TokenKind::op_or,
+												TokenKind::end};
 	CHECK(tokens.size() == sizeof(expected) / sizeof(expected[0]));
 	for (size_t index = 0; index < tokens.size() && index < sizeof(expected) / sizeof(expected[0]); ++index)
 		CHECK(tokens[index].kind == expected[index]);

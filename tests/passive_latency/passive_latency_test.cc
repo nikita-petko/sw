@@ -10,11 +10,11 @@
 
 #ifdef LAGSW_FEATURE_PASSIVE_LATENCY
 
-#include "fakes.h"
-#include "log.h"
-#include "packet_engine.h"
-#include "support/capture.h"
-#include "support/packets.h"
+#	include "fakes.h"
+#	include "log.h"
+#	include "packet_engine.h"
+#	include "support/capture.h"
+#	include "support/packets.h"
 
 namespace {
 using namespace packets;
@@ -31,10 +31,10 @@ ProfileOptions profile(const char* name)
 PacketEngineOptions passive_options(int32_t delay_ms, int32_t max_delay_ms = 0, bool enabled = true)
 {
 	PacketEngineOptions options;
-	options.profiles							   = {profile("A")};
-	options.global_filter						   = "tcp";
-	options.features.passive_latency.enabled	   = enabled;
-	options.features.passive_latency.delay_ms	   = delay_ms;
+	options.profiles							  = {profile("A")};
+	options.global_filter						  = "tcp";
+	options.features.passive_latency.enabled	  = enabled;
+	options.features.passive_latency.delay_ms	  = delay_ms;
 	options.features.passive_latency.max_delay_ms = max_delay_ms;
 	return options;
 }
@@ -64,7 +64,7 @@ void test_starting_the_workers_opens_the_passive_channel()
 void test_custom_filter_overrides_global_filter()
 {
 	fakes::reset();
-	PacketEngineOptions options				 = passive_options(50);
+	PacketEngineOptions options				= passive_options(50);
 	options.features.passive_latency.filter = "udp";
 	PacketEngine engine(options);
 	engine.start_workers();
@@ -114,7 +114,7 @@ void test_order_is_preserved_for_equal_delays()
 void test_overflow_releases_packets_immediately()
 {
 	fakes::reset();
-	PacketEngineOptions options						   = passive_options(5000);
+	PacketEngineOptions options							= passive_options(5000);
 	options.features.passive_latency.max_queued_packets = 1;
 	PacketEngine engine(options);
 	engine.start_workers();
@@ -161,13 +161,13 @@ void test_passive_channel_is_distinct_from_profile_channels()
 void test_inbound_only_leaves_outbound_packets_undelayed()
 {
 	fakes::reset();
-	PacketEngineOptions options				  = passive_options(5000);
+	PacketEngineOptions options				   = passive_options(5000);
 	options.features.passive_latency.direction = PassiveLatencyDirection::inbound;
 	PacketEngine engine(options);
 	engine.start_workers();
 	const auto channel = fakes::channel_with_filter("tcp");
 
-	channel->inject(tcp_packet(1, 1, kAck), 1, true);	// outbound: passes through at once
+	channel->inject(tcp_packet(1, 1, kAck), 1, true);  // outbound: passes through at once
 	CHECK(wait_until([&] { return channel->sent_count() == 1; }, std::chrono::milliseconds(1000)));
 	channel->inject(tcp_packet(2, 1, kAck), 2, false);	// inbound: held
 	CHECK(wait_until([&] { return channel->consumed() == 2; }));
@@ -181,7 +181,7 @@ void test_inbound_only_leaves_outbound_packets_undelayed()
 void test_per_direction_overrides()
 {
 	fakes::reset();
-	PacketEngineOptions options					  = passive_options(5000);
+	PacketEngineOptions options						   = passive_options(5000);
 	options.features.passive_latency.outbound_delay_ms = 0;
 	options.features.passive_latency.inbound_delay_ms  = 5000;
 	PacketEngine engine(options);
@@ -198,8 +198,8 @@ void test_jitter_modes_preserve_order()
 	for (const PassiveLatencyMode mode : {PassiveLatencyMode::uniform, PassiveLatencyMode::normal})
 	{
 		fakes::reset();
-		PacketEngineOptions options				= passive_options(60);
-		options.features.passive_latency.mode	= mode;
+		PacketEngineOptions options				   = passive_options(60);
+		options.features.passive_latency.mode	   = mode;
 		options.features.passive_latency.jitter_ms = 50;
 		PacketEngine engine(options);
 		engine.start_workers();
@@ -220,14 +220,14 @@ void test_status_text()
 	PacketEngineOptions options = passive_options(60);
 	CHECK(PacketEngine(options).passive_latency_status() == "60ms (both)");
 
-	options.features.passive_latency.mode		= PassiveLatencyMode::uniform;
+	options.features.passive_latency.mode	   = PassiveLatencyMode::uniform;
 	options.features.passive_latency.jitter_ms = 10;
 	CHECK(PacketEngine(options).passive_latency_status() == "60ms+/-10 (both)");
 
 	options.features.passive_latency.direction = PassiveLatencyDirection::outbound;
 	CHECK(PacketEngine(options).passive_latency_status() == "60ms+/-10 out");
 
-	options.features.passive_latency.direction		   = PassiveLatencyDirection::both;
+	options.features.passive_latency.direction		  = PassiveLatencyDirection::both;
 	options.features.passive_latency.inbound_delay_ms = 20;
 	CHECK(PacketEngine(options).passive_latency_status() == "60ms+/-10 out, 20ms+/-10 in");
 }
@@ -235,7 +235,7 @@ void test_status_text()
 void test_pause_flushes_and_lets_packets_through()
 {
 	fakes::reset();
-	PacketEngineOptions options				= passive_options(5000);
+	PacketEngineOptions options				   = passive_options(5000);
 	options.features.passive_latency.pause_key = 'P';
 	PacketEngine engine(options);
 	engine.start_workers();
@@ -249,7 +249,7 @@ void test_pause_flushes_and_lets_packets_through()
 	engine.toggle_passive_latency_pause();	// pausing releases what is queued
 	CHECK(engine.is_passive_latency_paused() && engine.passive_latency_status() == "paused");
 	CHECK(channel->sent_count() == 1);
-	channel->inject(tcp_packet(2, 1, kAck), 2);	// and new packets are not delayed
+	channel->inject(tcp_packet(2, 1, kAck), 2);	 // and new packets are not delayed
 	CHECK(wait_until([&] { return channel->sent_count() == 2; }, std::chrono::milliseconds(1000)));
 
 	engine.toggle_passive_latency_pause();	// resuming delays again
@@ -262,7 +262,7 @@ void test_pause_flushes_and_lets_packets_through()
 	CHECK(channel->sent_count() == 3);
 }
 
-#ifndef NDEBUG
+#	ifndef NDEBUG
 void test_packet_group_logs_each_packet()
 {
 	fakes::reset();
@@ -282,12 +282,12 @@ void test_packet_group_logs_each_packet()
 	CHECK(text.find("Passive latency recv: outbound packet (delaying for 40ms)") != std::string::npos);
 	CHECK(text.find("Passive latency send: delayed packet") != std::string::npos);
 }
-#endif
+#	endif
 
 // Kernel shaping: the baseline runs in the kernel when the backend allows it and nothing needs the packets in user space.
 PacketEngineOptions shaping_passive_options(int32_t delay_ms)
 {
-	PacketEngineOptions options			   = passive_options(delay_ms);
+	PacketEngineOptions options			  = passive_options(delay_ms);
 	options.features.linux_bpf.interfaces = {"lan0"};
 	return options;
 }
@@ -296,10 +296,10 @@ void test_the_baseline_runs_as_a_shaping_stage()
 {
 	fakes::reset();
 	fakes::set_shaping_unavailable("");
-	PacketEngineOptions options					   = shaping_passive_options(80);
-	options.features.passive_latency.mode		   = PassiveLatencyMode::uniform;
-	options.features.passive_latency.jitter_ms	   = 20;
-	options.features.passive_latency.direction	   = PassiveLatencyDirection::outbound;
+	PacketEngineOptions options						= shaping_passive_options(80);
+	options.features.passive_latency.mode			= PassiveLatencyMode::uniform;
+	options.features.passive_latency.jitter_ms		= 20;
+	options.features.passive_latency.direction		= PassiveLatencyDirection::outbound;
 	options.features.passive_latency.preserve_order = false;
 	PacketEngine engine(options);
 	engine.start_workers();
@@ -324,7 +324,7 @@ void test_an_inbound_delay_keeps_the_baseline_in_user_space()
 {
 	fakes::reset();
 	fakes::set_shaping_unavailable("");
-	PacketEngine engine(shaping_passive_options(80));	// both directions by default
+	PacketEngine engine(shaping_passive_options(80));  // both directions by default
 	engine.start_workers();
 	CHECK(fakes::shape_stages().empty());
 	CHECK(fakes::channel_with_filter("tcp") != nullptr);
@@ -355,7 +355,7 @@ void test_the_bpf_tier_does_not_fall_back_for_the_baseline()
 	PacketEngineOptions options				   = shaping_passive_options(80);
 	options.features.linux_bpf.tier			   = LinuxTier::bpf;
 	options.features.passive_latency.direction = PassiveLatencyDirection::outbound;
-	PacketEngine engine(options);
+	PacketEngine	  engine(options);
 	const std::string log = test::capture_stdout([&] { engine.start_workers(); });
 	CHECK(fakes::channels().empty() && fakes::shape_stages().empty());
 	CHECK(log.find("requires kernel shaping") != std::string::npos);
@@ -370,21 +370,21 @@ void test_toggling_without_a_channel_is_harmless()
 	CHECK(!engine.is_passive_latency_paused());
 }
 
-#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
+#	ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 constexpr uint16_t kProbePort = 55002;
 
 void test_probe_port_traffic_is_not_delayed()
 {
 	fakes::reset();
-	PacketEngineOptions options					  = passive_options(5000);
-	options.features.region_enforcement.enabled	  = true;
+	PacketEngineOptions options					   = passive_options(5000);
+	options.features.region_enforcement.enabled	   = true;
 	options.features.region_enforcement.probe_port = kProbePort;
 	PacketEngine engine(options);
 	engine.start_workers();
 	const auto channel = fakes::channel_with_filter("tcp");
 
-	channel->inject(tcp_packet(1, 0, kSyn, 40000, kProbePort), 1, true);	// probe SYN
-	channel->inject(tcp_packet(1, 2, kSyn | kAck, kProbePort, 40000), 2, false);	// answer
+	channel->inject(tcp_packet(1, 0, kSyn, 40000, kProbePort), 1, true);		  // probe SYN
+	channel->inject(tcp_packet(1, 2, kSyn | kAck, kProbePort, 40000), 2, false);  // answer
 	CHECK(wait_until([&] { return channel->sent_count() == 2; }, std::chrono::milliseconds(1000)));
 	channel->inject(tcp_packet(3, 1, kAck, 40000, 2000), 3, true);	// game traffic is still held
 	CHECK(wait_until([&] { return channel->consumed() == 3; }));
@@ -409,9 +409,9 @@ void test_probe_port_is_delayed_when_region_enforcement_is_off()
 void test_passive_runs_before_region_enforcement()
 {
 	fakes::reset();
-	PacketEngineOptions options					  = passive_options(50);
-	options.servers								  = {{"34.0.0.1", "eu1", "EU"}, {"35.0.0.1", "na1", "NA"}};
-	options.features.region_enforcement.enabled	  = true;
+	PacketEngineOptions options					   = passive_options(50);
+	options.servers								   = {{"34.0.0.1", "eu1", "EU"}, {"35.0.0.1", "na1", "NA"}};
+	options.features.region_enforcement.enabled	   = true;
 	options.features.region_enforcement.probe_port = kProbePort;
 	PacketEngine engine(options);
 	engine.start_workers();
@@ -422,7 +422,7 @@ void test_passive_runs_before_region_enforcement()
 	CHECK(passive->options.priority > enforcement->options.priority);
 	engine.stop_workers();
 }
-#endif
+#	endif
 }  // namespace
 
 int main(int argc, char** argv)
@@ -432,7 +432,8 @@ int main(int argc, char** argv)
 		{"disabled_passive_latency_opens_nothing", test_disabled_passive_latency_opens_nothing},
 		{"starting_the_workers_opens_the_passive_channel", test_starting_the_workers_opens_the_passive_channel},
 		{"custom_filter_overrides_global_filter", test_custom_filter_overrides_global_filter},
-		{"delayed_packets_are_released_after_about_the_configured_delay", test_delayed_packets_are_released_after_about_the_configured_delay},
+		{"delayed_packets_are_released_after_about_the_configured_delay",
+		 test_delayed_packets_are_released_after_about_the_configured_delay},
 		{"order_is_preserved_for_equal_delays", test_order_is_preserved_for_equal_delays},
 		{"overflow_releases_packets_immediately", test_overflow_releases_packets_immediately},
 		{"stopping_the_workers_flushes_and_closes_the_channel", test_stopping_the_workers_flushes_and_closes_the_channel},
@@ -442,19 +443,19 @@ int main(int argc, char** argv)
 		{"jitter_modes_preserve_order", test_jitter_modes_preserve_order},
 		{"status_text", test_status_text},
 		{"pause_flushes_and_lets_packets_through", test_pause_flushes_and_lets_packets_through},
-#ifndef NDEBUG
+#	ifndef NDEBUG
 		{"packet_group_logs_each_packet", test_packet_group_logs_each_packet},
-#endif
+#	endif
 		{"the_baseline_runs_as_a_shaping_stage", test_the_baseline_runs_as_a_shaping_stage},
 		{"an_inbound_delay_keeps_the_baseline_in_user_space", test_an_inbound_delay_keeps_the_baseline_in_user_space},
 		{"pausing_the_kernel_baseline_deactivates_the_stage", test_pausing_the_kernel_baseline_deactivates_the_stage},
 		{"the_bpf_tier_does_not_fall_back_for_the_baseline", test_the_bpf_tier_does_not_fall_back_for_the_baseline},
 		{"toggling_without_a_channel_is_harmless", test_toggling_without_a_channel_is_harmless},
-#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
+#	ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 		{"probe_port_traffic_is_not_delayed", test_probe_port_traffic_is_not_delayed},
 		{"probe_port_is_delayed_when_region_enforcement_is_off", test_probe_port_is_delayed_when_region_enforcement_is_off},
 		{"passive_runs_before_region_enforcement", test_passive_runs_before_region_enforcement},
-#endif
+#	endif
 	};
 	return test::run_tests("passive_latency", cases, argc, argv);
 }

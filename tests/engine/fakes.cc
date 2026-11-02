@@ -5,18 +5,18 @@
 
 namespace fakes {
 namespace {
-std::mutex											   registry_mutex;
-std::vector<std::shared_ptr<ChannelState>>			   registry;
-std::vector<backend::ProfileFilter>					   specs;
-std::string											   next_open_failure;
-std::function<platform::HttpResponse(const std::string&, const std::string&)> http_handler;
-std::vector<std::string>							   requested_paths;
-std::atomic<int>									   timer_begins{0};
-std::atomic<int>									   timer_ends{0};
-std::string											   shaping_reason = "kernel shaping is not available in tests";
-std::vector<std::shared_ptr<ShapeRecord>>			   shape_registry;
-backend::ShapingConfig								   last_shaping_config;
-std::vector<std::string>							   refusals;
+	std::mutex																	  registry_mutex;
+	std::vector<std::shared_ptr<ChannelState>>									  registry;
+	std::vector<backend::ProfileFilter>											  specs;
+	std::string																	  next_open_failure;
+	std::function<platform::HttpResponse(const std::string&, const std::string&)> http_handler;
+	std::vector<std::string>													  requested_paths;
+	std::atomic<int>															  timer_begins{0};
+	std::atomic<int>															  timer_ends{0};
+	std::string								  shaping_reason = "kernel shaping is not available in tests";
+	std::vector<std::shared_ptr<ShapeRecord>> shape_registry;
+	backend::ShapingConfig					  last_shaping_config;
+	std::vector<std::string>				  refusals;
 }  // namespace
 
 void set_shaping_unavailable(const std::string& reason)
@@ -98,7 +98,11 @@ public:
 		return backend::IoStatus::ok;
 	}
 
-	backend::IoStatus send(const uint8_t* packet, uint32_t length, const backend::PacketMeta& meta, uint32_t& sent, std::string& error) override
+	backend::IoStatus send(const uint8_t*			  packet,
+						   uint32_t					  length,
+						   const backend::PacketMeta& meta,
+						   uint32_t&				  sent,
+						   std::string&				  error) override
 	{
 		std::lock_guard<std::mutex> lock(state_->m_);
 		if (state_->closed_ || state_->fail_sends_)
@@ -152,7 +156,7 @@ private:
 void ChannelState::inject(const std::vector<uint8_t>& packet, int64_t id, bool outbound, uint32_t if_index)
 {
 	Inbound inbound;
-	inbound.data			= packet;
+	inbound.data		   = packet;
 	inbound.meta.timestamp = id;
 	inbound.meta.outbound  = outbound;
 	inbound.meta.if_index  = if_index;
@@ -314,9 +318,9 @@ std::unique_ptr<PacketChannel> open(const OpenOptions& options, std::string& err
 		fakes::next_open_failure.clear();
 		return nullptr;
 	}
-	auto state		= std::make_shared<fakes::ChannelState>();
-	state->options	= options;
-	state->filter	= options.filter;
+	auto state	   = std::make_shared<fakes::ChannelState>();
+	state->options = options;
+	state->filter  = options.filter;
 	fakes::registry.push_back(state);
 	return std::make_unique<fakes::FakeChannel>(state);
 }
@@ -341,47 +345,49 @@ std::unique_ptr<ShapeStage> open_shape_stage(const ShapeSpec& spec, std::string&
 		fakes::refusals.push_back(spec.label);
 		return nullptr;
 	}
-	auto record	  = std::make_shared<fakes::ShapeRecord>();
-	record->spec  = spec;
+	auto record	 = std::make_shared<fakes::ShapeRecord>();
+	record->spec = spec;
 	fakes::shape_registry.push_back(record);
 	return std::make_unique<fakes::FakeShapeStage>(record);
 }
 
-void calc_checksums(uint8_t*, uint32_t) {}
+void calc_checksums(uint8_t*, uint32_t)
+{
+}
 
 namespace filters {
-std::string profile(const ProfileFilter& spec)
-{
-	std::lock_guard<std::mutex> lock(fakes::registry_mutex);
-	fakes::specs.push_back(spec);
-	return "profile#" + std::to_string(fakes::specs.size() - 1);
-}
+	std::string profile(const ProfileFilter& spec)
+	{
+		std::lock_guard<std::mutex> lock(fakes::registry_mutex);
+		fakes::specs.push_back(spec);
+		return "profile#" + std::to_string(fakes::specs.size() - 1);
+	}
 
-std::string port(uint16_t port)
-{
-	return "port:" + std::to_string(port);
-}
+	std::string port(uint16_t port)
+	{
+		return "port:" + std::to_string(port);
+	}
 
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
-std::string syn_probe(uint16_t port)
-{
-	return "syn:" + std::to_string(port);
-}
+	std::string syn_probe(uint16_t port)
+	{
+		return "syn:" + std::to_string(port);
+	}
 
-std::string region_enforcement(const std::vector<std::string>& server_addresses, uint16_t port)
-{
-	std::string text = "region_enforcement:";
-	for (const std::string& address : server_addresses)
-		text += address + ",";
-	return text + ":" + std::to_string(port);
-}
+	std::string region_enforcement(const std::vector<std::string>& server_addresses, uint16_t port)
+	{
+		std::string text = "region_enforcement:";
+		for (const std::string& address : server_addresses)
+			text += address + ",";
+		return text + ":" + std::to_string(port);
+	}
 #endif
 
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
-std::string forwarded_address(uint32_t inbound_if_index, uint32_t outbound_if_index, uint16_t port)
-{
-	return "forwarded:" + std::to_string(inbound_if_index) + ":" + std::to_string(outbound_if_index) + ":" + std::to_string(port);
-}
+	std::string forwarded_address(uint32_t inbound_if_index, uint32_t outbound_if_index, uint16_t port)
+	{
+		return "forwarded:" + std::to_string(inbound_if_index) + ":" + std::to_string(outbound_if_index) + ":" + std::to_string(port);
+	}
 #endif
 }  // namespace filters
 }  // namespace backend
@@ -391,7 +397,8 @@ uint64_t tick_ms()
 {
 	// Offset so that "never happened" (0) can be told apart from the first instant.
 	static const auto start = std::chrono::steady_clock::now();
-	return 1000 + static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+	return 1000 +
+		   static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
 }
 
 void sleep_ms(uint32_t milliseconds)
@@ -419,7 +426,9 @@ std::string data_directory()
 	return {};
 }
 
-void make_directory(const std::string&) {}
+void make_directory(const std::string&)
+{
+}
 
 bool replace_file(const std::string&, const std::string&)
 {

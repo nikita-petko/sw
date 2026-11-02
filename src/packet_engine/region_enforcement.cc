@@ -2,9 +2,9 @@
 
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 
-#include <cstdlib>
+#	include <cstdlib>
 
-#include "log.h"
+#	include "log.h"
 
 LOG_DEFAULT_GROUP(logging::group::enforcement)
 
@@ -79,9 +79,9 @@ void PacketEngine::region_enforcement_recv()
 	uint8_t packet_data[0xFFFF];
 	while (!state_->region_enforcement_stopping && !shutdown_)
 	{
-		backend::PacketMeta address;
-		uint32_t			received_length = 0;
-		std::string			io_error;
+		backend::PacketMeta		address;
+		uint32_t				received_length = 0;
+		std::string				io_error;
 		const backend::IoStatus status =
 			state_->region_enforcement_handle->recv(packet_data, sizeof(packet_data), received_length, address, io_error);
 		if (status != backend::IoStatus::ok)
@@ -96,11 +96,12 @@ void PacketEngine::region_enforcement_recv()
 		const uint64_t release_at = now + delay_ms;
 
 		const PacketAddresses addresses = packet_addresses(packet_data, received_length);
-		LOG_DEBUG_GROUP(logging::group::enforcement_packet, "Region enforcement recv: TCP PSH packet (delaying for %llums): Length = %u, Src = %s, Dst = %s",
-				  static_cast<unsigned long long>(delay_ms),
-				  received_length,
-				  addresses.source.c_str(),
-				  addresses.destination.c_str());
+		LOG_DEBUG_GROUP(logging::group::enforcement_packet,
+						"Region enforcement recv: TCP PSH packet (delaying for %llums): Length = %u, Src = %s, Dst = %s",
+						static_cast<unsigned long long>(delay_ms),
+						received_length,
+						addresses.source.c_str(),
+						addresses.destination.c_str());
 
 		{
 			std::lock_guard<std::mutex> lock(state_->region_enforcement_mutex);
@@ -170,8 +171,8 @@ bool PacketEngine::send_due_enforcement_packets()
 
 	for (auto& pkt : ready_packets)
 	{
-		uint32_t	sent = 0;
-		std::string io_error;
+		uint32_t				sent = 0;
+		std::string				io_error;
 		const backend::IoStatus status =
 			state_->region_enforcement_handle->send(pkt.data.data(), static_cast<uint32_t>(pkt.data.size()), pkt.address, sent, io_error);
 		if (status != backend::IoStatus::ok)
@@ -182,11 +183,12 @@ bool PacketEngine::send_due_enforcement_packets()
 		else if (sent != 0)
 		{
 			const PacketAddresses addresses = packet_addresses(pkt.data.data(), static_cast<uint32_t>(pkt.data.size()));
-			LOG_DEBUG_GROUP(logging::group::enforcement_packet, "Region enforcement send: delayed packet: Length = %zu, Src = %s, Dst = %s, SendLen = %u",
-					  pkt.data.size(),
-					  addresses.source.c_str(),
-					  addresses.destination.c_str(),
-					  sent);
+			LOG_DEBUG_GROUP(logging::group::enforcement_packet,
+							"Region enforcement send: delayed packet: Length = %zu, Src = %s, Dst = %s, SendLen = %u",
+							pkt.data.size(),
+							addresses.source.c_str(),
+							addresses.destination.c_str(),
+							sent);
 		}
 	}
 	return true;
@@ -209,19 +211,20 @@ void PacketEngine::flush_enforcement_queue()
 			sent != 0)
 		{
 			const PacketAddresses addresses = packet_addresses(pkt.data.data(), static_cast<uint32_t>(pkt.data.size()));
-			LOG_DEBUG_GROUP(logging::group::enforcement_packet, "Region enforcement flush: sent packet: Length = %zu, Src = %s, Dst = %s, SendLen = %u",
-					  pkt.data.size(),
-					  addresses.source.c_str(),
-					  addresses.destination.c_str(),
-					  sent);
+			LOG_DEBUG_GROUP(logging::group::enforcement_packet,
+							"Region enforcement flush: sent packet: Length = %zu, Src = %s, Dst = %s, SendLen = %u",
+							pkt.data.size(),
+							addresses.source.c_str(),
+							addresses.destination.c_str(),
+							sent);
 		}
 	}
 }
 
 void PacketEngine::start_probe_worker()
 {
-	const uint16_t	  port	 = options_.features.region_enforcement.probe_port;
-	const std::string filter = backend::filters::syn_probe(port);
+	const uint16_t		 port	= options_.features.region_enforcement.probe_port;
+	const std::string	 filter = backend::filters::syn_probe(port);
 	backend::OpenOptions open_options;
 	open_options.filter			 = filter;
 	open_options.sniff			 = true;
@@ -244,9 +247,9 @@ void PacketEngine::probe_packets()
 	uint8_t packet_data[0xFFFF];
 	while (!shutdown_)
 	{
-		backend::PacketMeta address;
-		uint32_t			received_length = 0;
-		std::string			io_error;
+		backend::PacketMeta		address;
+		uint32_t				received_length = 0;
+		std::string				io_error;
 		const backend::IoStatus recv_status =
 			state_->probe_handle->recv(packet_data, sizeof(packet_data), received_length, address, io_error);
 		if (recv_status == backend::IoStatus::ok)
@@ -295,16 +298,15 @@ void PacketEngine::handle_probe_packet(const uint8_t* packet_data, uint32_t leng
 void PacketEngine::log_probed_server(const std::string& server_address)
 {
 	const std::string enforced_region = current_enforced_region();
-	const auto		  server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](const ServerOptions& s) {
-		  return s.address == server_address;
-	  });
+	const auto		  server =
+		std::find_if(options_.servers.begin(), options_.servers.end(), [&](const ServerOptions& s) { return s.address == server_address; });
 	if (server == options_.servers.end())
 	{
 		LOG_DEBUG_GROUP(logging::group::enforcement, "Unknown server '%s' was probed", server_address.c_str());
 		return;
 	}
 	const std::string server_region = !server->group.empty() ? server->group : server->name;
-	const std::string label = server->name == server->address ? server->address : server->name + " [" + server->address + "]";
+	const std::string label			= server->name == server->address ? server->address : server->name + " [" + server->address + "]";
 	if (enforced_region != "none" && !enforced_region.empty() && server_region == enforced_region)
 		LOG_SERVER("Server '%s' within enforced region '%s' was probed", label.c_str(), enforced_region.c_str());
 	else

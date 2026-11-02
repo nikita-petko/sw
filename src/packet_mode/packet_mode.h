@@ -1,8 +1,8 @@
 #ifndef PACKET_MODE_H_
 #define PACKET_MODE_H_
 
-#include "packet_engine.h"
 #include "packet_backend.h"
+#include "packet_engine.h"
 #include "packet_headers.h"
 
 #include <cstdint>
@@ -18,21 +18,21 @@
 struct PacketNode
 {
 	/// Owned packet bytes.
-	uint8_t*			 packet;
+	uint8_t* packet;
 	/// Packet size in bytes.
-	uint32_t			 length;
+	uint32_t length;
 	/// Owned capture metadata.
 	backend::PacketMeta* address;
 	/// Profile number associated with the packet.
-	int				   profile;
+	int profile;
 	/// Earliest time the packet may be released.
-	uint64_t		   release_at;
+	uint64_t release_at;
 	/// Receive-order tie breaker for packets with equal release times.
-	uint64_t		   receive_order;
+	uint64_t receive_order;
 	/// Zero-based packet group, used by packet_group_send mode.
-	size_t			   group_index = 0;
+	size_t group_index = 0;
 	/// Whether this packet belongs to an explicit packet group.
-	bool			   grouped = false;
+	bool grouped = false;
 };
 
 /// Priority-queue comparator ordering packets by release time, then receive order.
@@ -50,19 +50,19 @@ struct PacketReleaseEarlier
 using PacketQueue = std::priority_queue<PacketNode*, std::vector<PacketNode*>, PacketReleaseEarlier>;
 
 /// Copies a packet and its metadata into a new queue node.
-PacketNode* make_packet_node(const uint8_t*				   packet,
-							 uint32_t					   length,
+PacketNode* make_packet_node(const uint8_t*				packet,
+							 uint32_t					length,
 							 const backend::PacketMeta& address,
-							 int						   profile,
-							 uint64_t					   release_at,
-							 uint64_t					   receive_order);
+							 int						profile,
+							 uint64_t					release_at,
+							 uint64_t					receive_order);
 /// Frees a packet node and its owned packet and address data.
-void		destroy_packet_node(PacketNode* node);
+void destroy_packet_node(PacketNode* node);
 /// Moves due packets into the ready list, discarding malformed queue entries.
-void		collect_due_packets(PacketQueue& packets, uint64_t now, std::vector<PacketNode*>& ready_packets);
+void collect_due_packets(PacketQueue& packets, uint64_t now, std::vector<PacketNode*>& ready_packets);
 /// Extracts TCP sequence and acknowledgment numbers from a packet.
 /// Returns false when the packet does not contain a parseable TCP header.
-bool		get_tcp_numbers(const uint8_t* packet, uint32_t length, uint32_t& sequence, uint32_t& acknowledgment);
+bool get_tcp_numbers(const uint8_t* packet, uint32_t length, uint32_t& sequence, uint32_t& acknowledgment);
 
 /// Base class for profile-specific packet scheduling and release behavior.
 class PacketMode
@@ -74,26 +74,23 @@ public:
 	virtual ~PacketMode();
 
 	/// Applies common packet processing before delegating to capture_packet().
-	virtual void capture(const uint8_t*				 packet,
-						 uint32_t					 length,
+	virtual void capture(const uint8_t*				packet,
+						 uint32_t					length,
 						 const backend::PacketMeta& address,
-						 int						 profile,
-						 uint64_t					 now,
-						 uint64_t					 receive_order,
-						 PacketQueue&				 packets);
+						 int						profile,
+						 uint64_t					now,
+						 uint64_t					receive_order,
+						 PacketQueue&				packets);
 	/// Releases due packets according to the mode's scheduling policy.
 	virtual void release(PacketQueue& packets, uint64_t now, std::vector<PacketNode*>& ready_packets) = 0;
 	/// Resets packet-mode tracking state.
-	virtual void reset()
-	{
-		last_sent_ack_.clear();
-	}
+	virtual void reset() { last_sent_ack_.clear(); }
 	/// Callback invoked for each packet the mode drops instead of sending.
 	using DiscardSink = std::function<void(const backend::PacketMeta&)>;
 	/// Installs the sink that tells the capture backend about dropped packets; call before packets are captured.
-	void		 set_discard_sink(DiscardSink sink) { discard_sink_ = std::move(sink); }
+	void set_discard_sink(DiscardSink sink) { discard_sink_ = std::move(sink); }
 	/// Applies configured TCP acknowledgment restoration before sending a packet.
-	void		 prepare_packet_for_send(uint8_t* packet, uint32_t length, const backend::PacketMeta* address);
+	void prepare_packet_for_send(uint8_t* packet, uint32_t length, const backend::PacketMeta* address);
 	/// Toggles mode-specific behavior when supported; returns whether it changed state.
 	virtual bool toggle(PacketQueue&) { return false; }
 	/// Flushes mode-specific queued packets on demand when supported.

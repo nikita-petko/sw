@@ -62,7 +62,7 @@ std::string PacketEngine::profile_packet_status(int profile) const
 {
 	if (profile < 1 || static_cast<size_t>(profile) > options_.profiles.size())
 		return {};
-	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
+	std::lock_guard<std::mutex>		lock(state_->lifecycle_mutex);
 	const std::shared_ptr<Session>& session = state_->active_sessions[profile - 1];
 	if (!session)
 		return {};

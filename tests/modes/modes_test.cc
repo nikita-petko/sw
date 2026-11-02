@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "log.h"
-#include "passive_latency/delay_model.h"
 #include "packet_mode/packet_mode.h"
+#include "passive_latency/delay_model.h"
 #include "support/packets.h"
 #include "support/test.h"
 
@@ -84,10 +84,7 @@ public:
 	}
 
 	/// Feeds a TCP packet with a sequence number of its own.
-	void feed(uint64_t now, int64_t id)
-	{
-		feed(now, id, tcp_packet(static_cast<uint32_t>(1000 + id), 1));
-	}
+	void feed(uint64_t now, int64_t id) { feed(now, id, tcp_packet(static_cast<uint32_t>(1000 + id), 1)); }
 
 	Ids release(uint64_t now) { return release_nodes(now, std::nullopt); }
 	/// Releases like the engine does and then reports each packet as sent (or failed).
@@ -127,9 +124,15 @@ private:
 
 void test_factory_creates_every_mode()
 {
-	const PacketDelayMode all[] = {PacketDelayMode::from_timestamp, PacketDelayMode::send_all_after_delay, PacketDelayMode::ratio,
-								   PacketDelayMode::drop,			PacketDelayMode::drop_and_send,		   PacketDelayMode::hold_and_send,
-								   PacketDelayMode::drop_until_toggle, PacketDelayMode::hold_until_deactivation, PacketDelayMode::packet_group_send};
+	const PacketDelayMode all[] = {PacketDelayMode::from_timestamp,
+								   PacketDelayMode::send_all_after_delay,
+								   PacketDelayMode::ratio,
+								   PacketDelayMode::drop,
+								   PacketDelayMode::drop_and_send,
+								   PacketDelayMode::hold_and_send,
+								   PacketDelayMode::drop_until_toggle,
+								   PacketDelayMode::hold_until_deactivation,
+								   PacketDelayMode::packet_group_send};
 	for (const PacketDelayMode mode : all)
 	{
 		ProfileOptions options = options_for(mode);
@@ -153,17 +156,18 @@ void test_make_packet_node_copies_its_inputs()
 {
 	Bytes				packet = tcp_packet(5, 6);
 	backend::PacketMeta meta;
-	meta.outbound	= true;
-	meta.if_index	= 7;
-	meta.timestamp	= 42;
-	meta.native[3]	= 9;
+	meta.outbound	 = true;
+	meta.if_index	 = 7;
+	meta.timestamp	 = 42;
+	meta.native[3]	 = 9;
 	PacketNode* node = make_packet_node(packet.data(), static_cast<uint32_t>(packet.size()), meta, 3, 11, 12);
 	packet[0]		 = 0;
 	meta.if_index	 = 0;
 
 	CHECK(node->packet != packet.data() && node->packet[0] == 0x45);
 	CHECK(node->length == packet.size());
-	CHECK(node->address != &meta && node->address->outbound && node->address->if_index == 7 && node->address->timestamp == 42 && node->address->native[3] == 9);
+	CHECK(node->address != &meta && node->address->outbound && node->address->if_index == 7 && node->address->timestamp == 42 &&
+		  node->address->native[3] == 9);
 	CHECK(node->profile == 3 && node->release_at == 11 && node->receive_order == 12);
 	CHECK(!node->grouped && node->group_index == 0);
 	destroy_packet_node(node);
@@ -176,8 +180,8 @@ void test_collect_due_packets_orders_by_release_then_receive()
 	backend::PacketMeta meta;
 	PacketQueue			queue;
 	const auto			add = [&](uint64_t release_at, uint64_t order, int64_t id) {
-		   meta.timestamp = id;
-		   queue.push(make_packet_node(packet.data(), static_cast<uint32_t>(packet.size()), meta, 0, release_at, order));
+		meta.timestamp = id;
+		queue.push(make_packet_node(packet.data(), static_cast<uint32_t>(packet.size()), meta, 0, release_at, order));
 	};
 	add(300, 1, 10);
 	add(100, 2, 20);
@@ -223,7 +227,7 @@ void test_collect_due_packets_discards_malformed_entries()
 
 void test_get_tcp_numbers()
 {
-	const Bytes tcp = tcp_packet(0xDEADBEEF, 0x01020304);
+	const Bytes tcp		 = tcp_packet(0xDEADBEEF, 0x01020304);
 	uint32_t	sequence = 0, acknowledgment = 0;
 	CHECK(get_tcp_numbers(tcp.data(), static_cast<uint32_t>(tcp.size()), sequence, acknowledgment));
 	CHECK(sequence == 0xDEADBEEFu && acknowledgment == 0x01020304u);
@@ -393,8 +397,8 @@ void test_hold_and_send_holds_retransmissions_of_held_packets()
 	};
 	for (const Case& test_case : cases)
 	{
-		ProfileOptions options				 = options_for(PacketDelayMode::hold_and_send);
-		options.ratio						 = 1;
+		ProfileOptions options				= options_for(PacketDelayMode::hold_and_send);
+		options.ratio						= 1;
 		options.subsequent_packet_hold_mode = test_case.mode;
 		Rig rig(options);
 		rig.feed(10, 1, tcp_packet(100, 50));
@@ -481,7 +485,7 @@ void test_drop_until_toggle_phases()
 	CHECK(rig.discarded == (Ids{1}));
 	CHECK(rig.release(kForever).empty());
 
-	CHECK(rig.mode->toggle(rig.queue));  // finished: later packets are dropped again
+	CHECK(rig.mode->toggle(rig.queue));	 // finished: later packets are dropped again
 	rig.feed(4, 4);
 	CHECK(rig.discarded == (Ids{1, 4}));
 	CHECK(rig.flush() == (Ids{2, 3}));
@@ -529,9 +533,9 @@ void test_ratio_percentage_selection()
 	};
 	for (const Case& test_case : cases)
 	{
-		ProfileOptions options = options_for(PacketDelayMode::ratio, 100);
-		options.ratio_percent  = true;
-		options.ratio		   = 50;
+		ProfileOptions options	= options_for(PacketDelayMode::ratio, 100);
+		options.ratio_percent	= true;
+		options.ratio			= 50;
 		options.ratio_selection = test_case.selection;
 		Rig rig(options);
 		for (int64_t id = 1; id <= 4; ++id)
@@ -732,7 +736,7 @@ void test_retransmissions_are_discarded_while_queued()
 	};
 	for (const Case& test_case : cases)
 	{
-		ProfileOptions options	= options_for(PacketDelayMode::from_timestamp, 1000);
+		ProfileOptions options		= options_for(PacketDelayMode::from_timestamp, 1000);
 		options.retransmission_mode = test_case.mode;
 		Rig rig(options);
 		rig.feed(0, 1, tcp_packet(100, 1));
@@ -763,7 +767,7 @@ void test_retransmission_filter_ignores_released_and_non_tcp_packets()
 
 void test_ack_restoration_lets_pure_acks_bypass_the_mode()
 {
-	ProfileOptions options = options_for(PacketDelayMode::from_timestamp, 1000);
+	ProfileOptions options	= options_for(PacketDelayMode::from_timestamp, 1000);
 	options.ack_restoration = true;
 	Rig rig(options);
 	rig.feed(0, 1, tcp_packet(1, 1, kAck));
@@ -787,8 +791,8 @@ uint32_t acknowledgment_after_send(PacketMode& mode, Bytes packet)
 
 void test_ack_restoration_never_lets_the_ack_go_backwards()
 {
-	ProfileOptions options = options_for(PacketDelayMode::from_timestamp, 100);
-	options.ack_restoration = true;
+	ProfileOptions options			 = options_for(PacketDelayMode::from_timestamp, 100);
+	options.ack_restoration			 = true;
 	std::unique_ptr<PacketMode> mode = create_packet_mode(options);
 	checksum_calls					 = 0;
 
@@ -809,7 +813,8 @@ void test_ack_restoration_never_lets_the_ack_go_backwards()
 
 	// Flows are tracked independently, by addresses and ports.
 	CHECK(acknowledgment_after_send(*mode, tcp_packet(1, 5, kAck | kPsh, 1111, 2000)) == 5);
-	CHECK(acknowledgment_after_send(*mode, ipv4_packet(kTcp, tcp_segment(1000, 2000, 1, 5, kAck | kPsh), {10, 0, 0, 9}, {192, 168, 1, 20})) == 5);
+	CHECK(acknowledgment_after_send(*mode,
+									ipv4_packet(kTcp, tcp_segment(1000, 2000, 1, 5, kAck | kPsh), {10, 0, 0, 9}, {192, 168, 1, 20})) == 5);
 	CHECK(checksum_calls == 3);
 
 	// Packets without the ACK flag are not tracked, and UDP is left alone.
@@ -926,7 +931,7 @@ void test_delay_model_can_reorder_when_order_is_not_preserved()
 
 void test_delay_model_directions_are_independent()
 {
-	DelayModelOptions options = model_options(DelayModelKind::fixed, 0, 0, 500);
+	DelayModelOptions options									   = model_options(DelayModelKind::fixed, 0, 0, 500);
 	options.directions[static_cast<int>(DelayDirection::outbound)] = {120, 0, 500};
 	options.directions[static_cast<int>(DelayDirection::inbound)]  = {0, 0, 500};
 	DelayModel model(options, 1);
@@ -989,7 +994,8 @@ int main(int argc, char** argv)
 		{"ack_restoration_never_lets_the_ack_go_backwards", test_ack_restoration_never_lets_the_ack_go_backwards},
 		{"ack_restoration_is_off_by_default", test_ack_restoration_is_off_by_default},
 		{"delay_model_fixed_is_exact", test_delay_model_fixed_is_exact},
-		{"delay_model_samples_stay_within_bounds_and_center_on_the_mean", test_delay_model_samples_stay_within_bounds_and_center_on_the_mean},
+		{"delay_model_samples_stay_within_bounds_and_center_on_the_mean",
+		 test_delay_model_samples_stay_within_bounds_and_center_on_the_mean},
 		{"delay_model_uniform_stays_within_the_jitter_range", test_delay_model_uniform_stays_within_the_jitter_range},
 		{"delay_model_clamps_to_zero_and_max", test_delay_model_clamps_to_zero_and_max},
 		{"delay_model_is_deterministic_for_a_seed", test_delay_model_is_deterministic_for_a_seed},

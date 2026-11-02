@@ -1,11 +1,11 @@
 #ifndef _WIN32
-#error "platform/windows/keyboard.cc must only be built on Windows"
+#	error "platform/windows/keyboard.cc must only be built on Windows"
 #endif
 
 #include "platform.h"
 
-#include <windows.h>
 #include <conio.h>
+#include <windows.h>
 
 namespace platform {
 

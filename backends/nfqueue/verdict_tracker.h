@@ -39,11 +39,11 @@ public:
 
 private:
 	// Ids are widened to 64 bits so ordering survives the 32-bit wraparound.
-	std::map<uint64_t, uint32_t>			   waiting_;	  ///< widened id -> mark
-	std::unordered_map<uint32_t, uint64_t>	   widened_;	  ///< id -> widened id
-	uint64_t								   epoch_	 = 0;
-	uint32_t								   last_id_	 = 0;
-	bool									   seen_any_ = false;
+	std::map<uint64_t, uint32_t>		   waiting_;  ///< widened id -> mark
+	std::unordered_map<uint32_t, uint64_t> widened_;  ///< id -> widened id
+	uint64_t							   epoch_	 = 0;
+	uint32_t							   last_id_	 = 0;
+	bool								   seen_any_ = false;
 };
 
 }  // namespace nfq

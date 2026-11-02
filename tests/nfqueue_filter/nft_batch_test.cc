@@ -35,8 +35,8 @@ std::string hex(const void* data, uint32_t length)
 
 std::string data_of(const nftnl_expr* expr, uint16_t attribute)
 {
-	uint32_t	   length = 0;
-	const void*	   data	  = nftnl_expr_get(expr, attribute, &length);
+	uint32_t	length = 0;
+	const void* data   = nftnl_expr_get(expr, attribute, &length);
 	return hex(data, length);
 }
 
@@ -48,18 +48,22 @@ int describe_expr(nftnl_expr* expr, void* user)
 	if (line == "meta")
 		line += " key=" + std::to_string(nftnl_expr_get_u32(expr, NFTNL_EXPR_META_KEY));
 	else if (line == "payload")
-		line += " base=" + std::to_string(nftnl_expr_get_u32(expr, NFTNL_EXPR_PAYLOAD_BASE)) + " off=" + std::to_string(nftnl_expr_get_u32(expr, NFTNL_EXPR_PAYLOAD_OFFSET)) +
+		line += " base=" + std::to_string(nftnl_expr_get_u32(expr, NFTNL_EXPR_PAYLOAD_BASE)) +
+				" off=" + std::to_string(nftnl_expr_get_u32(expr, NFTNL_EXPR_PAYLOAD_OFFSET)) +
 				" len=" + std::to_string(nftnl_expr_get_u32(expr, NFTNL_EXPR_PAYLOAD_LEN));
 	else if (line == "cmp")
-		line += std::string(nftnl_expr_get_u32(expr, NFTNL_EXPR_CMP_OP) == NFT_CMP_EQ ? " eq " : " neq ") + data_of(expr, NFTNL_EXPR_CMP_DATA);
+		line +=
+			std::string(nftnl_expr_get_u32(expr, NFTNL_EXPR_CMP_OP) == NFT_CMP_EQ ? " eq " : " neq ") + data_of(expr, NFTNL_EXPR_CMP_DATA);
 	else if (line == "bitwise")
 		line += " mask=" + data_of(expr, NFTNL_EXPR_BITWISE_MASK) + " xor=" + data_of(expr, NFTNL_EXPR_BITWISE_XOR);
 	else if (line == "lookup")
-		line += std::string(" set=") + nftnl_expr_get_str(expr, NFTNL_EXPR_LOOKUP_SET) + (nftnl_expr_is_set(expr, NFTNL_EXPR_LOOKUP_FLAGS) ? " inv" : "");
+		line += std::string(" set=") + nftnl_expr_get_str(expr, NFTNL_EXPR_LOOKUP_SET) +
+				(nftnl_expr_is_set(expr, NFTNL_EXPR_LOOKUP_FLAGS) ? " inv" : "");
 	else if (line == "immediate")
 		line += " verdict=" + std::to_string(static_cast<int32_t>(nftnl_expr_get_u32(expr, NFTNL_EXPR_IMM_VERDICT)));
 	else if (line == "queue")
-		line += " num=" + std::to_string(nftnl_expr_get_u16(expr, NFTNL_EXPR_QUEUE_NUM)) + " total=" + std::to_string(nftnl_expr_get_u16(expr, NFTNL_EXPR_QUEUE_TOTAL)) +
+		line += " num=" + std::to_string(nftnl_expr_get_u16(expr, NFTNL_EXPR_QUEUE_NUM)) +
+				" total=" + std::to_string(nftnl_expr_get_u16(expr, NFTNL_EXPR_QUEUE_TOTAL)) +
 				" flags=" + std::to_string(nftnl_expr_get_u16(expr, NFTNL_EXPR_QUEUE_FLAGS));
 	text += (text.empty() ? "" : "; ") + line;
 	return MNL_CB_OK;
@@ -71,17 +75,19 @@ std::string describe_elements(const nlmsghdr* header)
 	std::string name;
 	std::string keys;
 	const auto	children = [](const nlattr* parent, auto&& visit) {
-		  const char* payload = static_cast<const char*>(mnl_attr_get_payload(parent));
-		  int		  left	  = static_cast<int>(mnl_attr_get_payload_len(parent));
-		  for (const nlattr* child = reinterpret_cast<const nlattr*>(payload); mnl_attr_ok(child, left); child = mnl_attr_next(child))
-		  {
-			  left = static_cast<int>(payload + mnl_attr_get_payload_len(parent) - reinterpret_cast<const char*>(child)) - static_cast<int>(MNL_ALIGN(child->nla_len));
-			  visit(child);
-		  }
-	  };
+		const char* payload = static_cast<const char*>(mnl_attr_get_payload(parent));
+		int			left	= static_cast<int>(mnl_attr_get_payload_len(parent));
+		for (const nlattr* child = reinterpret_cast<const nlattr*>(payload); mnl_attr_ok(child, left); child = mnl_attr_next(child))
+		{
+			left = static_cast<int>(payload + mnl_attr_get_payload_len(parent) - reinterpret_cast<const char*>(child)) -
+				   static_cast<int>(MNL_ALIGN(child->nla_len));
+			visit(child);
+		}
+	};
 	const char* first = static_cast<const char*>(mnl_nlmsg_get_payload_offset(header, sizeof(nfgenmsg)));
 	int			left  = static_cast<int>(mnl_nlmsg_get_payload_len(header) - sizeof(nfgenmsg));
-	for (const nlattr* attribute = reinterpret_cast<const nlattr*>(first); mnl_attr_ok(attribute, left); attribute = mnl_attr_next(attribute))
+	for (const nlattr* attribute = reinterpret_cast<const nlattr*>(first); mnl_attr_ok(attribute, left);
+		 attribute				 = mnl_attr_next(attribute))
 	{
 		left -= static_cast<int>(MNL_ALIGN(attribute->nla_len));
 		if (mnl_attr_get_type(attribute) == NFTA_SET_ELEM_LIST_SET)
@@ -107,7 +113,8 @@ Lines decode(const std::vector<uint8_t>& bytes)
 {
 	Lines lines;
 	int	  length = static_cast<int>(bytes.size());
-	for (const nlmsghdr* header = reinterpret_cast<const nlmsghdr*>(bytes.data()); mnl_nlmsg_ok(header, length); header = mnl_nlmsg_next(header, &length))
+	for (const nlmsghdr* header = reinterpret_cast<const nlmsghdr*>(bytes.data()); mnl_nlmsg_ok(header, length);
+		 header					= mnl_nlmsg_next(header, &length))
 	{
 		const std::string ack = (header->nlmsg_flags & NLM_F_ACK) != 0 ? " [ack]" : "";
 		if (header->nlmsg_type == NFNL_MSG_BATCH_BEGIN)
@@ -125,55 +132,64 @@ Lines decode(const std::vector<uint8_t>& bytes)
 		{
 			case NFT_MSG_NEWTABLE:
 			case NFT_MSG_DELTABLE:
-			{
-				nftnl_table* table = nftnl_table_alloc();
-				CHECK(nftnl_table_nlmsg_parse(header, table) == 0);
-				const bool add = (header->nlmsg_type & 0xFF) == NFT_MSG_NEWTABLE;
-				lines.push_back(std::string(add ? "add table " : "delete table ") + nftnl_table_get_str(table, NFTNL_TABLE_NAME) + " flags=" +
-								std::to_string(nftnl_table_is_set(table, NFTNL_TABLE_FLAGS) ? nftnl_table_get_u32(table, NFTNL_TABLE_FLAGS) : 0) + ack);
-				nftnl_table_free(table);
-				break;
-			}
+				{
+					nftnl_table* table = nftnl_table_alloc();
+					CHECK(nftnl_table_nlmsg_parse(header, table) == 0);
+					const bool add = (header->nlmsg_type & 0xFF) == NFT_MSG_NEWTABLE;
+					lines.push_back(
+						std::string(add ? "add table " : "delete table ") + nftnl_table_get_str(table, NFTNL_TABLE_NAME) + " flags=" +
+						std::to_string(nftnl_table_is_set(table, NFTNL_TABLE_FLAGS) ? nftnl_table_get_u32(table, NFTNL_TABLE_FLAGS) : 0) +
+						ack);
+					nftnl_table_free(table);
+					break;
+				}
 			case NFT_MSG_NEWSET:
 			case NFT_MSG_DELSET:
-			{
-				nftnl_set* set = nftnl_set_alloc();
-				CHECK(nftnl_set_nlmsg_parse(header, set) == 0);
-				lines.push_back(std::string((header->nlmsg_type & 0xFF) == NFT_MSG_NEWSET ? "add set " : "delete set ") + nftnl_set_get_str(set, NFTNL_SET_NAME) +
-								(nftnl_set_is_set(set, NFTNL_SET_KEY_LEN) ? " keylen=" + std::to_string(nftnl_set_get_u32(set, NFTNL_SET_KEY_LEN)) : "") + ack);
-				nftnl_set_free(set);
-				break;
-			}
+				{
+					nftnl_set* set = nftnl_set_alloc();
+					CHECK(nftnl_set_nlmsg_parse(header, set) == 0);
+					lines.push_back(std::string((header->nlmsg_type & 0xFF) == NFT_MSG_NEWSET ? "add set " : "delete set ") +
+									nftnl_set_get_str(set, NFTNL_SET_NAME) +
+									(nftnl_set_is_set(set, NFTNL_SET_KEY_LEN)
+										 ? " keylen=" + std::to_string(nftnl_set_get_u32(set, NFTNL_SET_KEY_LEN))
+										 : "") +
+									ack);
+					nftnl_set_free(set);
+					break;
+				}
 			case NFT_MSG_NEWSETELEM:
-			{
-				lines.push_back("add elements " + describe_elements(header) + ack);
-				break;
-			}
+				{
+					lines.push_back("add elements " + describe_elements(header) + ack);
+					break;
+				}
 			case NFT_MSG_NEWCHAIN:
 			case NFT_MSG_DELCHAIN:
-			{
-				nftnl_chain* chain = nftnl_chain_alloc();
-				CHECK(nftnl_chain_nlmsg_parse(header, chain) == 0);
-				std::string line = std::string((header->nlmsg_type & 0xFF) == NFT_MSG_NEWCHAIN ? "add chain " : "delete chain ") + nftnl_chain_get_str(chain, NFTNL_CHAIN_NAME);
-				if (nftnl_chain_is_set(chain, NFTNL_CHAIN_HOOKNUM))
-					line += " hook=" + std::to_string(nftnl_chain_get_u32(chain, NFTNL_CHAIN_HOOKNUM)) + " prio=" + std::to_string(nftnl_chain_get_s32(chain, NFTNL_CHAIN_PRIO)) +
-							" type=" + nftnl_chain_get_str(chain, NFTNL_CHAIN_TYPE) + " policy=" + std::to_string(nftnl_chain_get_u32(chain, NFTNL_CHAIN_POLICY));
-				lines.push_back(line + ack);
-				nftnl_chain_free(chain);
-				break;
-			}
+				{
+					nftnl_chain* chain = nftnl_chain_alloc();
+					CHECK(nftnl_chain_nlmsg_parse(header, chain) == 0);
+					std::string line = std::string((header->nlmsg_type & 0xFF) == NFT_MSG_NEWCHAIN ? "add chain " : "delete chain ") +
+									   nftnl_chain_get_str(chain, NFTNL_CHAIN_NAME);
+					if (nftnl_chain_is_set(chain, NFTNL_CHAIN_HOOKNUM))
+						line += " hook=" + std::to_string(nftnl_chain_get_u32(chain, NFTNL_CHAIN_HOOKNUM)) +
+								" prio=" + std::to_string(nftnl_chain_get_s32(chain, NFTNL_CHAIN_PRIO)) +
+								" type=" + nftnl_chain_get_str(chain, NFTNL_CHAIN_TYPE) +
+								" policy=" + std::to_string(nftnl_chain_get_u32(chain, NFTNL_CHAIN_POLICY));
+					lines.push_back(line + ack);
+					nftnl_chain_free(chain);
+					break;
+				}
 			case NFT_MSG_NEWRULE:
 			case NFT_MSG_DELRULE:
-			{
-				nftnl_rule* rule = nftnl_rule_alloc();
-				CHECK(nftnl_rule_nlmsg_parse(header, rule) == 0);
-				std::string expressions;
-				nftnl_expr_foreach(rule, describe_expr, &expressions);
-				lines.push_back(std::string((header->nlmsg_type & 0xFF) == NFT_MSG_NEWRULE ? "add rule " : "delete rules ") + nftnl_rule_get_str(rule, NFTNL_RULE_CHAIN) +
-								(expressions.empty() ? "" : ": " + expressions) + ack);
-				nftnl_rule_free(rule);
-				break;
-			}
+				{
+					nftnl_rule* rule = nftnl_rule_alloc();
+					CHECK(nftnl_rule_nlmsg_parse(header, rule) == 0);
+					std::string expressions;
+					nftnl_expr_foreach(rule, describe_expr, &expressions);
+					lines.push_back(std::string((header->nlmsg_type & 0xFF) == NFT_MSG_NEWRULE ? "add rule " : "delete rules ") +
+									nftnl_rule_get_str(rule, NFTNL_RULE_CHAIN) + (expressions.empty() ? "" : ": " + expressions) + ack);
+					nftnl_rule_free(rule);
+					break;
+				}
 			default:
 				lines.push_back("unexpected message type " + std::to_string(header->nlmsg_type & 0xFF));
 		}
@@ -191,7 +207,7 @@ std::vector<nfq::CompiledRule> compile(const std::string& filter, bool forward =
 }
 
 const std::string kNfproto = "meta key=" + std::to_string(NFT_META_NFPROTO) + "; cmp eq 02";
-const std::string kQueue	= "queue num=10 total=1 flags=1";
+const std::string kQueue   = "queue num=10 total=1 flags=1";
 
 std::string net(uint32_t offset, uint32_t length)
 {
@@ -205,7 +221,7 @@ std::string transport(uint32_t offset, uint32_t length)
 
 Lines channel_lines(const std::string& filter, bool forward = false, bool include_forward = false, nfq::ChannelChains* out = nullptr)
 {
-	nfq::NftBatch	  batch(100);
+	nfq::NftBatch	   batch(100);
 	nfq::ChannelChains chains;
 	batch.add_channel(0, 10, -150, compile(filter, forward, include_forward), chains);
 	CHECK(batch.finish());
@@ -224,21 +240,26 @@ void test_owner_table_replacement_batch()
 	CHECK(batch.first_seq() == 7);
 	CHECK(batch.last_seq() == 10);
 	CHECK(batch.message_count() == 5);
-	const Lines expected = {"begin", "add table lagsw flags=0", "delete table lagsw flags=0", "add table lagsw flags=" + std::to_string(NFT_TABLE_F_OWNER) + " [ack]", "end"};
+	const Lines expected = {"begin",
+							"add table lagsw flags=0",
+							"delete table lagsw flags=0",
+							"add table lagsw flags=" + std::to_string(NFT_TABLE_F_OWNER) + " [ack]",
+							"end"};
 	CHECK(decode(batch.bytes()) == expected);
 
 	// Sequence numbers run consecutively from the first one.
-	int			  length  = static_cast<int>(batch.bytes().size());
-	uint32_t	  seq	  = 7;
-	for (const nlmsghdr* header = reinterpret_cast<const nlmsghdr*>(batch.bytes().data()); mnl_nlmsg_ok(header, length); header = mnl_nlmsg_next(header, &length))
+	int		 length = static_cast<int>(batch.bytes().size());
+	uint32_t seq	= 7;
+	for (const nlmsghdr* header = reinterpret_cast<const nlmsghdr*>(batch.bytes().data()); mnl_nlmsg_ok(header, length);
+		 header					= mnl_nlmsg_next(header, &length))
 		CHECK(header->nlmsg_seq == seq++);
 	CHECK(seq == 12);
 }
 
 void test_simple_filter_builds_typed_expressions()
 {
-	const std::string p = "ch0_output";
-	const Lines expected = {
+	const std::string p		   = "ch0_output";
+	const Lines		  expected = {
 		"begin",
 		"add chain " + p + " hook=3 prio=-150 type=filter policy=1",
 		"add rule " + p + ": " + kNfproto + "; " + net(9, 1) + "; cmp eq 06; " + transport(2, 2) + "; cmp eq 0050; " + kQueue + " [ack]",
@@ -249,22 +270,22 @@ void test_simple_filter_builds_typed_expressions()
 
 void test_flags_ports_and_interfaces()
 {
-	const Lines flags = channel_lines("tcp.Syn and not tcp.Ack and inbound");
+	const Lines flags	 = channel_lines("tcp.Syn and not tcp.Ack and inbound");
 	const Lines expected = {
 		"begin",
 		"add chain ch0_input hook=1 prio=-150 type=filter policy=1",
-		"add rule ch0_input: " + kNfproto + "; " + net(9, 1) + "; cmp eq 06; " + transport(13, 1) + "; bitwise mask=02 xor=00; cmp eq 02; " + transport(13, 1) +
-			"; bitwise mask=10 xor=00; cmp eq 00; " + kQueue + " [ack]",
+		"add rule ch0_input: " + kNfproto + "; " + net(9, 1) + "; cmp eq 06; " + transport(13, 1) +
+			"; bitwise mask=02 xor=00; cmp eq 02; " + transport(13, 1) + "; bitwise mask=10 xor=00; cmp eq 00; " + kQueue + " [ack]",
 		"end",
 	};
 	CHECK(flags == expected);
 
-	const Lines udp = channel_lines("udp.SrcPort != 53 and outbound and ifIdx == 5");
+	const Lines udp			 = channel_lines("udp.SrcPort != 53 and outbound and ifIdx == 5");
 	const Lines expected_udp = {
 		"begin",
 		"add chain ch0_output hook=3 prio=-150 type=filter policy=1",
-		"add rule ch0_output: " + kNfproto + "; " + net(9, 1) + "; cmp eq 11; " + transport(0, 2) + "; cmp neq 0035; meta key=" + std::to_string(NFT_META_OIF) + "; cmp eq 05000000; " +
-			kQueue + " [ack]",
+		"add rule ch0_output: " + kNfproto + "; " + net(9, 1) + "; cmp eq 11; " + transport(0, 2) +
+			"; cmp neq 0035; meta key=" + std::to_string(NFT_META_OIF) + "; cmp eq 05000000; " + kQueue + " [ack]",
 		"end",
 	};
 	CHECK(udp == expected_udp);
@@ -277,7 +298,11 @@ void test_single_addresses_are_compared_and_lists_become_sets()
 	CHECK(single[2] == "add rule ch0_output: " + kNfproto + "; " + net(16, 4) + "; cmp eq 01020304; " + kQueue + " [ack]");
 
 	nfq::ChannelChains chains;
-	const Lines		   list = channel_lines("(ip.Addr == 3.3.3.3 or ip.Addr == 1.1.1.1 or ip.Addr == 3.3.3.3) and not ip.SrcAddr == 9.9.9.9 and outbound", false, false, &chains);
+	const Lines		   list =
+		channel_lines("(ip.Addr == 3.3.3.3 or ip.Addr == 1.1.1.1 or ip.Addr == 3.3.3.3) and not ip.SrcAddr == 9.9.9.9 and outbound",
+					  false,
+					  false,
+					  &chains);
 	// The same address list is one set no matter which side or clause uses it; duplicates collapse and order is normalised.
 	CHECK(chains.sets == (std::vector<std::string>{"ch0_a0"}));
 	const Lines expected = {
@@ -286,16 +311,17 @@ void test_single_addresses_are_compared_and_lists_become_sets()
 		"add elements ch0_a0 01010101,03030303",
 		"add chain ch0_output hook=3 prio=-150 type=filter policy=1",
 		"add rule ch0_output: " + kNfproto + "; " + net(12, 4) + "; lookup set=ch0_a0; " + net(12, 4) + "; cmp neq 09090909; " + kQueue,
-		"add rule ch0_output: " + kNfproto + "; " + net(16, 4) + "; lookup set=ch0_a0; " + net(12, 4) + "; cmp neq 09090909; " + kQueue + " [ack]",
+		"add rule ch0_output: " + kNfproto + "; " + net(16, 4) + "; lookup set=ch0_a0; " + net(12, 4) + "; cmp neq 09090909; " + kQueue +
+			" [ack]",
 		"end",
 	};
 	CHECK(list == expected);
 
-	const Lines negated = channel_lines("ip.DstAddr != 1.1.1.1 and ip.DstAddr != 2.2.2.2 and outbound");
+	const Lines negated	 = channel_lines("ip.DstAddr != 1.1.1.1 and ip.DstAddr != 2.2.2.2 and outbound");
 	bool		inverted = false;
 	for (const std::string& line : negated)
 		inverted = inverted || line.find("lookup set=") != std::string::npos;
-	CHECK(!inverted);	// two separate single-address comparisons, not a set
+	CHECK(!inverted);  // two separate single-address comparisons, not a set
 }
 
 void test_negated_lists_invert_the_lookup()
@@ -328,17 +354,18 @@ void test_release_guard_leads_every_chain()
 	// Loopback traffic crosses the output and the input hook; the guard keeps a released packet from being queued twice.
 	batch.add_channel(0, 10, -150, compile("tcp.DstPort == 80"), chains, 0x01000000u);
 	CHECK(batch.finish());
-	const std::string guard = "meta key=" + std::to_string(NFT_META_MARK) + "; bitwise mask=00000001 xor=00000000; cmp neq 00000000; immediate verdict=" + std::to_string(NFT_RETURN);
+	const std::string guard	   = "meta key=" + std::to_string(NFT_META_MARK) +
+								 "; bitwise mask=00000001 xor=00000000; cmp neq 00000000; immediate verdict=" + std::to_string(NFT_RETURN);
 	const Lines		  expected = {
-		  "begin",
-		  "add chain ch0_input hook=1 prio=-150 type=filter policy=1",
-		  "add rule ch0_input: " + guard,
-		  "add rule ch0_input: " + kNfproto + "; " + net(9, 1) + "; cmp eq 06; " + transport(2, 2) + "; cmp eq 0050; " + kQueue,
-		  "add chain ch0_output hook=3 prio=-150 type=filter policy=1",
-		  "add rule ch0_output: " + guard,
-		  "add rule ch0_output: " + kNfproto + "; " + net(9, 1) + "; cmp eq 06; " + transport(2, 2) + "; cmp eq 0050; " + kQueue + " [ack]",
-		  "end",
-	  };
+		"begin",
+		"add chain ch0_input hook=1 prio=-150 type=filter policy=1",
+		"add rule ch0_input: " + guard,
+		"add rule ch0_input: " + kNfproto + "; " + net(9, 1) + "; cmp eq 06; " + transport(2, 2) + "; cmp eq 0050; " + kQueue,
+		"add chain ch0_output hook=3 prio=-150 type=filter policy=1",
+		"add rule ch0_output: " + guard,
+		"add rule ch0_output: " + kNfproto + "; " + net(9, 1) + "; cmp eq 06; " + transport(2, 2) + "; cmp eq 0050; " + kQueue + " [ack]",
+		"end",
+	};
 	CHECK(decode(batch.bytes()) == expected);
 }
 
@@ -386,9 +413,10 @@ void test_long_address_lists_are_split_across_messages()
 {
 	std::string filter = "(";
 	for (int index = 0; index < 600; ++index)
-		filter += (index == 0 ? "" : " or ") + std::string("ip.DstAddr == 10.") + std::to_string(index / 250) + "." + std::to_string(index % 250) + ".1";
+		filter += (index == 0 ? "" : " or ") + std::string("ip.DstAddr == 10.") + std::to_string(index / 250) + "." +
+				  std::to_string(index % 250) + ".1";
 	filter += ") and outbound";
-	const Lines lines = channel_lines(filter);
+	const Lines lines			 = channel_lines(filter);
 	size_t		element_messages = 0;
 	for (const std::string& line : lines)
 		element_messages += line.rfind("add elements ch0_a0", 0) == 0 ? 1 : 0;

@@ -4,7 +4,7 @@
 
 namespace nfq {
 namespace {
-constexpr uint32_t kHalfRange = 0x80000000u;
+	constexpr uint32_t kHalfRange = 0x80000000u;
 }
 
 void VerdictTracker::add(uint32_t id, uint32_t mark)

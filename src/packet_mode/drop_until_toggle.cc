@@ -14,10 +14,10 @@ public:
 		phase_ = Phase::dropping;
 	}
 
-	void capture_packet(const uint8_t*				 packet,
-						uint32_t					 length,
+	void capture_packet(const uint8_t*			   packet,
+						uint32_t				   length,
 						const backend::PacketMeta& address,
-						int						 profile,
+						int						   profile,
 						uint64_t,
 						uint64_t	 receive_order,
 						PacketQueue& packets) override

@@ -15,8 +15,8 @@ backend::ShapingConfig shaping_config(const LinuxBpfOptions& options)
 {
 	backend::ShapingConfig config;
 	config.tier		  = options.tier == LinuxTier::nfqueue ? backend::ShapingTier::capture
-						: options.tier == LinuxTier::bpf	 ? backend::ShapingTier::kernel
-															 : backend::ShapingTier::automatic;
+						: options.tier == LinuxTier::bpf   ? backend::ShapingTier::kernel
+														   : backend::ShapingTier::automatic;
 	config.interfaces = options.interfaces;
 	return config;
 }
@@ -49,7 +49,12 @@ const char* delay_mode_text(PacketDelayMode mode)
 
 /// Describes how a profile would run as a kernel-shaping stage. Returns false with `reason` when its behaviour needs the
 /// packets themselves in user space, so it must use a capture channel.
-bool profile_shape_spec(const ProfileOptions& profile, [[maybe_unused]] bool pcap, const std::string& filter, bool forward, backend::ShapeSpec& spec, std::string& reason)
+bool profile_shape_spec(const ProfileOptions& profile,
+						[[maybe_unused]] bool pcap,
+						const std::string&	  filter,
+						bool				  forward,
+						backend::ShapeSpec&	  spec,
+						std::string&		  reason)
 {
 	switch (profile.delay_mode)
 	{
@@ -91,25 +96,26 @@ bool profile_shape_spec(const ProfileOptions& profile, [[maybe_unused]] bool pca
 		reason = "a delay of 0 holds packets until deactivation";
 		return false;
 	}
-	spec.filter		   = filter;
-	spec.forward	   = forward;
-	spec.delay_ms	   = static_cast<uint32_t>(profile.delay_ms);
-	spec.label		   = profile.name;
+	spec.filter	  = filter;
+	spec.forward  = forward;
+	spec.delay_ms = static_cast<uint32_t>(profile.delay_ms);
+	spec.label	  = profile.name;
 	return true;
 }
 
-void log_profile_enabled([[maybe_unused]] int profile,
-						const ProfileOptions& profile_options,
-						[[maybe_unused]] const std::string& capture_filter,
-						[[maybe_unused]] bool forward)
+void log_profile_enabled([[maybe_unused]] int				 profile,
+						 const ProfileOptions&				 profile_options,
+						 [[maybe_unused]] const std::string& capture_filter,
+						 [[maybe_unused]] bool				 forward)
 {
 	LOG_DEBUG_GROUP(logging::group::profile, "profile #%d - %s setup: opening handle", profile, profile_options.name.c_str());
-	LOG_DEBUG_GROUP(logging::group::profile, "profile #%d - %s setup: backend = %s, forward = %d, filter = %s",
-			  profile,
-			  profile_options.name.c_str(),
-			  backend::name(),
-			  forward ? 1 : 0,
-			  capture_filter.c_str());
+	LOG_DEBUG_GROUP(logging::group::profile,
+					"profile #%d - %s setup: backend = %s, forward = %d, filter = %s",
+					profile,
+					profile_options.name.c_str(),
+					backend::name(),
+					forward ? 1 : 0,
+					capture_filter.c_str());
 	LOG_ACTIVATE("Lag switch enabled, profile = %s (%s, mode = %s). %s",
 				 profile_options.name.c_str(),
 				 format_keys(profile_options).c_str(),
@@ -208,7 +214,7 @@ void PacketEngine::setup(int profile)
 	open_options.filter	 = capture_filter;
 	open_options.forward = forward;
 	open_options.sniff	 = sniff;
-	std::string open_error;
+	std::string							 open_error;
 	std::unique_ptr<backend::ShapeStage> shape;
 	if (options_.features.linux_bpf.tier != LinuxTier::nfqueue)
 	{
@@ -226,14 +232,23 @@ void PacketEngine::setup(int profile)
 		{
 			if (options_.features.linux_bpf.tier == LinuxTier::bpf)
 			{
-				LOG_ERROR("profile #%d - %s setup: kernel shaping is required (linux_bpf tier bpf) but unavailable: %s", profile, profile_options.name.c_str(), reason.c_str());
+				LOG_ERROR("profile #%d - %s setup: kernel shaping is required (linux_bpf tier bpf) but unavailable: %s",
+						  profile,
+						  profile_options.name.c_str(),
+						  reason.c_str());
 				platform::end_timer_resolution();
 				return;
 			}
-			LOG_DEBUG_GROUP(logging::group::profile, "profile #%d - %s setup: using NFQUEUE, not kernel shaping: %s", profile, profile_options.name.c_str(), reason.c_str());
+			LOG_DEBUG_GROUP(logging::group::profile,
+							"profile #%d - %s setup: using NFQUEUE, not kernel shaping: %s",
+							profile,
+							profile_options.name.c_str(),
+							reason.c_str());
 		}
 		else
-			LOG_INFO("profile #%d - %s runs in the kernel (eBPF + fq), packets do not reach user space", profile, profile_options.name.c_str());
+			LOG_INFO("profile #%d - %s runs in the kernel (eBPF + fq), packets do not reach user space",
+					 profile,
+					 profile_options.name.c_str());
 	}
 	std::unique_ptr<backend::PacketChannel> handle;
 	if (!shape)
@@ -262,8 +277,8 @@ void PacketEngine::setup(int profile)
 		start_pcap_capture(options_.features.pcap_files, profile, profile_options, session->pcap);
 #endif
 	state_->profile_stats[profile - 1].enabled_since = platform::tick_ms();
-	state_->active_sessions[profile - 1] = session;
-	state_->active_profiles[profile - 1] = true;
+	state_->active_sessions[profile - 1]			 = session;
+	state_->active_profiles[profile - 1]			 = true;
 #ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 	{
 		std::lock_guard<std::mutex> discovery_lock(state_->discovery_mutex);
@@ -271,7 +286,7 @@ void PacketEngine::setup(int profile)
 	}
 #endif
 	packet_modes_[profile - 1]->reset();
-	running_				= true;
+	running_ = true;
 	if (!in_kernel)
 	{
 		session->receive_thread = std::thread(&PacketEngine::read_packets, this, session);
@@ -319,7 +334,10 @@ void PacketEngine::teardown(int profile)
 		session = state_->active_sessions[profile - 1];
 		if (!session)
 			return;
-		LOG_DEBUG_GROUP(logging::group::profile, "profile #%d - %s teardown: stopping workers", profile, options_.profiles[profile - 1].name.c_str());
+		LOG_DEBUG_GROUP(logging::group::profile,
+						"profile #%d - %s teardown: stopping workers",
+						profile,
+						options_.profiles[profile - 1].name.c_str());
 		State::ProfileStats& stats = state_->profile_stats[profile - 1];
 		enabled_time			   = platform::tick_ms() - stats.enabled_since;
 		stats.last_enabled_time	   = enabled_time;
@@ -354,9 +372,9 @@ void PacketEngine::teardown(int profile)
 				session->handle->close();
 			platform::end_timer_resolution();
 			LOG_DEACTIVATE("profile #%d - %s teardown: disabled after %s",
-					 profile,
-					 options_.profiles[profile - 1].name.c_str(),
-					 logging::format_duration(enabled_time).c_str());
+						   profile,
+						   options_.profiles[profile - 1].name.c_str(),
+						   logging::format_duration(enabled_time).c_str());
 #ifdef LAGSW_FEATURE_PCAP_FILES
 			if (pcap_captured)
 				LOG_INFO("profile #%d - %s PCAP capture: %s (GUID: %s)",

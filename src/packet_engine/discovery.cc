@@ -2,13 +2,13 @@
 
 #ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 
-#include <atomic>
-#include <cstdlib>
-#include <ctime>
-#include <thread>
+#	include <atomic>
+#	include <cstdlib>
+#	include <ctime>
+#	include <thread>
 
-#include "disconnect_detector.h"
-#include "log.h"
+#	include "disconnect_detector.h"
+#	include "log.h"
 
 LOG_DEFAULT_GROUP(logging::group::discovery)
 
@@ -64,7 +64,8 @@ class DiscoveryHeartbeat
 {
 public:
 	DiscoveryHeartbeat(DiscoveryCounters& counters, const uint64_t& window_ms, uint32_t disconnect_drop_percent)
-		: detector_(disconnect_drop_percent), thread_([this, &counters, &window_ms] { run(counters, window_ms); })
+	: detector_(disconnect_drop_percent)
+	, thread_([this, &counters, &window_ms] { run(counters, window_ms); })
 	{
 	}
 
@@ -88,7 +89,7 @@ private:
 			waited += 100;
 			if (waited < window_ms)
 				continue;
-			waited = 0;
+			waited									   = 0;
 			[[maybe_unused]] const uint64_t received   = counters.received.exchange(0);
 			[[maybe_unused]] const uint64_t suppressed = counters.suppressed.exchange(0);
 			[[maybe_unused]] const uint64_t unparsed   = counters.unparsed.exchange(0);
@@ -115,31 +116,32 @@ private:
 		const double avg = detector_.average();
 		switch (detector_.observe(counted))
 		{
-		case DisconnectDetector::Event::disconnected:
-			LOG_WARN("Disconnect detected: %llu packets in the last %s, down from an average of %.1f per window",
-					 static_cast<unsigned long long>(counted),
-					 logging::format_duration(window_ms).c_str(),
-					 avg);
-			break;
-		case DisconnectDetector::Event::reconnected:
-			LOG_INFO("Connection recovered: %llu packets in the last %s", static_cast<unsigned long long>(counted), logging::format_duration(window_ms).c_str());
-			break;
-		case DisconnectDetector::Event::none:
-			break;
+			case DisconnectDetector::Event::disconnected:
+				LOG_WARN("Disconnect detected: %llu packets in the last %s, down from an average of %.1f per window",
+						 static_cast<unsigned long long>(counted),
+						 logging::format_duration(window_ms).c_str(),
+						 avg);
+				break;
+			case DisconnectDetector::Event::reconnected:
+				LOG_INFO("Connection recovered: %llu packets in the last %s",
+						 static_cast<unsigned long long>(counted),
+						 logging::format_duration(window_ms).c_str());
+				break;
+			case DisconnectDetector::Event::none:
+				break;
 		}
 	}
 
-	std::atomic<bool> stop_{false};
+	std::atomic<bool>  stop_{false};
 	DisconnectDetector detector_;
-	std::thread		  thread_;
+	std::thread		   thread_;
 };
 }  // namespace
 
 std::string PacketEngine::server_label(const std::string& address) const
 {
-	const auto server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](const ServerOptions& item) {
-		return item.address == address;
-	});
+	const auto server =
+		std::find_if(options_.servers.begin(), options_.servers.end(), [&](const ServerOptions& item) { return item.address == address; });
 	return server == options_.servers.end() ? address : server->name + " [" + address + "]";
 }
 
@@ -168,13 +170,13 @@ void PacketEngine::discover_packets()
 	const ServerDiscoveryOptions& discovery = options_.features.server_discovery;
 	DiscoveryScan				  scan(platform::tick_ms());
 	DiscoveryHeartbeat			  heartbeat(scan.counters, discovery.window_ms, discovery.disconnect_drop_percent);
-	uint8_t			   packet_data[0xFFFF];
+	uint8_t						  packet_data[0xFFFF];
 	LOG_DEBUG_GROUP(logging::group::discovery, "Server discovery: capture loop started, waiting for packets");
 	while (!shutdown_)
 	{
-		backend::PacketMeta address;
-		uint32_t			received_length = 0;
-		std::string			io_error;
+		backend::PacketMeta		address;
+		uint32_t				received_length = 0;
+		std::string				io_error;
 		const backend::IoStatus recv_status =
 			state_->discovery_handle->recv(packet_data, sizeof(packet_data), received_length, address, io_error);
 		if (recv_status == backend::IoStatus::ok)
@@ -188,7 +190,9 @@ void PacketEngine::discover_packets()
 		}
 		else if (!shutdown_)
 		{
-			LOG_DEBUG_GROUP(logging::group::discovery_packet, "Server discovery: recv returned status %d without a packet", static_cast<int>(recv_status));
+			LOG_DEBUG_GROUP(logging::group::discovery_packet,
+							"Server discovery: recv returned status %d without a packet",
+							static_cast<int>(recv_status));
 		}
 
 		const uint64_t now = platform::tick_ms();
@@ -252,10 +256,9 @@ void PacketEngine::count_discovered_server(DiscoveryScan& scan, const std::strin
 {
 	std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
 	const bool					first_seen = scan.seen_servers.insert(address_text).second;
-	const bool					configured_server =
-		std::any_of(options_.servers.begin(), options_.servers.end(), [&](const ServerOptions& server) {
-			return server.address == address_text;
-		});
+	const bool configured_server = std::any_of(options_.servers.begin(), options_.servers.end(), [&](const ServerOptions& server) {
+		return server.address == address_text;
+	});
 	if (!configured_server)
 		options_.servers.push_back({address_text, address_text, ""});
 	if (first_seen)
@@ -266,11 +269,15 @@ void PacketEngine::count_discovered_server(DiscoveryScan& scan, const std::strin
 		{
 			if (is_public_address(address_text))
 			{
-				LOG_DEBUG_GROUP(logging::group::discovery, "Server discovery: '%s' is public, triggering region lookup", address_text.c_str());
+				LOG_DEBUG_GROUP(logging::group::discovery,
+								"Server discovery: '%s' is public, triggering region lookup",
+								address_text.c_str());
 				resolve_region(address_text, configured_server);
 			}
 			else
-				LOG_DEBUG_GROUP(logging::group::discovery, "Server discovery: '%s' is private/local, skipping region lookup", address_text.c_str());
+				LOG_DEBUG_GROUP(logging::group::discovery,
+								"Server discovery: '%s' is private/local, skipping region lookup",
+								address_text.c_str());
 		}
 	}
 	++scan.packet_counts[address_text];
@@ -300,8 +307,8 @@ void PacketEngine::finish_discovery_window(DiscoveryScan& scan)
 				LOG_WARN("Discovered server '%s' already exists in the server list; switching to '%s'",
 						 winner->first.c_str(),
 						 existing_server->name.c_str());
-			state_->discovered_server	   = winner->first;
-			const std::string label = server_label(winner->first);
+			state_->discovered_server = winner->first;
+			const std::string label	  = server_label(winner->first);
 			LOG_SERVER("Server '%s' is the authoritative server (%llu packets in %s)",
 					   label.c_str(),
 					   static_cast<unsigned long long>(winner->second),
@@ -319,4 +326,4 @@ void PacketEngine::finish_discovery_window(DiscoveryScan& scan)
 	state_->discovery_counts.clear();
 }
 
-#endif  // LAGSW_FEATURE_SERVER_DISCOVERY
+#endif	// LAGSW_FEATURE_SERVER_DISCOVERY

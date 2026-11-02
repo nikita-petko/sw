@@ -10,16 +10,16 @@ namespace nfq::qdisc {
 
 struct FqParameters
 {
-	uint32_t packet_limit	  = 262144;	 ///< Packets queued in total; delay x packet rate must fit.
-	uint32_t flow_packet_limit = 65536;	 ///< Packets queued per flow.
-	uint32_t horizon_ms		  = 900000;	 ///< Furthest departure time accepted; beyond it a time is capped, not dropped.
+	uint32_t packet_limit	   = 262144;  ///< Packets queued in total; delay x packet rate must fit.
+	uint32_t flow_packet_limit = 65536;	  ///< Packets queued per flow.
+	uint32_t horizon_ms		   = 900000;  ///< Furthest departure time accepted; beyond it a time is capped, not dropped.
 };
 
 struct Interface
 {
-	uint32_t	index  = 0;
+	uint32_t index = 0;
 	/// Length of the link-layer header the egress program must skip: 14 for Ethernet, 0 for devices without one.
-	uint32_t	l2_len = 0;
+	uint32_t l2_len = 0;
 };
 
 /// Resolves an interface name. Fails for names that do not exist or link types the program cannot parse.

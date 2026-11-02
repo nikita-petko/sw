@@ -11,48 +11,48 @@
 #include <string>
 
 #ifdef _WIN32
-#include <io.h>
+#	include <io.h>
 #else
-#include <unistd.h>
+#	include <unistd.h>
 #endif
 
 namespace test {
 namespace detail {
-inline int duplicate(int descriptor)
-{
+	inline int duplicate(int descriptor)
+	{
 #ifdef _WIN32
-	return _dup(descriptor);
+		return _dup(descriptor);
 #else
-	return dup(descriptor);
+		return dup(descriptor);
 #endif
-}
+	}
 
-inline void redirect(int from, int to)
-{
+	inline void redirect(int from, int to)
+	{
 #ifdef _WIN32
-	_dup2(from, to);
-	_close(from);
+		_dup2(from, to);
+		_close(from);
 #else
-	dup2(from, to);
-	close(from);
+		dup2(from, to);
+		close(from);
 #endif
-}
+	}
 
-inline int descriptor_of(std::FILE* file)
-{
+	inline int descriptor_of(std::FILE* file)
+	{
 #ifdef _WIN32
-	return _fileno(file);
+		return _fileno(file);
 #else
-	return fileno(file);
+		return fileno(file);
 #endif
-}
+	}
 }  // namespace detail
 
 /// Runs `body` and returns everything it wrote to stdout.
 inline std::string capture_stdout(const std::function<void()>& body)
 {
 	// Test binaries run in parallel under `xmake test`, so every process needs a capture file of its own.
-	static const std::string name = "lagsw_test_stdout_" + std::to_string(std::random_device{}()) + ".txt";
+	static const std::string	name = "lagsw_test_stdout_" + std::to_string(std::random_device{}()) + ".txt";
 	const std::filesystem::path path = std::filesystem::temp_directory_path() / name;
 	std::fflush(stdout);
 	const int  saved  = detail::duplicate(detail::descriptor_of(stdout));

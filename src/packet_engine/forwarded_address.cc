@@ -2,7 +2,7 @@
 
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 
-#include "log.h"
+#	include "log.h"
 
 LOG_DEFAULT_GROUP(logging::group::forwarded)
 
@@ -10,19 +10,22 @@ namespace {
 using AddressCounts = std::unordered_map<std::string, uint64_t>;
 
 /// Counts a packet seen on the forwarded-address-discovery capture. Returns false when the packet is ignored.
-bool count_forwarded_address(const uint8_t*			packet_data,
-							 uint32_t				received_length,
+bool count_forwarded_address(const uint8_t*				packet_data,
+							 uint32_t					received_length,
 							 const backend::PacketMeta& address,
-							 uint32_t				inbound_if_idx,
-							 uint32_t				outbound_if_idx,
-							 AddressCounts&			destination_counts,
-							 AddressCounts&			source_counts)
+							 uint32_t					inbound_if_idx,
+							 uint32_t					outbound_if_idx,
+							 AddressCounts&				destination_counts,
+							 AddressCounts&				source_counts)
 {
 	const bool is_inbound_interface	 = address.if_index == inbound_if_idx;
 	const bool is_outbound_interface = address.if_index == outbound_if_idx;
 	if (!is_inbound_interface && !is_outbound_interface)
 	{
-		LOG_DEBUG_GROUP(logging::group::forwarded_packet, "Forwarded address discovery: ignoring packet on unrelated ifIdx %u (outbound=%d)", address.if_index, address.outbound);
+		LOG_DEBUG_GROUP(logging::group::forwarded_packet,
+						"Forwarded address discovery: ignoring packet on unrelated ifIdx %u (outbound=%d)",
+						address.if_index,
+						address.outbound);
 		return false;
 	}
 	ParsedPacket parsed;
@@ -72,7 +75,9 @@ void PacketEngine::start_forwarded_address_worker()
 	state_->fad_handle = backend::open(open_options, open_error);
 	if (!state_->fad_handle)
 	{
-		LOG_ERROR_GROUP(logging::group::forwarded, "Forwarded address discovery setup: failed to open capture channel: %s", open_error.c_str());
+		LOG_ERROR_GROUP(logging::group::forwarded,
+						"Forwarded address discovery setup: failed to open capture channel: %s",
+						open_error.c_str());
 		return;
 	}
 	LOG_INFO("Forwarded address discovery enabled (inbound ifIdx %u, outbound ifIdx %u)", inbound_if_idx, outbound_if_idx);
@@ -91,9 +96,8 @@ void PacketEngine::apply_forwarded_address_winner(AddressCounts& counts, bool is
 						logging::format_duration(window_ms).c_str());
 		return;
 	}
-	const auto winner = std::max_element(counts.begin(), counts.end(), [](const auto& left, const auto& right) {
-		return left.second < right.second;
-	});
+	const auto winner =
+		std::max_element(counts.begin(), counts.end(), [](const auto& left, const auto& right) { return left.second < right.second; });
 	LOG_DEBUG_GROUP(logging::group::forwarded,
 					"Forwarded address discovery: %s window closed with %zu candidate address(es); winner '%s' with %llu packet(s)",
 					label,
@@ -146,14 +150,20 @@ void PacketEngine::forwarded_address_discovery_recv()
 	uint8_t		  packet_data[0xFFFF];
 	while (!shutdown_)
 	{
-		backend::PacketMeta address;
-		uint32_t			received_length = 0;
-		std::string			io_error;
+		backend::PacketMeta		address;
+		uint32_t				received_length = 0;
+		std::string				io_error;
 		const backend::IoStatus recv_status =
 			state_->fad_handle->recv(packet_data, sizeof(packet_data), received_length, address, io_error);
 		if (recv_status == backend::IoStatus::ok)
 		{
-			if (!count_forwarded_address(packet_data, received_length, address, inbound_if_idx, outbound_if_idx, destination_counts, source_counts))
+			if (!count_forwarded_address(packet_data,
+										 received_length,
+										 address,
+										 inbound_if_idx,
+										 outbound_if_idx,
+										 destination_counts,
+										 source_counts))
 				continue;
 		}
 		else if (!shutdown_ && recv_status == backend::IoStatus::error)
@@ -188,8 +198,8 @@ std::string PacketEngine::forwarded_address_discovery_status() const
 		return {};
 
 	std::lock_guard<std::mutex> lock(state_->fad_mutex);
-	const std::string			 source		 = state_->fad_client_source_address.empty() ? "unknown" : state_->fad_client_source_address;
-	const std::string			 destination = state_->fad_client_destination_address.empty() ? "unknown" : state_->fad_client_destination_address;
+	const std::string			source = state_->fad_client_source_address.empty() ? "unknown" : state_->fad_client_source_address;
+	const std::string destination = state_->fad_client_destination_address.empty() ? "unknown" : state_->fad_client_destination_address;
 	return "src: " + source + ", dst: " + destination;
 }
 

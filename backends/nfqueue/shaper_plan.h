@@ -39,7 +39,7 @@ struct StageSpec
 	uint32_t				  max_delay_ms	 = 0;
 	bool					  preserve_order = true;
 	/// Inbound packets are not shaped by this stage (their delay is zero), so input-hook rules can be ignored.
-	bool					  ignore_inbound = false;
+	bool ignore_inbound = false;
 };
 
 /// Longest delay the egress tier accepts, and so the horizon the `fq` qdisc needs.
@@ -55,7 +55,7 @@ struct AddressSet
 
 struct Plan
 {
-	bool					ok = false;
+	bool ok = false;
 	/// Why the stage cannot run on the egress tier; empty when `ok`.
 	std::string				reason;
 	lagsw_stage				stage{};

@@ -11,20 +11,15 @@ class HoldUntilDeactivationMode final : public PacketMode
 public:
 	explicit HoldUntilDeactivationMode(ProfileOptions options) : PacketMode(std::move(options), "hold_until_deactivation") {}
 
-	void capture_packet(const uint8_t* packet,
-						uint32_t length,
+	void capture_packet(const uint8_t*			   packet,
+						uint32_t				   length,
 						const backend::PacketMeta& address,
-						int profile,
+						int						   profile,
 						uint64_t,
-						uint64_t receive_order,
+						uint64_t	 receive_order,
 						PacketQueue& packets) override
 	{
-		packets.push(make_packet_node(packet,
-									  length,
-									  address,
-									  profile,
-									  (std::numeric_limits<uint64_t>::max)(),
-									  receive_order));
+		packets.push(make_packet_node(packet, length, address, profile, (std::numeric_limits<uint64_t>::max)(), receive_order));
 	}
 
 	void release(PacketQueue& packets, uint64_t now, std::vector<PacketNode*>& ready_packets) override
@@ -34,7 +29,7 @@ public:
 
 	void release_amount(PacketQueue& packets)
 	{
-		const size_t amount = options_.amount == 0 ? packets.size() : static_cast<size_t>(options_.amount);
+		const size_t			 amount = options_.amount == 0 ? packets.size() : static_cast<size_t>(options_.amount);
 		std::vector<PacketNode*> released;
 		released.reserve((std::min)(amount, packets.size()));
 		for (size_t index = 0; index < amount && !packets.empty(); ++index)
@@ -56,10 +51,7 @@ public:
 		return true;
 	}
 
-	void flush_on_demand(PacketQueue& packets) override
-	{
-		release_amount(packets);
-	}
+	void flush_on_demand(PacketQueue& packets) override { release_amount(packets); }
 
 	void flush(PacketQueue& packets, std::vector<PacketNode*>& pending_packets) override
 	{

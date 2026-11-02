@@ -25,9 +25,8 @@ bool PacketEngine::use_cached_region(const std::string& address, bool preserve_n
 	// resolve_region is only ever called by discover_packets, which already holds lifecycle_mutex here
 	if (!preserve_name && !cached.server_name.empty())
 	{
-		const auto server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](ServerOptions& item) {
-			return item.address == address;
-		});
+		const auto server =
+			std::find_if(options_.servers.begin(), options_.servers.end(), [&](ServerOptions& item) { return item.address == address; });
 		if (server != options_.servers.end())
 			server->name = cached.server_name;
 	}
@@ -52,21 +51,28 @@ void PacketEngine::resolve_region(const std::string& address, bool preserve_name
 
 void PacketEngine::lookup_region(const std::string& address, bool preserve_name)
 {
-	LOG_DEBUG_GROUP(logging::group::region, "Region lookup for '%s': requesting https://ipapi.co/%s/json/", address.c_str(), address.c_str());
+	LOG_DEBUG_GROUP(logging::group::region,
+					"Region lookup for '%s': requesting https://ipapi.co/%s/json/",
+					address.c_str(),
+					address.c_str());
 	const std::string  path		= "/" + address + "/json/";
 	const HttpResponse response = https_get_until_not_rate_limited("ipapi.co", path);
 	if (response.status < 200 || response.status >= 300 || response.body.empty())
 	{
-		LOG_DEBUG_GROUP(logging::group::region, "Region lookup for '%s': unsuccessful response (status %u), giving up", address.c_str(), response.status);
+		LOG_DEBUG_GROUP(logging::group::region,
+						"Region lookup for '%s': unsuccessful response (status %u), giving up",
+						address.c_str(),
+						response.status);
 		return;
 	}
 	LOG_DEBUG_GROUP(logging::group::region, "Region lookup for '%s': received %zu byte response", address.c_str(), response.body.size());
 	const auto label = extract_region_label(response.body);
 	if (!label)
 	{
-		LOG_DEBUG_GROUP(logging::group::region, "Region lookup for '%s': response missing region/country fields, body: %s",
-				  address.c_str(),
-				  response.body.substr(0, 300).c_str());
+		LOG_DEBUG_GROUP(logging::group::region,
+						"Region lookup for '%s': response missing region/country fields, body: %s",
+						address.c_str(),
+						response.body.substr(0, 300).c_str());
 		return;
 	}
 	const std::string new_name = build_server_name(address, response.body);
@@ -90,15 +96,14 @@ void PacketEngine::lookup_region(const std::string& address, bool preserve_name)
 void PacketEngine::rename_server(const std::string& address, const std::string& name)
 {
 	std::lock_guard<std::mutex> lifecycle_lock(state_->lifecycle_mutex);
-	const auto					server = std::find_if(options_.servers.begin(), options_.servers.end(), [&](ServerOptions& item) {
-		  return item.address == address;
-	  });
+	const auto					server =
+		std::find_if(options_.servers.begin(), options_.servers.end(), [&](ServerOptions& item) { return item.address == address; });
 	if (server != options_.servers.end())
 		server->name = name;
 	else
 		LOG_DEBUG_GROUP(logging::group::region, "Region lookup for '%s': server no longer tracked, skipping rename", address.c_str());
 }
-#endif  // LAGSW_FEATURE_SERVER_DISCOVERY
+#endif	// LAGSW_FEATURE_SERVER_DISCOVERY
 
 void PacketEngine::resolve_client_region()
 {
@@ -122,20 +127,26 @@ void PacketEngine::lookup_client_region()
 	const HttpResponse response = https_get_until_not_rate_limited("ipapi.co", "/json/");
 	if (response.status < 200 || response.status >= 300 || response.body.empty())
 	{
-		LOG_DEBUG_GROUP(logging::group::region_client, "Client region lookup: unsuccessful response (status %u), giving up", response.status);
+		LOG_DEBUG_GROUP(logging::group::region_client,
+						"Client region lookup: unsuccessful response (status %u), giving up",
+						response.status);
 		return;
 	}
 	LOG_DEBUG_GROUP(logging::group::region_client, "Client region lookup: received %zu byte response", response.body.size());
 	const auto label = extract_region_label(response.body);
 	if (!label)
 	{
-		LOG_DEBUG_GROUP(logging::group::region_client, "Client region lookup: response missing region/country fields, body: %s", response.body.substr(0, 300).c_str());
+		LOG_DEBUG_GROUP(logging::group::region_client,
+						"Client region lookup: response missing region/country fields, body: %s",
+						response.body.substr(0, 300).c_str());
 		return;
 	}
 	{
 		std::lock_guard<std::mutex> lock(state_->region_mutex);
 		state_->client_region						  = *label;
-		state_->region_cache[client_region_cache_key] = {*label, "", static_cast<uint64_t>(std::time(nullptr)) + region_cache_lifetime_seconds};
+		state_->region_cache[client_region_cache_key] = {*label,
+														 "",
+														 static_cast<uint64_t>(std::time(nullptr)) + region_cache_lifetime_seconds};
 		save_region_cache(state_->region_cache);
 	}
 	LOG_DEBUG_GROUP(logging::group::region_client, "Client region lookup: cached result");

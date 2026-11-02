@@ -78,9 +78,9 @@ public:
 	bool disconnected() const { return disconnected_; }
 
 private:
-	uint32_t			  drop_percent_;
-	std::deque<uint64_t>  history_;
-	bool				  disconnected_ = false;
+	uint32_t			 drop_percent_;
+	std::deque<uint64_t> history_;
+	bool				 disconnected_ = false;
 };
 
 #endif

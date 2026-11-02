@@ -19,141 +19,153 @@
 
 namespace nfq {
 namespace {
-constexpr size_t   kScratchBytes	 = 64 * 1024;
-constexpr size_t   kAddressesPerMessage = 256;
-constexpr uint32_t kTypeIpv4Addr	 = 7;  // nft's ipv4_addr data type; informational for the kernel
-constexpr uint16_t kFamily			 = NFPROTO_INET;
+	constexpr size_t   kScratchBytes		= 64 * 1024;
+	constexpr size_t   kAddressesPerMessage = 256;
+	constexpr uint32_t kTypeIpv4Addr		= 7;  // nft's ipv4_addr data type; informational for the kernel
+	constexpr uint16_t kFamily				= NFPROTO_INET;
 
-template <typename T, void (*Free)(T*)>
-struct Deleter
-{
-	void operator()(T* object) const { Free(object); }
-};
-
-void free_table(nftnl_table* object) { nftnl_table_free(object); }
-void free_chain(nftnl_chain* object) { nftnl_chain_free(object); }
-void free_set(nftnl_set* object) { nftnl_set_free(object); }
-void free_rule(nftnl_rule* object) { nftnl_rule_free(object); }
-
-using TablePtr = std::unique_ptr<nftnl_table, Deleter<nftnl_table, free_table>>;
-using ChainPtr = std::unique_ptr<nftnl_chain, Deleter<nftnl_chain, free_chain>>;
-using SetPtr   = std::unique_ptr<nftnl_set, Deleter<nftnl_set, free_set>>;
-using RulePtr  = std::unique_ptr<nftnl_rule, Deleter<nftnl_rule, free_rule>>;
-
-uint32_t hook_number(Hook hook)
-{
-	switch (hook)
+	template<typename T, void (*Free)(T*)>
+	struct Deleter
 	{
-		case Hook::input:
-			return NF_INET_LOCAL_IN;
-		case Hook::output:
-			return NF_INET_LOCAL_OUT;
-		case Hook::forward:
-			return NF_INET_FORWARD;
+		void operator()(T* object) const { Free(object); }
+	};
+
+	void free_table(nftnl_table* object)
+	{
+		nftnl_table_free(object);
 	}
-	return NF_INET_LOCAL_IN;
-}
+	void free_chain(nftnl_chain* object)
+	{
+		nftnl_chain_free(object);
+	}
+	void free_set(nftnl_set* object)
+	{
+		nftnl_set_free(object);
+	}
+	void free_rule(nftnl_rule* object)
+	{
+		nftnl_rule_free(object);
+	}
 
-nftnl_expr* make_expr(const char* name)
-{
-	nftnl_expr* expr = nftnl_expr_alloc(name);
-	if (expr == nullptr)
-		throw std::bad_alloc();
-	return expr;
-}
+	using TablePtr = std::unique_ptr<nftnl_table, Deleter<nftnl_table, free_table>>;
+	using ChainPtr = std::unique_ptr<nftnl_chain, Deleter<nftnl_chain, free_chain>>;
+	using SetPtr   = std::unique_ptr<nftnl_set, Deleter<nftnl_set, free_set>>;
+	using RulePtr  = std::unique_ptr<nftnl_rule, Deleter<nftnl_rule, free_rule>>;
 
-/// Expressions are handed to the rule, which owns and frees them.
-void add_meta_load(nftnl_rule* rule, uint32_t key)
-{
-	nftnl_expr* expr = make_expr("meta");
-	nftnl_expr_set_u32(expr, NFTNL_EXPR_META_KEY, key);
-	nftnl_expr_set_u32(expr, NFTNL_EXPR_META_DREG, NFT_REG_1);
-	nftnl_rule_add_expr(rule, expr);
-}
+	uint32_t hook_number(Hook hook)
+	{
+		switch (hook)
+		{
+			case Hook::input:
+				return NF_INET_LOCAL_IN;
+			case Hook::output:
+				return NF_INET_LOCAL_OUT;
+			case Hook::forward:
+				return NF_INET_FORWARD;
+		}
+		return NF_INET_LOCAL_IN;
+	}
 
-void add_payload_load(nftnl_rule* rule, uint32_t base, uint32_t offset, uint32_t length)
-{
-	nftnl_expr* expr = make_expr("payload");
-	nftnl_expr_set_u32(expr, NFTNL_EXPR_PAYLOAD_BASE, base);
-	nftnl_expr_set_u32(expr, NFTNL_EXPR_PAYLOAD_DREG, NFT_REG_1);
-	nftnl_expr_set_u32(expr, NFTNL_EXPR_PAYLOAD_OFFSET, offset);
-	nftnl_expr_set_u32(expr, NFTNL_EXPR_PAYLOAD_LEN, length);
-	nftnl_rule_add_expr(rule, expr);
-}
+	nftnl_expr* make_expr(const char* name)
+	{
+		nftnl_expr* expr = nftnl_expr_alloc(name);
+		if (expr == nullptr)
+			throw std::bad_alloc();
+		return expr;
+	}
 
-void add_compare(nftnl_rule* rule, bool negated, const void* data, uint32_t length)
-{
-	nftnl_expr* expr = make_expr("cmp");
-	nftnl_expr_set_u32(expr, NFTNL_EXPR_CMP_SREG, NFT_REG_1);
-	nftnl_expr_set_u32(expr, NFTNL_EXPR_CMP_OP, negated ? NFT_CMP_NEQ : NFT_CMP_EQ);
-	nftnl_expr_set(expr, NFTNL_EXPR_CMP_DATA, data, length);
-	nftnl_rule_add_expr(rule, expr);
-}
+	/// Expressions are handed to the rule, which owns and frees them.
+	void add_meta_load(nftnl_rule* rule, uint32_t key)
+	{
+		nftnl_expr* expr = make_expr("meta");
+		nftnl_expr_set_u32(expr, NFTNL_EXPR_META_KEY, key);
+		nftnl_expr_set_u32(expr, NFTNL_EXPR_META_DREG, NFT_REG_1);
+		nftnl_rule_add_expr(rule, expr);
+	}
 
-void add_byte_mask(nftnl_rule* rule, uint8_t mask)
-{
-	const uint8_t xor_value = 0;
-	nftnl_expr*	  expr		= make_expr("bitwise");
-	nftnl_expr_set_u32(expr, NFTNL_EXPR_BITWISE_SREG, NFT_REG_1);
-	nftnl_expr_set_u32(expr, NFTNL_EXPR_BITWISE_DREG, NFT_REG_1);
-	nftnl_expr_set_u32(expr, NFTNL_EXPR_BITWISE_LEN, 1);
-	nftnl_expr_set(expr, NFTNL_EXPR_BITWISE_MASK, &mask, 1);
-	nftnl_expr_set(expr, NFTNL_EXPR_BITWISE_XOR, &xor_value, 1);
-	nftnl_rule_add_expr(rule, expr);
-}
+	void add_payload_load(nftnl_rule* rule, uint32_t base, uint32_t offset, uint32_t length)
+	{
+		nftnl_expr* expr = make_expr("payload");
+		nftnl_expr_set_u32(expr, NFTNL_EXPR_PAYLOAD_BASE, base);
+		nftnl_expr_set_u32(expr, NFTNL_EXPR_PAYLOAD_DREG, NFT_REG_1);
+		nftnl_expr_set_u32(expr, NFTNL_EXPR_PAYLOAD_OFFSET, offset);
+		nftnl_expr_set_u32(expr, NFTNL_EXPR_PAYLOAD_LEN, length);
+		nftnl_rule_add_expr(rule, expr);
+	}
 
-void add_set_lookup(nftnl_rule* rule, bool negated, const std::string& name, uint32_t id)
-{
-	nftnl_expr* expr = make_expr("lookup");
-	nftnl_expr_set_u32(expr, NFTNL_EXPR_LOOKUP_SREG, NFT_REG_1);
-	nftnl_expr_set_str(expr, NFTNL_EXPR_LOOKUP_SET, name.c_str());
-	nftnl_expr_set_u32(expr, NFTNL_EXPR_LOOKUP_SET_ID, id);
-	if (negated)
-		nftnl_expr_set_u32(expr, NFTNL_EXPR_LOOKUP_FLAGS, NFT_LOOKUP_F_INV);
-	nftnl_rule_add_expr(rule, expr);
-}
+	void add_compare(nftnl_rule* rule, bool negated, const void* data, uint32_t length)
+	{
+		nftnl_expr* expr = make_expr("cmp");
+		nftnl_expr_set_u32(expr, NFTNL_EXPR_CMP_SREG, NFT_REG_1);
+		nftnl_expr_set_u32(expr, NFTNL_EXPR_CMP_OP, negated ? NFT_CMP_NEQ : NFT_CMP_EQ);
+		nftnl_expr_set(expr, NFTNL_EXPR_CMP_DATA, data, length);
+		nftnl_rule_add_expr(rule, expr);
+	}
 
-void add_mask32(nftnl_rule* rule, uint32_t mask)
-{
-	const uint32_t xor_value = 0;
-	nftnl_expr*	   expr		 = make_expr("bitwise");
-	nftnl_expr_set_u32(expr, NFTNL_EXPR_BITWISE_SREG, NFT_REG_1);
-	nftnl_expr_set_u32(expr, NFTNL_EXPR_BITWISE_DREG, NFT_REG_1);
-	nftnl_expr_set_u32(expr, NFTNL_EXPR_BITWISE_LEN, sizeof(uint32_t));
-	nftnl_expr_set(expr, NFTNL_EXPR_BITWISE_MASK, &mask, sizeof(mask));
-	nftnl_expr_set(expr, NFTNL_EXPR_BITWISE_XOR, &xor_value, sizeof(xor_value));
-	nftnl_rule_add_expr(rule, expr);
-}
+	void add_byte_mask(nftnl_rule* rule, uint8_t mask)
+	{
+		const uint8_t xor_value = 0;
+		nftnl_expr*	  expr		= make_expr("bitwise");
+		nftnl_expr_set_u32(expr, NFTNL_EXPR_BITWISE_SREG, NFT_REG_1);
+		nftnl_expr_set_u32(expr, NFTNL_EXPR_BITWISE_DREG, NFT_REG_1);
+		nftnl_expr_set_u32(expr, NFTNL_EXPR_BITWISE_LEN, 1);
+		nftnl_expr_set(expr, NFTNL_EXPR_BITWISE_MASK, &mask, 1);
+		nftnl_expr_set(expr, NFTNL_EXPR_BITWISE_XOR, &xor_value, 1);
+		nftnl_rule_add_expr(rule, expr);
+	}
 
-void add_verdict(nftnl_rule* rule, uint32_t verdict)
-{
-	nftnl_expr* expr = make_expr("immediate");
-	nftnl_expr_set_u32(expr, NFTNL_EXPR_IMM_DREG, NFT_REG_VERDICT);
-	nftnl_expr_set_u32(expr, NFTNL_EXPR_IMM_VERDICT, verdict);
-	nftnl_rule_add_expr(rule, expr);
-}
+	void add_set_lookup(nftnl_rule* rule, bool negated, const std::string& name, uint32_t id)
+	{
+		nftnl_expr* expr = make_expr("lookup");
+		nftnl_expr_set_u32(expr, NFTNL_EXPR_LOOKUP_SREG, NFT_REG_1);
+		nftnl_expr_set_str(expr, NFTNL_EXPR_LOOKUP_SET, name.c_str());
+		nftnl_expr_set_u32(expr, NFTNL_EXPR_LOOKUP_SET_ID, id);
+		if (negated)
+			nftnl_expr_set_u32(expr, NFTNL_EXPR_LOOKUP_FLAGS, NFT_LOOKUP_F_INV);
+		nftnl_rule_add_expr(rule, expr);
+	}
 
-void add_queue(nftnl_rule* rule, uint16_t queue_number)
-{
-	nftnl_expr* expr = make_expr("queue");
-	nftnl_expr_set_u16(expr, NFTNL_EXPR_QUEUE_NUM, queue_number);
-	nftnl_expr_set_u16(expr, NFTNL_EXPR_QUEUE_TOTAL, 1);
-	nftnl_expr_set_u16(expr, NFTNL_EXPR_QUEUE_FLAGS, NFT_QUEUE_FLAG_BYPASS);
-	nftnl_rule_add_expr(rule, expr);
-}
+	void add_mask32(nftnl_rule* rule, uint32_t mask)
+	{
+		const uint32_t xor_value = 0;
+		nftnl_expr*	   expr		 = make_expr("bitwise");
+		nftnl_expr_set_u32(expr, NFTNL_EXPR_BITWISE_SREG, NFT_REG_1);
+		nftnl_expr_set_u32(expr, NFTNL_EXPR_BITWISE_DREG, NFT_REG_1);
+		nftnl_expr_set_u32(expr, NFTNL_EXPR_BITWISE_LEN, sizeof(uint32_t));
+		nftnl_expr_set(expr, NFTNL_EXPR_BITWISE_MASK, &mask, sizeof(mask));
+		nftnl_expr_set(expr, NFTNL_EXPR_BITWISE_XOR, &xor_value, sizeof(xor_value));
+		nftnl_rule_add_expr(rule, expr);
+	}
 
-/// Distinct sorted address list, so equal lists from different clauses share one set.
-std::vector<uint32_t> normalized(std::vector<uint32_t> addrs)
-{
-	std::sort(addrs.begin(), addrs.end());
-	addrs.erase(std::unique(addrs.begin(), addrs.end()), addrs.end());
-	return addrs;
-}
+	void add_verdict(nftnl_rule* rule, uint32_t verdict)
+	{
+		nftnl_expr* expr = make_expr("immediate");
+		nftnl_expr_set_u32(expr, NFTNL_EXPR_IMM_DREG, NFT_REG_VERDICT);
+		nftnl_expr_set_u32(expr, NFTNL_EXPR_IMM_VERDICT, verdict);
+		nftnl_rule_add_expr(rule, expr);
+	}
 
-uint8_t transport_protocol(Transport transport)
-{
-	return transport == Transport::tcp ? IPPROTO_TCP : IPPROTO_UDP;
-}
+	void add_queue(nftnl_rule* rule, uint16_t queue_number)
+	{
+		nftnl_expr* expr = make_expr("queue");
+		nftnl_expr_set_u16(expr, NFTNL_EXPR_QUEUE_NUM, queue_number);
+		nftnl_expr_set_u16(expr, NFTNL_EXPR_QUEUE_TOTAL, 1);
+		nftnl_expr_set_u16(expr, NFTNL_EXPR_QUEUE_FLAGS, NFT_QUEUE_FLAG_BYPASS);
+		nftnl_rule_add_expr(rule, expr);
+	}
+
+	/// Distinct sorted address list, so equal lists from different clauses share one set.
+	std::vector<uint32_t> normalized(std::vector<uint32_t> addrs)
+	{
+		std::sort(addrs.begin(), addrs.end());
+		addrs.erase(std::unique(addrs.begin(), addrs.end()), addrs.end());
+		return addrs;
+	}
+
+	uint8_t transport_protocol(Transport transport)
+	{
+		return transport == Transport::tcp ? IPPROTO_TCP : IPPROTO_UDP;
+	}
 }  // namespace
 
 NftBatch::NftBatch(uint32_t first_seq) : scratch_(kScratchBytes), first_seq_(first_seq), seq_(first_seq), last_seq_(first_seq)
@@ -300,59 +312,59 @@ void NftBatch::add_queue_rule(const std::string& chain, const CompiledRule& comp
 		switch (match.kind)
 		{
 			case MatchKind::nfproto_ipv4:
-			{
-				const uint8_t family = NFPROTO_IPV4;
-				add_meta_load(rule.get(), NFT_META_NFPROTO);
-				add_compare(rule.get(), false, &family, sizeof(family));
-				break;
-			}
+				{
+					const uint8_t family = NFPROTO_IPV4;
+					add_meta_load(rule.get(), NFT_META_NFPROTO);
+					add_compare(rule.get(), false, &family, sizeof(family));
+					break;
+				}
 			case MatchKind::ip_protocol:
-			{
-				const uint8_t protocol = transport_protocol(match.transport);
-				add_payload_load(rule.get(), NFT_PAYLOAD_NETWORK_HEADER, 9, 1);
-				add_compare(rule.get(), match.negated, &protocol, sizeof(protocol));
-				break;
-			}
+				{
+					const uint8_t protocol = transport_protocol(match.transport);
+					add_payload_load(rule.get(), NFT_PAYLOAD_NETWORK_HEADER, 9, 1);
+					add_compare(rule.get(), match.negated, &protocol, sizeof(protocol));
+					break;
+				}
 			case MatchKind::tcp_flag:
-			{
-				const uint8_t expected = match.negated ? 0 : match.tcp_flag;
-				add_payload_load(rule.get(), NFT_PAYLOAD_TRANSPORT_HEADER, 13, 1);
-				add_byte_mask(rule.get(), match.tcp_flag);
-				add_compare(rule.get(), false, &expected, sizeof(expected));
-				break;
-			}
+				{
+					const uint8_t expected = match.negated ? 0 : match.tcp_flag;
+					add_payload_load(rule.get(), NFT_PAYLOAD_TRANSPORT_HEADER, 13, 1);
+					add_byte_mask(rule.get(), match.tcp_flag);
+					add_compare(rule.get(), false, &expected, sizeof(expected));
+					break;
+				}
 			case MatchKind::ip_addr:
-			{
-				add_payload_load(rule.get(), NFT_PAYLOAD_NETWORK_HEADER, match.endpoint == Endpoint::source ? 12 : 16, 4);
-				const std::vector<uint32_t> addrs = normalized(match.addrs);
-				if (addrs.size() == 1)
 				{
-					const uint32_t address = htonl(addrs.front());
-					add_compare(rule.get(), match.negated, &address, sizeof(address));
+					add_payload_load(rule.get(), NFT_PAYLOAD_NETWORK_HEADER, match.endpoint == Endpoint::source ? 12 : 16, 4);
+					const std::vector<uint32_t> addrs = normalized(match.addrs);
+					if (addrs.size() == 1)
+					{
+						const uint32_t address = htonl(addrs.front());
+						add_compare(rule.get(), match.negated, &address, sizeof(address));
+					}
+					else
+					{
+						const auto found = sets.find(addrs);
+						if (found == sets.end())
+							return fail("internal error: address set was not created");
+						add_set_lookup(rule.get(), match.negated, found->second.name, found->second.id);
+					}
+					break;
 				}
-				else
-				{
-					const auto found = sets.find(addrs);
-					if (found == sets.end())
-						return fail("internal error: address set was not created");
-					add_set_lookup(rule.get(), match.negated, found->second.name, found->second.id);
-				}
-				break;
-			}
 			case MatchKind::port:
-			{
-				const uint16_t port = htons(match.port);
-				add_payload_load(rule.get(), NFT_PAYLOAD_TRANSPORT_HEADER, match.endpoint == Endpoint::source ? 0 : 2, 2);
-				add_compare(rule.get(), match.negated, &port, sizeof(port));
-				break;
-			}
+				{
+					const uint16_t port = htons(match.port);
+					add_payload_load(rule.get(), NFT_PAYLOAD_TRANSPORT_HEADER, match.endpoint == Endpoint::source ? 0 : 2, 2);
+					add_compare(rule.get(), match.negated, &port, sizeof(port));
+					break;
+				}
 			case MatchKind::interface:
-			{
-				const uint32_t index = match.index;
-				add_meta_load(rule.get(), match.output ? NFT_META_OIF : NFT_META_IIF);
-				add_compare(rule.get(), match.negated, &index, sizeof(index));
-				break;
-			}
+				{
+					const uint32_t index = match.index;
+					add_meta_load(rule.get(), match.output ? NFT_META_OIF : NFT_META_IIF);
+					add_compare(rule.get(), match.negated, &index, sizeof(index));
+					break;
+				}
 		}
 	}
 	add_queue(rule.get(), queue_number);
@@ -361,7 +373,12 @@ void NftBatch::add_queue_rule(const std::string& chain, const CompiledRule& comp
 	commit(message);
 }
 
-void NftBatch::add_channel(uint32_t channel_id, uint16_t queue_number, int priority, const std::vector<CompiledRule>& rules, ChannelChains& chains, uint32_t release_bit)
+void NftBatch::add_channel(uint32_t							channel_id,
+						   uint16_t							queue_number,
+						   int								priority,
+						   const std::vector<CompiledRule>& rules,
+						   ChannelChains&					chains,
+						   uint32_t							release_bit)
 {
 	try
 	{
@@ -408,7 +425,7 @@ void NftBatch::delete_channel(const ChannelChains& chains)
 {
 	for (const std::string& name : chains.names)
 	{
-		RulePtr rule(nftnl_rule_alloc());
+		RulePtr	 rule(nftnl_rule_alloc());
 		ChainPtr chain(nftnl_chain_alloc());
 		if (!rule || !chain)
 			return fail("out of memory");

@@ -17,35 +17,35 @@
 
 #ifdef LAGSW_FEATURE_NET_MONITOR
 
-#include "fakes.h"
-#include "log.h"
-#include "packet_engine.h"
-#include "support/packets.h"
-#include "support/test.h"
+#	include "fakes.h"
+#	include "log.h"
+#	include "packet_engine.h"
+#	include "support/packets.h"
+#	include "support/test.h"
 
 // The tests look at the measured values directly instead of parsing the rendered screen; LAGSW_NET_MONITOR_TESTING makes the
 // internals of NetMonitor public.
-#include "net_monitor.h"
+#	include "net_monitor.h"
 
 namespace {
 using namespace packets;
 using fakes::wait_until;
 
-constexpr std::array<uint8_t, 4> kServer = {192, 168, 1, 20};
-constexpr std::array<uint8_t, 4> kClient = {10, 0, 0, 1};
+constexpr std::array<uint8_t, 4> kServer		= {192, 168, 1, 20};
+constexpr std::array<uint8_t, 4> kClient		= {10, 0, 0, 1};
 const char*						 kServerAddress = "192.168.1.20";
 
 PacketEngineOptions options_with_server()
 {
 	PacketEngineOptions options;
 	ProfileOptions		profile;
-	profile.name		  = "A";
-	options.profiles	  = {profile};
-	options.global_filter = "tcp";
+	profile.name						 = "A";
+	options.profiles					 = {profile};
+	options.global_filter				 = "tcp";
 	options.features.net_monitor.enabled = true;
 	ServerOptions server;
-	server.address = kServerAddress;
-	server.name	   = "Test";
+	server.address	= kServerAddress;
+	server.name		= "Test";
 	options.servers = {server};
 	return options;
 }
@@ -62,7 +62,7 @@ Bytes from_server(uint32_t seq, uint32_t ack, uint8_t flags, size_t payload)
 
 void test_toggle_key_follows_the_configuration()
 {
-	PacketEngineOptions options = options_with_server();
+	PacketEngineOptions options		 = options_with_server();
 	options.features.net_monitor.key = 'M';
 	PacketEngine engine(options);
 	NetMonitor	 monitor(engine, options);
@@ -212,10 +212,10 @@ void test_pause_ignores_packets_and_reset_clears_them()
 void test_view_keys_follow_the_configuration()
 {
 	fakes::reset();
-	PacketEngineOptions options = options_with_server();
-	options.features.net_monitor.pause_key	 = 'G';
-	options.features.net_monitor.reset_key	 = 'H';
-	options.features.net_monitor.flows_key	 = 'J';
+	PacketEngineOptions options			   = options_with_server();
+	options.features.net_monitor.pause_key = 'G';
+	options.features.net_monitor.reset_key = 'H';
+	options.features.net_monitor.flows_key = 'J';
 	PacketEngine engine(options);
 	NetMonitor	 monitor(engine, options);
 	monitor.toggle();
@@ -238,16 +238,16 @@ void test_charts_and_frame_render()
 	const PacketEngineOptions options = options_with_server();
 	PacketEngine			  engine(options);
 	engine.cycle_server(1);
-	NetMonitor				  monitor(engine, options);
+	NetMonitor monitor(engine, options);
 	monitor.toggle();
 	monitor.stop();
 	{
 		std::lock_guard<std::mutex> lock(monitor.mutex_);
 		auto&						stats = monitor.servers_[kServerAddress];
-		stats.up.packets_tick   = 5;
-		stats.down.packets_tick = 50;
-		stats.rtt_samples		= 1;
-		stats.last_rtt_ms		= 42;
+		stats.up.packets_tick			  = 5;
+		stats.down.packets_tick			  = 50;
+		stats.rtt_samples				  = 1;
+		stats.last_rtt_ms				  = 42;
 		stats.recent_rtt.push_back(42);
 		monitor.tick();
 		monitor.tick();
@@ -260,9 +260,9 @@ void test_charts_and_frame_render()
 		CHECK(frame.find("▁") != std::string::npos || frame.find("█") != std::string::npos);
 
 		// A taller, wider terminal makes the charts taller and wider but never produces more lines than rows.
-		const auto count_lines = [](const std::string& text) { return std::count(text.begin(), text.end(), '\n'); };
-		const std::string small = monitor.render_frame(100, 0);
-		const std::string tall	= monitor.render_frame(200, 100);
+		const auto		  count_lines = [](const std::string& text) { return std::count(text.begin(), text.end(), '\n'); };
+		const std::string small		  = monitor.render_frame(100, 0);
+		const std::string tall		  = monitor.render_frame(200, 100);
 		CHECK(count_lines(tall) > count_lines(small));
 		CHECK(count_lines(tall) <= 99);
 		const std::string cramped = monitor.render_frame(100, 40);
@@ -318,7 +318,7 @@ void test_tcp_health_flows_and_path()
 	const PacketEngineOptions options = options_with_server();
 	PacketEngine			  engine(options);
 	engine.cycle_server(1);
-	NetMonitor				  monitor(engine, options);
+	NetMonitor monitor(engine, options);
 	monitor.toggle();
 	monitor.stop();
 
@@ -346,7 +346,7 @@ void test_tcp_health_flows_and_path()
 	CHECK(frame.find("TCP health") != std::string::npos);
 	CHECK(frame.find("This machine") != std::string::npos);
 	CHECK(frame.find("burstiness") != std::string::npos);
-	CHECK(monitor.cpu_.values.empty());  // the first sample only sets the baseline
+	CHECK(monitor.cpu_.values.empty());	 // the first sample only sets the baseline
 }
 
 void feed(NetMonitor& monitor, const Bytes& packet)
@@ -414,11 +414,11 @@ void test_resize_is_not_needed_for_the_layout_to_fit()
 void test_alerts_raise_and_clear()
 {
 	fakes::reset();
-	PacketEngineOptions options = options_with_server();
-	options.features.net_monitor.alert_rtt_ms			 = 100;
-	options.features.net_monitor.alert_jitter_ms		 = 20;
+	PacketEngineOptions options							  = options_with_server();
+	options.features.net_monitor.alert_rtt_ms			  = 100;
+	options.features.net_monitor.alert_jitter_ms		  = 20;
 	options.features.net_monitor.alert_retransmit_percent = 10;
-	options.features.net_monitor.alert_stall_ms			 = 500;
+	options.features.net_monitor.alert_stall_ms			  = 500;
 	PacketEngine engine(options);
 	NetMonitor	 monitor(engine, options);
 	monitor.toggle();
@@ -426,13 +426,13 @@ void test_alerts_raise_and_clear()
 
 	std::lock_guard<std::mutex> lock(monitor.mutex_);
 	auto&						stats = monitor.servers_[kServerAddress];
-	stats.rtt_samples	 = 1;
-	stats.tick_rtt_sum_ms = 300;
-	stats.tick_rtt_count = 1;
-	stats.jitter_ms		 = 40;
-	stats.data_up		 = 40;
-	stats.retrans_up	 = 10;
-	stats.tick_max_gap_ms = 900;
+	stats.rtt_samples				  = 1;
+	stats.tick_rtt_sum_ms			  = 300;
+	stats.tick_rtt_count			  = 1;
+	stats.jitter_ms					  = 40;
+	stats.data_up					  = 40;
+	stats.retrans_up				  = 10;
+	stats.tick_max_gap_ms			  = 900;
 	monitor.tick();
 	for (const auto kind : {NetMonitor::alert_rtt, NetMonitor::alert_jitter, NetMonitor::alert_retransmit, NetMonitor::alert_stall})
 		CHECK(stats.alert_active[kind] && stats.alert_count[kind] == 1);
@@ -458,7 +458,7 @@ void test_alerts_raise_and_clear()
 void test_alerts_can_be_disabled()
 {
 	fakes::reset();
-	PacketEngineOptions options = options_with_server();
+	PacketEngineOptions options					 = options_with_server();
 	options.features.net_monitor.alert_rtt_ms	 = 0;
 	options.features.net_monitor.alert_jitter_ms = 0;
 	options.features.net_monitor.alert_stall_ms	 = 0;
@@ -469,11 +469,11 @@ void test_alerts_can_be_disabled()
 
 	std::lock_guard<std::mutex> lock(monitor.mutex_);
 	auto&						stats = monitor.servers_[kServerAddress];
-	stats.rtt_samples	  = 1;
-	stats.tick_rtt_sum_ms = 5000;
-	stats.tick_rtt_count  = 1;
-	stats.jitter_ms		  = 500;
-	stats.tick_max_gap_ms = 9000;
+	stats.rtt_samples				  = 1;
+	stats.tick_rtt_sum_ms			  = 5000;
+	stats.tick_rtt_count			  = 1;
+	stats.jitter_ms					  = 500;
+	stats.tick_max_gap_ms			  = 9000;
 	monitor.tick();
 	CHECK(monitor.events_.empty());
 }
@@ -511,11 +511,12 @@ void test_profile_view_tracks_activations_and_conditions()
 	{
 		std::lock_guard<std::mutex> lock(monitor.mutex_);
 		auto&						stats = monitor.servers_[kServerAddress];
-		stats.tick_rtt_sum_ms = 20;
-		stats.tick_rtt_count  = 1;
+		stats.tick_rtt_sum_ms			  = 20;
+		stats.tick_rtt_count			  = 1;
 		monitor.tick();
 		CHECK(monitor.baseline_.ticks == 1 && monitor.baseline_.rtt_samples == 1);
-		CHECK(monitor.profile_stats_.size() == 1 && monitor.profile_stats_[0].activations == 0 && monitor.profile_stats_[0].active.ticks == 0);
+		CHECK(monitor.profile_stats_.size() == 1 && monitor.profile_stats_[0].activations == 0 &&
+			  monitor.profile_stats_[0].active.ticks == 0);
 	}
 
 	engine.setup(1);
@@ -524,15 +525,15 @@ void test_profile_view_tracks_activations_and_conditions()
 	{
 		std::lock_guard<std::mutex> lock(monitor.mutex_);
 		auto&						stats = monitor.servers_[kServerAddress];
-		stats.tick_rtt_sum_ms = 100;
-		stats.tick_rtt_count  = 1;
+		stats.tick_rtt_sum_ms			  = 100;
+		stats.tick_rtt_count			  = 1;
 		stats.data_up += 50;
 		stats.retrans_up += 5;
 		stats.down.bytes_tick = 1000;
 		monitor.tick();
 	}
 	{
-		std::lock_guard<std::mutex> lock(monitor.mutex_);
+		std::lock_guard<std::mutex>		lock(monitor.mutex_);
 		const NetMonitor::ProfileStats& profile = monitor.profile_stats_[0];
 		CHECK(profile.activations == 1 && profile.current_ticks == 2 && profile.active.ticks == 2);
 		CHECK(profile.active.rtt_samples == 2 && profile.active.data_packets == 100 && profile.active.retransmits == 10 &&
@@ -604,7 +605,8 @@ void test_udp_and_tcp_flows_are_listed()
 		std::lock_guard<std::mutex> lock(monitor.mutex_);
 		CHECK(monitor.view_ == NetMonitor::View::flows && monitor.has_selection_);
 		const std::string frame = monitor.render_flow_view(120, 0);
-		CHECK(frame.find("Selected flow") != std::string::npos && frame.find("tcp") != std::string::npos && frame.find("udp") != std::string::npos);
+		CHECK(frame.find("Selected flow") != std::string::npos && frame.find("tcp") != std::string::npos &&
+			  frame.find("udp") != std::string::npos);
 		CHECK(frame.find("connecting") != std::string::npos || frame.find("established") != std::string::npos);
 	}
 	const uint64_t before = [&] {
@@ -662,7 +664,7 @@ void test_rtt_spread_is_recorded_and_drawn()
 	std::this_thread::sleep_for(std::chrono::milliseconds(30));
 	feed(monitor, from_server(1, 110, kAck, 0));
 	std::lock_guard<std::mutex> lock(monitor.mutex_);
-	auto&						stats = monitor.servers_[kServerAddress];
+	auto&						stats	= monitor.servers_[kServerAddress];
 	uint64_t					samples = 0;
 	for (const uint64_t count : stats.rtt_hist)
 		samples += count;
@@ -697,8 +699,8 @@ std::filesystem::path scratch_directory(const char* name)
 
 std::string read_file(const std::filesystem::path& path)
 {
-	std::ifstream		file(path);
-	std::ostringstream	text;
+	std::ifstream	   file(path);
+	std::ostringstream text;
 	text << file.rdbuf();
 	return text.str();
 }
@@ -706,8 +708,8 @@ std::string read_file(const std::filesystem::path& path)
 void test_export_writes_csv_and_json()
 {
 	fakes::reset();
-	const std::filesystem::path directory = scratch_directory("export");
-	PacketEngineOptions			options	  = options_with_server();
+	const std::filesystem::path directory		  = scratch_directory("export");
+	PacketEngineOptions			options			  = options_with_server();
 	options.features.net_monitor.export_directory = (directory / "nested").string();
 	PacketEngine engine(options);
 	NetMonitor	 monitor(engine, options);
@@ -736,7 +738,7 @@ void test_export_writes_csv_and_json()
 	const std::string json_text = read_file(json);
 	CHECK(csv_text.rfind("second,server,address,", 0) == 0);
 	CHECK(csv_text.find("\"Test\",192.168.1.20,") != std::string::npos);
-	CHECK(std::count(csv_text.begin(), csv_text.end(), '\n') == 3);  // the header and one row per second and server
+	CHECK(std::count(csv_text.begin(), csv_text.end(), '\n') == 3);	 // the header and one row per second and server
 	CHECK(json_text.find("\"address\":\"192.168.1.20\"") != std::string::npos && json_text.find("\"series\"") != std::string::npos);
 	CHECK(json_text.find("\"flows\"") != std::string::npos && json_text.find("\"events\"") != std::string::npos);
 
@@ -772,13 +774,13 @@ void test_log_file_keeps_history_after_the_view_closes()
 	std::filesystem::remove_all(directory);
 }
 
-#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+#	ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 void test_discovered_servers_are_added_and_captured()
 {
 	fakes::reset();
-	PacketEngineOptions options = options_with_server();
-	options.features.server_discovery.enabled	 = true;
-	options.features.server_discovery.port		 = 55000;
+	PacketEngineOptions options					= options_with_server();
+	options.features.server_discovery.enabled	= true;
+	options.features.server_discovery.port		= 55000;
 	options.features.server_discovery.window_ms = 60000;
 	PacketEngine engine(options);
 	engine.start_workers();
@@ -813,7 +815,7 @@ void test_discovered_servers_are_added_and_captured()
 	monitor.stop();
 	CHECK(second->closed());
 }
-#endif
+#	endif
 }  // namespace
 
 int main(int argc, char** argv)
@@ -844,9 +846,9 @@ int main(int argc, char** argv)
 		{"gateway_forwarded_traffic_is_requested", test_gateway_forwarded_traffic_is_requested},
 		{"export_writes_csv_and_json", test_export_writes_csv_and_json},
 		{"log_file_keeps_history_after_the_view_closes", test_log_file_keeps_history_after_the_view_closes},
-#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+#	ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 		{"discovered_servers_are_added_and_captured", test_discovered_servers_are_added_and_captured},
-#endif
+#	endif
 	};
 	return test::run_tests("net_monitor", cases, argc, argv);
 }

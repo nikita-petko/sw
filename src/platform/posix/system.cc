@@ -1,5 +1,5 @@
 #ifdef _WIN32
-#error "platform/posix/system.cc must not be built on Windows"
+#	error "platform/posix/system.cc must not be built on Windows"
 #endif
 
 #include "platform.h"
@@ -33,8 +33,12 @@ void sleep_ms(uint32_t milliseconds)
 }
 
 // the kernel timer is already fine grained enough
-void begin_timer_resolution() {}
-void end_timer_resolution() {}
+void begin_timer_resolution()
+{
+}
+void end_timer_resolution()
+{
+}
 
 std::string generate_guid()
 {
@@ -47,8 +51,8 @@ std::string generate_guid()
 	if (read_count != sizeof(bytes))
 		return {};
 	// RFC 4122 version 4
-	bytes[6] = static_cast<unsigned char>((bytes[6] & 0x0F) | 0x40);
-	bytes[8] = static_cast<unsigned char>((bytes[8] & 0x3F) | 0x80);
+	bytes[6]	  = static_cast<unsigned char>((bytes[6] & 0x0F) | 0x40);
+	bytes[8]	  = static_cast<unsigned char>((bytes[8] & 0x3F) | 0x80);
 	char text[37] = {};
 	std::snprintf(text,
 				  sizeof(text),
@@ -73,7 +77,9 @@ std::string generate_guid()
 }
 
 // terminals interpret ANSI escape sequences by default
-void enable_terminal_colors() {}
+void enable_terminal_colors()
+{
+}
 
 int console_width()
 {
@@ -97,8 +103,8 @@ SystemCounters system_counters()
 	rusage		   usage = {};
 	if (getrusage(RUSAGE_SELF, &usage) == 0)
 	{
-		counters.cpu_seconds = static_cast<double>(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) +
-							   static_cast<double>(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1e6;
+		counters.cpu_seconds   = static_cast<double>(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) +
+								 static_cast<double>(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1e6;
 		counters.cpu_available = true;
 	}
 #ifdef __linux__
@@ -114,8 +120,8 @@ SystemCounters system_counters()
 		name.erase(0, name.find_first_not_of(' '));
 		if (name == "lo")
 			continue;
-		std::istringstream		fields(text.substr(colon + 1));
-		unsigned long long		value[16] = {};
+		std::istringstream fields(text.substr(colon + 1));
+		unsigned long long value[16] = {};
 		for (unsigned long long& field : value)
 			fields >> field;
 		if (fields.fail())

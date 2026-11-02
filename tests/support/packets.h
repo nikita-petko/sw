@@ -41,7 +41,13 @@ inline void append(Bytes& out, const Bytes& more)
 }
 
 /// `flags` is the TCP flag byte (kFin ... kUrg); `words` the data offset in 32-bit words.
-inline Bytes tcp_segment(uint16_t source_port, uint16_t destination_port, uint32_t sequence, uint32_t acknowledgment, uint8_t flags, uint8_t words = 5, size_t payload = 0)
+inline Bytes tcp_segment(uint16_t source_port,
+						 uint16_t destination_port,
+						 uint32_t sequence,
+						 uint32_t acknowledgment,
+						 uint8_t  flags,
+						 uint8_t  words	  = 5,
+						 size_t	  payload = 0)
 {
 	Bytes out;
 	put_u16(out, source_port);
@@ -70,8 +76,12 @@ inline Bytes udp_datagram(uint16_t source_port, uint16_t destination_port, size_
 }
 
 /// `fragment_field` is the raw flags + fragment-offset word (DF = 0x4000, MF = 0x2000); `words` the header length in 32-bit words.
-inline Bytes ipv4_packet(uint8_t protocol, const Bytes& payload, std::array<uint8_t, 4> source = {10, 0, 0, 1}, std::array<uint8_t, 4> destination = {192, 168, 1, 20},
-						 uint16_t fragment_field = 0, uint8_t words = 5)
+inline Bytes ipv4_packet(uint8_t				protocol,
+						 const Bytes&			payload,
+						 std::array<uint8_t, 4> source		   = {10, 0, 0, 1},
+						 std::array<uint8_t, 4> destination	   = {192, 168, 1, 20},
+						 uint16_t				fragment_field = 0,
+						 uint8_t				words		   = 5)
 {
 	Bytes out;
 	out.push_back(static_cast<uint8_t>(0x40 | words));
@@ -108,7 +118,11 @@ inline Bytes ipv6_packet(uint8_t next_header, const Bytes& payload, int declared
 }
 
 /// A bare IPv4 TCP packet from 10.0.0.1:1000 to 192.168.1.20:2000.
-inline Bytes tcp_packet(uint32_t sequence, uint32_t acknowledgment, uint8_t flags = kAck, uint16_t source_port = 1000, uint16_t destination_port = 2000)
+inline Bytes tcp_packet(uint32_t sequence,
+						uint32_t acknowledgment,
+						uint8_t	 flags			  = kAck,
+						uint16_t source_port	  = 1000,
+						uint16_t destination_port = 2000)
 {
 	return ipv4_packet(kTcp, tcp_segment(source_port, destination_port, sequence, acknowledgment, flags));
 }

@@ -4,12 +4,12 @@
 // Built with `clang -target bpf -mcpu=v3 -O2 -g` at package time and embedded in the binary; see backends/nfqueue/xmake.lua.
 #include <stdbool.h>
 
+#include <bpf/bpf_endian.h>
+#include <bpf/bpf_helpers.h>
 #include <linux/bpf.h>
 #include <linux/if_ether.h>
 #include <linux/in.h>
 #include <linux/pkt_cls.h>
-#include <bpf/bpf_endian.h>
-#include <bpf/bpf_helpers.h>
 
 #include "bpf_shared.h"
 
@@ -67,14 +67,14 @@ struct packet
 {
 	__u32 saddr; /* network byte order, as in the header */
 	__u32 daddr;
-	__u32 ifindex;	/* egress interface */
-	__u32 iif;		/* interface the packet arrived on; 0 for locally generated packets */
-	__u16 sport;	/* host byte order */
+	__u32 ifindex; /* egress interface */
+	__u32 iif;	   /* interface the packet arrived on; 0 for locally generated packets */
+	__u16 sport;   /* host byte order */
 	__u16 dport;
 	__u8  proto;
 	__u8  tcp_flags;
 	__u8  forwarded;
-	__u8  has_l4;	/* the transport header was readable (not a later fragment) */
+	__u8  has_l4; /* the transport header was readable (not a later fragment) */
 };
 
 struct tcp_prefix
@@ -89,27 +89,27 @@ struct tcp_prefix
 
 struct match_ctx
 {
-	const struct lagsw_rule *rule;
-	const struct packet		*pkt;
+	const struct lagsw_rule* rule;
+	const struct packet*	 pkt;
 	__u32					 ok;
 };
 
 struct rule_ctx
 {
-	const struct lagsw_stage *stage;
-	const struct packet		 *pkt;
+	const struct lagsw_stage* stage;
+	const struct packet*	  pkt;
 	__u32					  matched;
 };
 
 struct stage_ctx
 {
-	const struct packet *pkt;
+	const struct packet* pkt;
 	__u64				 now;
 	__u64				 delay; /* summed delay of the stages that matched so far */
 	__u32				 drop;
 };
 
-static __always_inline bool evaluate(const struct lagsw_match *match, const struct packet *pkt)
+static __always_inline bool evaluate(const struct lagsw_match* match, const struct packet* pkt)
 {
 	bool result;
 	switch (match->kind)
@@ -124,17 +124,17 @@ static __always_inline bool evaluate(const struct lagsw_match *match, const stru
 			result = (pkt->tcp_flags & match->flag) != 0;
 			return match->negated ? !result : result;
 		case LAGSW_MATCH_ADDRESS:
-		{
-			const __u32 address = match->endpoint ? pkt->daddr : pkt->saddr;
-			if (match->is_set)
 			{
-				struct lagsw_addr_key key = {.set = match->value, .addr = address};
-				result					  = bpf_map_lookup_elem(&addrs, &key) != NULL;
+				const __u32 address = match->endpoint ? pkt->daddr : pkt->saddr;
+				if (match->is_set)
+				{
+					struct lagsw_addr_key key = {.set = match->value, .addr = address};
+					result					  = bpf_map_lookup_elem(&addrs, &key) != NULL;
+				}
+				else
+					result = address == match->value;
+				return match->negated ? !result : result;
 			}
-			else
-				result = address == match->value;
-			return match->negated ? !result : result;
-		}
 		case LAGSW_MATCH_PORT:
 			if (!pkt->has_l4 || pkt->proto != match->proto)
 				return false;
@@ -150,9 +150,9 @@ static __always_inline bool evaluate(const struct lagsw_match *match, const stru
 	return false;
 }
 
-static long match_callback(__u64 index, void *data)
+static long match_callback(__u64 index, void* data)
 {
-	struct match_ctx *ctx = data;
+	struct match_ctx* ctx = data;
 	if (index >= LAGSW_MAX_MATCHES)
 		return 1;
 	if (!evaluate(&ctx->rule->matches[index], ctx->pkt))
@@ -163,12 +163,12 @@ static long match_callback(__u64 index, void *data)
 	return 0;
 }
 
-static long rule_callback(__u64 index, void *data)
+static long rule_callback(__u64 index, void* data)
 {
-	struct rule_ctx *ctx = data;
+	struct rule_ctx* ctx = data;
 	if (index >= LAGSW_MAX_RULES)
 		return 1;
-	const struct lagsw_rule *rule = &ctx->stage->rules[index];
+	const struct lagsw_rule* rule = &ctx->stage->rules[index];
 	if ((rule->hooks & (ctx->pkt->forwarded ? LAGSW_HOOK_FORWARD : LAGSW_HOOK_LOCAL)) == 0)
 		return 0;
 	struct match_ctx match = {.rule = rule, .pkt = ctx->pkt, .ok = 1};
@@ -180,7 +180,7 @@ static long rule_callback(__u64 index, void *data)
 }
 
 /* Draws this packet's baseline delay in nanoseconds. */
-static __always_inline __u64 sample_delay(const struct lagsw_stage *stage, bool *clamped)
+static __always_inline __u64 sample_delay(const struct lagsw_stage* stage, bool* clamped)
 {
 	__s64 value = stage->delay_ns;
 	if (stage->jitter_ns != 0)
@@ -192,8 +192,8 @@ static __always_inline __u64 sample_delay(const struct lagsw_stage *stage, bool 
 		}
 		else if (stage->model == LAGSW_MODEL_NORMAL)
 		{
-			const __u32 step = bpf_get_prandom_u32() & (LAGSW_NORMAL_STEPS - 1);
-			const __s32 *score = bpf_map_lookup_elem(&normal_z, &step);
+			const __u32	 step  = bpf_get_prandom_u32() & (LAGSW_NORMAL_STEPS - 1);
+			const __s32* score = bpf_map_lookup_elem(&normal_z, &step);
 			if (score)
 			{
 				// The BPF target has no signed division, so scale the magnitude and apply the sign afterwards.
@@ -219,7 +219,7 @@ static __always_inline __u64 sample_delay(const struct lagsw_stage *stage, bool 
 }
 
 /* Never leave before an earlier packet of the same stage: raise `release` to the last release time and record it. */
-static __always_inline __u64 keep_order(struct lagsw_state *st, __u64 release)
+static __always_inline __u64 keep_order(struct lagsw_state* st, __u64 release)
 {
 	for (int attempt = 0; attempt < 8; ++attempt)
 	{
@@ -233,7 +233,7 @@ static __always_inline __u64 keep_order(struct lagsw_state *st, __u64 release)
 }
 
 /* The first packet of a batch fixes its deadline; packets arriving before it share it. */
-static __always_inline __u64 batch_release(struct lagsw_state *st, __u64 arrival, __u64 delay)
+static __always_inline __u64 batch_release(struct lagsw_state* st, __u64 arrival, __u64 delay)
 {
 	for (int attempt = 0; attempt < 8; ++attempt)
 	{
@@ -246,13 +246,13 @@ static __always_inline __u64 batch_release(struct lagsw_state *st, __u64 arrival
 	return arrival + delay;
 }
 
-static long stage_callback(__u64 index, void *data)
+static long stage_callback(__u64 index, void* data)
 {
-	struct stage_ctx *ctx = data;
+	struct stage_ctx* ctx = data;
 	const __u32		  key = index;
 	if (index >= LAGSW_MAX_STAGES)
 		return 1;
-	const struct lagsw_stage *stage = bpf_map_lookup_elem(&stages, &key);
+	const struct lagsw_stage* stage = bpf_map_lookup_elem(&stages, &key);
 	if (!stage || !stage->active)
 		return 0;
 	struct rule_ctx rules = {.stage = stage, .pkt = ctx->pkt, .matched = 0};
@@ -260,8 +260,8 @@ static long stage_callback(__u64 index, void *data)
 	if (!rules.matched)
 		return 0;
 
-	struct lagsw_stats *counters = bpf_map_lookup_elem(&stats, &key);
-	struct lagsw_state *st		 = bpf_map_lookup_elem(&state, &key);
+	struct lagsw_stats* counters = bpf_map_lookup_elem(&stats, &key);
+	struct lagsw_state* st		 = bpf_map_lookup_elem(&state, &key);
 	if (counters)
 		counters->matched++;
 	if (stage->mode == LAGSW_MODE_DROP)
@@ -296,10 +296,10 @@ static long stage_callback(__u64 index, void *data)
 }
 
 SEC("tcx/egress")
-int lagsw_egress(struct __sk_buff *skb)
+int lagsw_egress(struct __sk_buff* skb)
 {
-	const __u32 ifindex = skb->ifindex;
-	const struct lagsw_ifinfo *iface = bpf_map_lookup_elem(&ifinfo, &ifindex);
+	const __u32				   ifindex = skb->ifindex;
+	const struct lagsw_ifinfo* iface   = bpf_map_lookup_elem(&ifinfo, &ifindex);
 	if (!iface || skb->protocol != bpf_htons(ETH_P_IP))
 		return TCX_NEXT;
 

@@ -86,12 +86,12 @@ struct CompiledRule
 /// Compiles `filter` for the local (input/output) or forwarded traffic path. An empty filter matches all IPv4 packets.
 /// On failure `error` and `position` (byte offset into `filter`) describe the problem.
 /// `include_forward` additionally hooks forwarded traffic when `forward` is false.
-bool compile_filter(const std::string& filter,
-					bool			 forward,
+bool compile_filter(const std::string&		   filter,
+					bool					   forward,
 					std::vector<CompiledRule>& rules,
-					std::string&	 error,
-					uint32_t&		 position,
-					bool			 include_forward = false);
+					std::string&			   error,
+					uint32_t&				   position,
+					bool					   include_forward = false);
 
 }  // namespace nfq
 

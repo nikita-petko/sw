@@ -20,8 +20,8 @@ namespace {
 using namespace packets;
 using fakes::wait_until;
 
-constexpr uint16_t kDiscoveryPort  = 55000;
-[[maybe_unused]] constexpr uint64_t kDiscoveryWindowMs = 100;
+constexpr uint16_t								 kDiscoveryPort		= 55000;
+[[maybe_unused]] constexpr uint64_t				 kDiscoveryWindowMs = 100;
 [[maybe_unused]] const std::chrono::milliseconds kWindowPause(kDiscoveryWindowMs + 60);
 
 ProfileOptions profile(const char* name, PacketDelayMode mode = PacketDelayMode::from_timestamp, int32_t delay_ms = 0)
@@ -49,7 +49,7 @@ PacketEngineOptions engine_options(std::vector<ProfileOptions> profiles, std::ve
 #ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 PacketEngineOptions discovery_options(std::vector<ProfileOptions> profiles = {profile("A")}, std::vector<ServerOptions> servers = {})
 {
-	PacketEngineOptions options = engine_options(std::move(profiles), std::move(servers));
+	PacketEngineOptions options					= engine_options(std::move(profiles), std::move(servers));
 	options.features.server_discovery.enabled	= true;
 	options.features.server_discovery.port		= kDiscoveryPort;
 	options.features.server_discovery.window_ms = kDiscoveryWindowMs;
@@ -85,7 +85,8 @@ bool report_contains(const PacketEngine& engine, const std::string& text)
 #ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 /// Feeds the discovery channel `counts` packets per server, lets the discovery window run out and closes it with one more packet to
 /// the first server (so list the expected winner first).
-void run_discovery_window(const std::shared_ptr<fakes::ChannelState>& channel, const std::vector<std::pair<std::array<uint8_t, 4>, int>>& counts)
+void run_discovery_window(const std::shared_ptr<fakes::ChannelState>&				 channel,
+						  const std::vector<std::pair<std::array<uint8_t, 4>, int>>& counts)
 {
 	size_t expected = channel->consumed();
 	for (const auto& [address, count] : counts)
@@ -105,7 +106,7 @@ void run_discovery_window(const std::shared_ptr<fakes::ChannelState>& channel, c
 void test_initial_server_selection()
 {
 	fakes::reset();
-	const std::vector<ServerOptions> servers = {server("1.1.1.1", "alpha"), server("2.2.2.2", "beta", "EU"), server("3.3.3.3")};
+	const std::vector<ServerOptions> servers  = {server("1.1.1.1", "alpha"), server("2.2.2.2", "beta", "EU"), server("3.3.3.3")};
 	const auto						 selected = [&](std::optional<std::string> initial) {
 		PacketEngineOptions options = engine_options({profile("A")}, servers);
 		options.initial_server		= std::move(initial);
@@ -174,11 +175,13 @@ void test_setup_and_teardown_manage_the_channel()
 void test_unknown_profiles_are_rejected()
 {
 	fakes::reset();
-	PacketEngine engine(engine_options({profile("A")}));
-	const std::string log = logged([&] {
-		engine.setup(0);
-		engine.setup(2);
-	}, logging::level::error);
+	PacketEngine	  engine(engine_options({profile("A")}));
+	const std::string log = logged(
+		[&] {
+			engine.setup(0);
+			engine.setup(2);
+		},
+		logging::level::error);
 	CHECK(log.find("Profile 0 is not configured") != std::string::npos && log.find("Profile 2 is not configured") != std::string::npos);
 	CHECK(!engine.is_running() && !engine.is_running(0) && !engine.is_running(2) && !engine.is_running(-1));
 	CHECK(!engine.toggle(0) && !engine.toggle(2));
@@ -332,11 +335,13 @@ void test_failed_sends_are_logged_and_not_retried()
 	engine.setup(1);
 	const auto channel = fakes::channel(0);
 	channel->fail_sends(true);
-	const std::string log = logged([&] {
-		channel->inject(tcp_packet(1, 1), 1);
-		wait_until([&] { return channel->consumed() == 1 && engine.pending_packets() == 0; });
-		std::this_thread::sleep_for(std::chrono::milliseconds(300));
-	}, logging::level::error);
+	const std::string log = logged(
+		[&] {
+			channel->inject(tcp_packet(1, 1), 1);
+			wait_until([&] { return channel->consumed() == 1 && engine.pending_packets() == 0; });
+			std::this_thread::sleep_for(std::chrono::milliseconds(300));
+		},
+		logging::level::error);
 	CHECK(log.find("send: failed: send failed (fake)") != std::string::npos);
 	CHECK(channel->sent_count() == 0);
 }
@@ -344,8 +349,8 @@ void test_failed_sends_are_logged_and_not_retried()
 // Kernel shaping: the engine asks the backend to run eligible profiles as shaping stages and falls back to a capture channel otherwise.
 PacketEngineOptions shaping_options(std::vector<ProfileOptions> profiles, LinuxTier tier = LinuxTier::automatic)
 {
-	PacketEngineOptions options			   = engine_options(std::move(profiles));
-	options.features.linux_bpf.tier		   = tier;
+	PacketEngineOptions options			  = engine_options(std::move(profiles));
+	options.features.linux_bpf.tier		  = tier;
 	options.features.linux_bpf.interfaces = {"lan0", "wan0"};
 	return options;
 }
@@ -353,7 +358,7 @@ PacketEngineOptions shaping_options(std::vector<ProfileOptions> profiles, LinuxT
 void test_the_shaping_configuration_reaches_the_backend()
 {
 	fakes::reset();
-	PacketEngine engine(shaping_options({profile("A", PacketDelayMode::from_timestamp, 100)}, LinuxTier::bpf));
+	PacketEngine				 engine(shaping_options({profile("A", PacketDelayMode::from_timestamp, 100)}, LinuxTier::bpf));
 	const backend::ShapingConfig config = fakes::shaping_config();
 	CHECK(config.tier == backend::ShapingTier::kernel);
 	CHECK(config.interfaces == (std::vector<std::string>{"lan0", "wan0"}));
@@ -376,7 +381,7 @@ void test_an_eligible_profile_runs_as_a_shaping_stage()
 {
 	fakes::reset();
 	fakes::set_shaping_unavailable("");
-	ProfileOptions options = profile("A", PacketDelayMode::from_timestamp, 250);
+	ProfileOptions options			= profile("A", PacketDelayMode::from_timestamp, 250);
 	options.capture_options.forward = true;
 	PacketEngine engine(shaping_options({options}));
 	engine.setup(1);
@@ -425,13 +430,13 @@ void test_profiles_that_need_packets_never_ask_for_a_shaping_stage()
 	profiles.push_back(profile("hold", PacketDelayMode::hold_until_deactivation));
 	profiles.push_back(profile("ratio", PacketDelayMode::ratio, 100));
 	profiles.push_back(profile("zero", PacketDelayMode::from_timestamp, 0));
-	ProfileOptions acks = profile("acks", PacketDelayMode::from_timestamp, 100);
+	ProfileOptions acks	 = profile("acks", PacketDelayMode::from_timestamp, 100);
 	acks.ack_restoration = true;
 	profiles.push_back(acks);
-	ProfileOptions retransmissions = profile("retransmissions", PacketDelayMode::from_timestamp, 100);
+	ProfileOptions retransmissions		= profile("retransmissions", PacketDelayMode::from_timestamp, 100);
 	retransmissions.retransmission_mode = RetransmissionMode::only_seq;
 	profiles.push_back(retransmissions);
-	ProfileOptions sniffer = profile("sniffer", PacketDelayMode::from_timestamp, 100);
+	ProfileOptions sniffer		  = profile("sniffer", PacketDelayMode::from_timestamp, 100);
 	sniffer.capture_options.sniff = true;
 	profiles.push_back(sniffer);
 	PacketEngine engine(shaping_options(profiles));
@@ -455,11 +460,15 @@ void test_the_bpf_tier_refuses_profiles_it_cannot_serve()
 {
 	fakes::reset();
 	fakes::set_shaping_unavailable("no fq here");
-	PacketEngine engine(shaping_options({profile("A", PacketDelayMode::from_timestamp, 100), profile("B", PacketDelayMode::hold_until_deactivation)}, LinuxTier::bpf));
-	const std::string log = logged([&] {
-		engine.setup(1);
-		engine.setup(2);
-	}, logging::level::error);
+	PacketEngine engine(
+		shaping_options({profile("A", PacketDelayMode::from_timestamp, 100), profile("B", PacketDelayMode::hold_until_deactivation)},
+						LinuxTier::bpf));
+	const std::string log = logged(
+		[&] {
+			engine.setup(1);
+			engine.setup(2);
+		},
+		logging::level::error);
 	CHECK(!engine.is_running(1) && !engine.is_running(2));
 	CHECK(fakes::channels().empty());
 	CHECK(log.find("kernel shaping is required") != std::string::npos && log.find("no fq here") != std::string::npos);
@@ -517,10 +526,12 @@ void test_packet_mode_status_is_reported_while_active()
 void test_capture_filters_describe_the_selected_server()
 {
 	fakes::reset();
-	ProfileOptions tracking					 = profile("A");
+	ProfileOptions tracking					  = profile("A");
 	tracking.capture_options.server_direction = backend::ServerDirection::source;
-	PacketEngineOptions options				 = engine_options({tracking}, {server("34.0.0.1", "A1", "EU"), server("34.0.0.2", "A2", "EU"), server("35.0.0.1", "B1"), server("35.0.0.2", "B2")});
-	options.initial_server					 = "A1";
+	PacketEngineOptions options				  = engine_options(
+		{tracking},
+		{server("34.0.0.1", "A1", "EU"), server("34.0.0.2", "A2", "EU"), server("35.0.0.1", "B1"), server("35.0.0.2", "B2")});
+	options.initial_server = "A1";
 	PacketEngine engine(options);
 
 	const auto expect_spec = [&](size_t index, std::vector<std::string> addresses) {
@@ -529,17 +540,19 @@ void test_capture_filters_describe_the_selected_server()
 		if (specs.size() <= index)
 			return;
 		CHECK(specs[index].server_addresses == addresses);
-		CHECK(specs[index].server_direction == std::optional<backend::ServerDirection>(addresses.empty() ? std::nullopt : std::optional<backend::ServerDirection>(backend::ServerDirection::source)));
+		CHECK(specs[index].server_direction ==
+			  std::optional<backend::ServerDirection>(
+				  addresses.empty() ? std::nullopt : std::optional<backend::ServerDirection>(backend::ServerDirection::source)));
 	};
 	engine.setup(1);
 	expect_spec(0, {"34.0.0.1", "34.0.0.2"});
-	engine.cycle_server(1);  // another member of the same group
+	engine.cycle_server(1);	 // another member of the same group
 	expect_spec(1, {"34.0.0.1", "34.0.0.2"});
-	engine.cycle_server(1);  // an ungrouped server is matched on its own
+	engine.cycle_server(1);	 // an ungrouped server is matched on its own
 	expect_spec(2, {"35.0.0.1"});
 	engine.cycle_server(1);
 	expect_spec(3, {"35.0.0.2"});
-	engine.cycle_server(1);  // wraps to "none": no server restriction at all
+	engine.cycle_server(1);	 // wraps to "none": no server restriction at all
 	expect_spec(4, {});
 	CHECK(engine.is_running(1));
 	CHECK(wait_until([&] { return fakes::channels().size() == 5 && fakes::channel(3)->closed(); }));
@@ -571,7 +584,7 @@ void test_cycling_servers_restarts_active_profiles_only()
 void test_capture_filters_carry_the_profile_settings()
 {
 	fakes::reset();
-	ProfileOptions first = profile("A");
+	ProfileOptions first							 = profile("A");
 	first.capture_options.client_address_enforcement = backend::ClientAddressEnforcement::source;
 	first.capture_options.outbound					 = true;
 	first.ack_restoration							 = true;
@@ -593,7 +606,8 @@ void test_capture_filters_carry_the_profile_settings()
 	CHECK(specs[1].client_enforcement == backend::ClientAddressEnforcement::both);
 	CHECK(specs[0].outbound && !specs[1].outbound);
 	CHECK(specs[0].include_bare_acks && !specs[1].include_bare_acks);
-	CHECK(specs[0].client_source == std::optional<std::string>("10.1.1.1") && specs[0].client_destination == std::optional<std::string>("10.2.2.2"));
+	CHECK(specs[0].client_source == std::optional<std::string>("10.1.1.1") &&
+		  specs[0].client_destination == std::optional<std::string>("10.2.2.2"));
 }
 
 void test_running_times_follow_activations()
@@ -611,7 +625,7 @@ void test_running_times_follow_activations()
 void test_desync_countdown_follows_the_last_activation()
 {
 	fakes::reset();
-	PacketEngineOptions options					   = engine_options({profile("A")});
+	PacketEngineOptions options						   = engine_options({profile("A")});
 	options.features.desync_countdown.enabled		   = true;
 	options.features.desync_countdown.duration_percent = 100;
 	PacketEngine engine(options);
@@ -627,7 +641,7 @@ void test_desync_countdown_follows_the_last_activation()
 void test_desync_countdown_expires()
 {
 	fakes::reset();
-	PacketEngineOptions options					   = engine_options({profile("A")});
+	PacketEngineOptions options						   = engine_options({profile("A")});
 	options.features.desync_countdown.enabled		   = true;
 	options.features.desync_countdown.duration_percent = 50;
 	PacketEngine engine(options);
@@ -641,7 +655,7 @@ void test_desync_countdown_expires()
 void test_desync_countdown_can_hide_while_active()
 {
 	fakes::reset();
-	PacketEngineOptions options					   = engine_options({profile("A")});
+	PacketEngineOptions options						   = engine_options({profile("A")});
 	options.features.desync_countdown.enabled		   = true;
 	options.features.desync_countdown.duration_percent = 100;
 	options.features.desync_countdown.display		   = DesyncCountdownDisplay::until_reactivated;
@@ -769,7 +783,10 @@ void test_regions_are_resolved_and_servers_renamed()
 	fakes::reset();
 	fakes::set_http_handler([](const std::string&, const std::string& path) -> platform::HttpResponse {
 		if (path == "/34.1.2.19/json/")
-			return {200, 0, R"({"region": "Iowa", "region_code": "IA", "country_name": "United States", "country_code": "US", "continent_code": "NA", "longitude": -93.6})"};
+			return {
+				200,
+				0,
+				R"({"region": "Iowa", "region_code": "IA", "country_name": "United States", "country_code": "US", "continent_code": "NA", "longitude": -93.6})"};
 		if (path == "/json/")
 			return {200, 0, R"({"region": "Berlin", "country_name": "Germany"})"};
 		return {404, 0, ""};
@@ -796,7 +813,10 @@ void test_regions_of_configured_servers_keep_their_names()
 	fakes::reset();
 	fakes::set_http_handler([](const std::string&, const std::string& path) -> platform::HttpResponse {
 		if (path == "/34.1.2.19/json/")
-			return {200, 0, R"({"region": "Iowa", "region_code": "IA", "country_name": "United States", "country_code": "US", "longitude": -93.6})"};
+			return {
+				200,
+				0,
+				R"({"region": "Iowa", "region_code": "IA", "country_name": "United States", "country_code": "US", "longitude": -93.6})"};
 		return {404, 0, ""};
 	});
 	PacketEngineOptions options = discovery_options({profile("A")}, {server("34.1.2.19", "mine")});
@@ -815,7 +835,7 @@ void test_regions_of_configured_servers_keep_their_names()
 void test_server_discovery_is_off_unless_enabled()
 {
 	fakes::reset();
-	PacketEngineOptions options = discovery_options();
+	PacketEngineOptions options				  = discovery_options();
 	options.features.server_discovery.enabled = false;
 	PacketEngine engine(options);
 	engine.start_workers();
@@ -826,12 +846,12 @@ void test_server_discovery_is_off_unless_enabled()
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 PacketEngineOptions forwarding_options()
 {
-	PacketEngineOptions options								   = engine_options({profile("A")});
-	options.features.forwarded_address_discovery.enabled		   = true;
-	options.features.forwarded_address_discovery.inbound_if_idx  = 5;
+	PacketEngineOptions options									 = engine_options({profile("A")});
+	options.features.forwarded_address_discovery.enabled		 = true;
+	options.features.forwarded_address_discovery.inbound_if_idx	 = 5;
 	options.features.forwarded_address_discovery.outbound_if_idx = 7;
-	options.features.forwarded_address_discovery.port			   = kDiscoveryPort;
-	options.features.forwarded_address_discovery.window_ms	   = kDiscoveryWindowMs;
+	options.features.forwarded_address_discovery.port			 = kDiscoveryPort;
+	options.features.forwarded_address_discovery.window_ms		 = kDiscoveryWindowMs;
 	return options;
 }
 
@@ -849,8 +869,12 @@ void test_forwarded_address_discovery_learns_the_client_addresses()
 		return;
 	CHECK(channel->options.sniff && channel->options.priority == 1000);
 
-	const auto inbound	= [](std::array<uint8_t, 4> client) { return ipv4_packet(kUdp, udp_datagram(kDiscoveryPort, 40000, 4), {34, 0, 0, 1}, client); };
-	const auto outbound = [](std::array<uint8_t, 4> client) { return ipv4_packet(kUdp, udp_datagram(40000, kDiscoveryPort, 4), client, {34, 0, 0, 1}); };
+	const auto inbound = [](std::array<uint8_t, 4> client) {
+		return ipv4_packet(kUdp, udp_datagram(kDiscoveryPort, 40000, 4), {34, 0, 0, 1}, client);
+	};
+	const auto outbound = [](std::array<uint8_t, 4> client) {
+		return ipv4_packet(kUdp, udp_datagram(40000, kDiscoveryPort, 4), client, {34, 0, 0, 1});
+	};
 	for (int index = 0; index < 3; ++index)
 		channel->inject(inbound({192, 168, 1, 50}), 0, false, 5);
 	channel->inject(inbound({192, 168, 1, 51}), 0, false, 5);

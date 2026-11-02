@@ -14,11 +14,21 @@ inline std::string escape(const std::string& text)
 	{
 		switch (c)
 		{
-			case '"': out += "\\\""; break;
-			case '\\': out += "\\\\"; break;
-			case '\n': out += "\\n"; break;
-			case '\r': out += "\\r"; break;
-			case '\t': out += "\\t"; break;
+			case '"':
+				out += "\\\"";
+				break;
+			case '\\':
+				out += "\\\\";
+				break;
+			case '\n':
+				out += "\\n";
+				break;
+			case '\r':
+				out += "\\r";
+				break;
+			case '\t':
+				out += "\\t";
+				break;
 			default:
 				if (static_cast<unsigned char>(c) < 0x20)
 				{

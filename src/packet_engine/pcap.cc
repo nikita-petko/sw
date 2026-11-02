@@ -2,14 +2,14 @@
 
 #ifdef LAGSW_FEATURE_PCAP_FILES
 
-#include <algorithm>
-#include <chrono>
-#include <filesystem>
-#include <string>
-#include <system_error>
+#	include <algorithm>
+#	include <chrono>
+#	include <filesystem>
+#	include <string>
+#	include <system_error>
 
-#include "log.h"
-#include "platform.h"
+#	include "log.h"
+#	include "platform.h"
 
 LOG_DEFAULT_GROUP(logging::group::pcap)
 
@@ -69,7 +69,10 @@ void start_pcap_capture(const PcapFilesOptions& pcap_files, int profile, const P
 	write_pcap_u32(file, 101);
 	if (!file)
 	{
-		LOG_ERROR("profile #%d - %s PCAP capture: failed to write header to %s", profile, profile_options.name.c_str(), capture.path.c_str());
+		LOG_ERROR("profile #%d - %s PCAP capture: failed to write header to %s",
+				  profile,
+				  profile_options.name.c_str(),
+				  capture.path.c_str());
 		capture.file.reset();
 	}
 }

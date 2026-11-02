@@ -10,13 +10,13 @@ class DropAndSendMode final : public PacketMode
 public:
 	explicit DropAndSendMode(ProfileOptions options) : PacketMode(std::move(options), "drop_and_send") {}
 
-	void capture_packet(const uint8_t*				 packet,
-						uint32_t					 length,
+	void capture_packet(const uint8_t*			   packet,
+						uint32_t				   length,
 						const backend::PacketMeta& address,
-						int						 profile,
-						uint64_t				 now,
-						uint64_t				 receive_order,
-						PacketQueue&			 packets) override
+						int						   profile,
+						uint64_t				   now,
+						uint64_t				   receive_order,
+						PacketQueue&			   packets) override
 	{
 		profile_			= profile;
 		uint64_t release_at = now + static_cast<uint64_t>(options_.delay_ms);
@@ -51,11 +51,12 @@ private:
 		for (size_t index = 0; index < drop_count; ++index)
 		{
 			PacketNode* node = packets[index];
-			LOG_DEBUG_GROUP(logging::group::packet_drop, "%s drop: %s packet: Length = %u, Timestamp = %llu",
-					  profile_label.c_str(),
-					  source,
-					  node->length,
-					  static_cast<unsigned long long>(node->address->timestamp));
+			LOG_DEBUG_GROUP(logging::group::packet_drop,
+							"%s drop: %s packet: Length = %u, Timestamp = %llu",
+							profile_label.c_str(),
+							source,
+							node->length,
+							static_cast<unsigned long long>(node->address->timestamp));
 			discard(*node->address);
 			destroy_packet_node(node);
 		}

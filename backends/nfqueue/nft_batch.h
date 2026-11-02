@@ -39,14 +39,19 @@ public:
 	/// With a non-zero `release_bit`, every chain starts with `meta mark & <bit> != 0 return`: the channel sets that bit on
 	/// the packets it releases, so a released packet is not queued a second time by another chain of the same channel
 	/// (for example on loopback, which crosses both the output and the input hook). Other channels ignore the bit.
-	void add_channel(uint32_t channel_id, uint16_t queue_number, int priority, const std::vector<CompiledRule>& rules, ChannelChains& chains, uint32_t release_bit = 0);
+	void add_channel(uint32_t						  channel_id,
+					 uint16_t						  queue_number,
+					 int							  priority,
+					 const std::vector<CompiledRule>& rules,
+					 ChannelChains&					  chains,
+					 uint32_t						  release_bit = 0);
 
 	/// Deletes the rules, chains and sets of a channel.
 	void delete_channel(const ChannelChains& chains);
 
 	/// Finishes the batch. Returns false and sets `error()` if a message could not be built or the batch is too large.
-	bool finish();
-	bool ok() const { return error_.empty(); }
+	bool			   finish();
+	bool			   ok() const { return error_.empty(); }
 	const std::string& error() const { return error_; }
 
 	/// Serialised batch; valid after a successful finish().
@@ -54,7 +59,7 @@ public:
 	/// Sequence number of the last message before the batch end; only this message requests an acknowledgement.
 	uint32_t last_seq() const { return last_seq_; }
 	uint32_t first_seq() const { return first_seq_; }
-	size_t message_count() const { return messages_; }
+	size_t	 message_count() const { return messages_; }
 	/// Largest batch the sender can submit in one `sendto`.
 	static constexpr size_t kMaxBytes = 1u << 20;
 
@@ -68,11 +73,11 @@ private:
 
 	nlmsghdr* header(uint16_t type, uint16_t flags);
 	void	  commit(const nlmsghdr* message);
-	void fail(const std::string& message);
-	void add_set(const std::string& name, uint32_t id, const std::vector<uint32_t>& addrs);
-	void add_chain(const std::string& name, Hook hook, int priority);
-	void add_release_guard(const std::string& chain, uint32_t release_bit);
-	void add_queue_rule(const std::string& chain, const CompiledRule& rule, uint16_t queue_number, const AddressSets& sets);
+	void	  fail(const std::string& message);
+	void	  add_set(const std::string& name, uint32_t id, const std::vector<uint32_t>& addrs);
+	void	  add_chain(const std::string& name, Hook hook, int priority);
+	void	  add_release_guard(const std::string& chain, uint32_t release_bit);
+	void	  add_queue_rule(const std::string& chain, const CompiledRule& rule, uint16_t queue_number, const AddressSets& sets);
 
 	std::vector<uint8_t> bytes_;
 	std::vector<char>	 scratch_;

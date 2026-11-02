@@ -8,8 +8,7 @@
 #include "log.h"
 
 namespace {
-[[maybe_unused]] static
-const char* retransmission_mode_name(RetransmissionMode mode)
+[[maybe_unused]] static const char* retransmission_mode_name(RetransmissionMode mode)
 {
 	switch (mode)
 	{
@@ -84,13 +83,13 @@ void PacketMode::prepare_packet_for_send(uint8_t* packet, uint32_t length, const
 		last_sent_ack_[flow] = acknowledgment;
 }
 
-void PacketMode::capture(const uint8_t*				 packet,
-						 uint32_t					 length,
+void PacketMode::capture(const uint8_t*				packet,
+						 uint32_t					length,
 						 const backend::PacketMeta& address,
-						 int						 profile,
-						 uint64_t					 now,
-						 uint64_t					 receive_order,
-						 PacketQueue&				 packets)
+						 int						profile,
+						 uint64_t					now,
+						 uint64_t					receive_order,
+						 PacketQueue&				packets)
 {
 	if (options_.retransmission_mode != RetransmissionMode::none)
 	{
@@ -115,12 +114,13 @@ void PacketMode::capture(const uint8_t*				 packet,
 										   : sequence == queued_sequence && acknowledgment == queued_acknowledgment;
 				if (duplicate)
 				{
-					LOG_DEBUG_GROUP(logging::group::packet_drop, "profile #%d - %s drop: duplicate TCP retransmission (mode = %s, sequence = %u, ack = %u)",
-							  profile,
-							  options_.name.c_str(),
-							  retransmission_mode_name(options_.retransmission_mode),
-							  sequence,
-							  acknowledgment);
+					LOG_DEBUG_GROUP(logging::group::packet_drop,
+									"profile #%d - %s drop: duplicate TCP retransmission (mode = %s, sequence = %u, ack = %u)",
+									profile,
+									options_.name.c_str(),
+									retransmission_mode_name(options_.retransmission_mode),
+									sequence,
+									acknowledgment);
 					discard(address);
 					return;
 				}
@@ -139,12 +139,12 @@ void PacketMode::capture(const uint8_t*				 packet,
 	capture_packet(packet, length, address, profile, now, receive_order, packets);
 }
 
-PacketNode* make_packet_node(const uint8_t*				   packet,
-							 uint32_t					   length,
+PacketNode* make_packet_node(const uint8_t*				packet,
+							 uint32_t					length,
 							 const backend::PacketMeta& address,
-							 int						   profile,
-							 uint64_t					   release_at,
-							 uint64_t					   receive_order)
+							 int						profile,
+							 uint64_t					release_at,
+							 uint64_t					receive_order)
 {
 	PacketNode* node	= new PacketNode;
 	node->packet		= new uint8_t[length];

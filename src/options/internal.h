@@ -27,27 +27,27 @@ std::string trim(std::string value);
 /// Removes one pair of matching single or double quotes around the value.
 std::string unquote(std::string value);
 
-std::optional<bool>							parse_bool(const std::string& value);
-std::optional<ProfileActivationMode>		parse_activation_mode(const std::string& value);
-std::optional<ProfileKeyMode>				parse_key_mode(const std::string& value);
+std::optional<bool>										parse_bool(const std::string& value);
+std::optional<ProfileActivationMode>					parse_activation_mode(const std::string& value);
+std::optional<ProfileKeyMode>							parse_key_mode(const std::string& value);
 std::optional<CaptureOptions::ClientAddressEnforcement> parse_client_address_enforcement(const std::string& value);
-std::optional<CaptureOptions::ServerDirection> parse_server_direction(const std::string& value);
-std::optional<PacketDelayMode>				parse_delay_mode(const std::string& value);
-std::optional<RetransmissionMode>			parse_retransmission_mode(const std::string& value);
-std::optional<SubsequentPacketHoldMode>		parse_subsequent_packet_hold_mode(const std::string& value);
-std::optional<RatioSelection>				parse_ratio_selection(const std::string& value);
-std::optional<PacketGroupOrder>				parse_packet_group_order(const std::string& value);
-std::optional<DefaultView>					parse_default_view(const std::string& value);
-std::optional<LinuxTier>					parse_linux_tier(const std::string& value);
+std::optional<CaptureOptions::ServerDirection>			parse_server_direction(const std::string& value);
+std::optional<PacketDelayMode>							parse_delay_mode(const std::string& value);
+std::optional<RetransmissionMode>						parse_retransmission_mode(const std::string& value);
+std::optional<SubsequentPacketHoldMode>					parse_subsequent_packet_hold_mode(const std::string& value);
+std::optional<RatioSelection>							parse_ratio_selection(const std::string& value);
+std::optional<PacketGroupOrder>							parse_packet_group_order(const std::string& value);
+std::optional<DefaultView>								parse_default_view(const std::string& value);
+std::optional<LinuxTier>								parse_linux_tier(const std::string& value);
 #ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
-std::optional<DesyncCountdownDisplay>		parse_countdown_display(const std::string& value);
+std::optional<DesyncCountdownDisplay> parse_countdown_display(const std::string& value);
 #endif
 #ifdef LAGSW_FEATURE_PASSIVE_LATENCY
-std::optional<PassiveLatencyMode>			parse_passive_latency_mode(const std::string& value);
-std::optional<PassiveLatencyDirection>		parse_passive_latency_direction(const std::string& value);
+std::optional<PassiveLatencyMode>	   parse_passive_latency_mode(const std::string& value);
+std::optional<PassiveLatencyDirection> parse_passive_latency_direction(const std::string& value);
 #endif
 /// Parses a key name (single character, alt, ctrl, shift, space, VK_* names) or a number into a virtual-key code.
-std::optional<int>							parse_key(std::string value);
+std::optional<int> parse_key(std::string value);
 
 /// Parses the whole text as a number within [min, max]; nullopt when it is not a number or out of range.
 std::optional<unsigned long>	  parse_ulong(const std::string& text, unsigned long min, unsigned long max);

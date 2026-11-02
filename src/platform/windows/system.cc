@@ -1,12 +1,12 @@
 #ifndef _WIN32
-#error "platform/windows/system.cc must only be built on Windows"
+#	error "platform/windows/system.cc must only be built on Windows"
 #endif
 
 #include "platform.h"
 
+#include <windows.h>
 #include <winsock2.h>
 #include <ws2ipdef.h>
-#include <windows.h>
 // The SDK's NDIS headers behind netioapi.h trip the strict warning level.
 #pragma warning(push)
 #pragma warning(disable : 4668)
@@ -64,13 +64,13 @@ std::string generate_guid()
 }
 
 namespace {
-UINT original_output_code_page = 0;
+	UINT original_output_code_page = 0;
 
-void restore_output_code_page()
-{
-	if (original_output_code_page != 0)
-		SetConsoleOutputCP(original_output_code_page);
-}
+	void restore_output_code_page()
+	{
+		if (original_output_code_page != 0)
+			SetConsoleOutputCP(original_output_code_page);
+	}
 }  // namespace
 
 void enable_terminal_colors()
@@ -113,8 +113,8 @@ SystemCounters system_counters()
 	FILETIME	   created, exited, kernel, user;
 	if (GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user))
 	{
-		const auto to_100ns = [](const FILETIME& time) { return (static_cast<uint64_t>(time.dwHighDateTime) << 32) | time.dwLowDateTime; };
-		counters.cpu_seconds   = static_cast<double>(to_100ns(kernel) + to_100ns(user)) / 1e7;
+		const auto to_100ns	 = [](const FILETIME& time) { return (static_cast<uint64_t>(time.dwHighDateTime) << 32) | time.dwLowDateTime; };
+		counters.cpu_seconds = static_cast<double>(to_100ns(kernel) + to_100ns(user)) / 1e7;
 		counters.cpu_available = true;
 	}
 	// Interface counters are cumulative; loopback and interfaces that are down are left out.

@@ -209,7 +209,8 @@ profiles:
 	CHECK(o.features.region_enforcement.enabled && o.features.region_enforcement.probe_port == 8080);
 #endif
 #ifdef LAGSW_FEATURE_PASSIVE_LATENCY
-	CHECK(o.features.passive_latency.enabled && o.features.passive_latency.delay_ms == 50 && o.features.passive_latency.max_delay_ms == 120);
+	CHECK(o.features.passive_latency.enabled && o.features.passive_latency.delay_ms == 50 &&
+		  o.features.passive_latency.max_delay_ms == 120);
 	CHECK(o.features.passive_latency.max_queued_packets == 2048 && o.features.passive_latency.filter == "udp");
 	CHECK(o.features.passive_latency.mode == PassiveLatencyMode::normal && o.features.passive_latency.jitter_ms == 8);
 	CHECK(o.features.passive_latency.inbound_delay_ms == 20 && o.features.passive_latency.outbound_delay_ms == 90);
@@ -295,9 +296,15 @@ void test_rejected_files()
 		{"period without mode", kProfile + "    activation_period: 10\n", "can only set activation_period when mode is period"},
 		{"period mode without period", kProfile + "    mode: period\n", "requires a positive activation_period"},
 		{"ratio without delay", kProfile + "    delay_mode: ratio\n", "requires a positive ratio and delay_ms"},
-		{"hold_and_send percentage", kProfile + "    delay_mode: hold_and_send\n    ratio: 5%\n", "positive packet count ratio for hold_and_send"},
-		{"drop_until_toggle in hold mode", kProfile + "    mode: hold\n    delay_mode: drop_until_toggle\n", "requires toggle mode for drop_until_toggle"},
-		{"group_count without packet_group_send", kProfile + "    group_count: 2\n", "can only set group_count when delay_mode is packet_group_send"},
+		{"hold_and_send percentage",
+		 kProfile + "    delay_mode: hold_and_send\n    ratio: 5%\n",
+		 "positive packet count ratio for hold_and_send"},
+		{"drop_until_toggle in hold mode",
+		 kProfile + "    mode: hold\n    delay_mode: drop_until_toggle\n",
+		 "requires toggle mode for drop_until_toggle"},
+		{"group_count without packet_group_send",
+		 kProfile + "    group_count: 2\n",
+		 "can only set group_count when delay_mode is packet_group_send"},
 		{"bad capture boolean", kProfile + "    capture_options:\n      sniff: maybe\n", "Invalid boolean in"},
 		{"bad server direction", kProfile + "    capture_options:\n      server_direction: up\n", "Invalid server_direction in"},
 		{"empty server", "servers:\n  addresses:\n    - \"\"\n" + kProfile, "Invalid empty server in"},
@@ -305,71 +312,119 @@ void test_rejected_files()
 		{"addresses not a list", "servers:\n  addresses: 1.1.1.1\n" + kProfile, "Invalid servers addresses list in"},
 		{"unknown servers key", "servers:\n  nonsense: 1\n" + kProfile, "Invalid servers configuration key 'nonsense' in"},
 		{"unknown features key", "features:\n  nonsense: 1\n" + kProfile, "Invalid features configuration key 'nonsense' in"},
-		{"discovery setting in servers", "servers:\n  discovery_port: 55000\n" + kProfile, "Invalid servers configuration key 'discovery_port' in"},
+		{"discovery setting in servers",
+		 "servers:\n  discovery_port: 55000\n" + kProfile,
+		 "Invalid servers configuration key 'discovery_port' in"},
 		{"bad default view", "default_view: table\n" + kProfile, "Invalid default_view in"},
 #ifdef LAGSW_FEATURE_NET_MONITOR
-		{"default view net monitor without feature", "default_view: net_monitor\n" + kProfile, "default_view net_monitor requires the net_monitor feature"},
+		{"default view net monitor without feature",
+		 "default_view: net_monitor\n" + kProfile,
+		 "default_view net_monitor requires the net_monitor feature"},
 #endif
 #ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 		{"server discovery without port", "features:\n  server_discovery:\n    enabled: true\n" + kProfile, "port is missing or invalid"},
 		{"zero server discovery port", "features:\n  server_discovery:\n    port: 0\n" + kProfile, "Invalid server_discovery port in"},
-		{"server discovery drop percentage", "features:\n  server_discovery:\n    disconnect_drop_percent: 101\n" + kProfile,
+		{"server discovery drop percentage",
+		 "features:\n  server_discovery:\n    disconnect_drop_percent: 101\n" + kProfile,
 		 "Invalid server_discovery disconnect_drop_percent in"},
 #endif
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
-		{"region enforcement without port", "features:\n  region_enforcement:\n    enabled: true\n" + kProfile, "probe_port is missing or invalid"},
+		{"region enforcement without port",
+		 "features:\n  region_enforcement:\n    enabled: true\n" + kProfile,
+		 "probe_port is missing or invalid"},
 #endif
 #ifdef LAGSW_FEATURE_PASSIVE_LATENCY
-		{"passive latency without delay", "features:\n  passive_latency:\n    enabled: true\n" + kProfile, "delay_ms must be positive for at least one direction"},
-		{"passive latency negative delay", "features:\n  passive_latency:\n    delay_ms: -1\n" + kProfile, "Invalid passive_latency delay_ms in"},
-		{"passive latency max below delay", "features:\n  passive_latency:\n    enabled: true\n    delay_ms: 50\n    max_delay_ms: 10\n" + kProfile,
+		{"passive latency without delay",
+		 "features:\n  passive_latency:\n    enabled: true\n" + kProfile,
+		 "delay_ms must be positive for at least one direction"},
+		{"passive latency negative delay",
+		 "features:\n  passive_latency:\n    delay_ms: -1\n" + kProfile,
+		 "Invalid passive_latency delay_ms in"},
+		{"passive latency max below delay",
+		 "features:\n  passive_latency:\n    enabled: true\n    delay_ms: 50\n    max_delay_ms: 10\n" + kProfile,
 		 "max_delay_ms must be 0 or greater than or equal to the delay of each direction"},
-		{"passive latency fixed with jitter", "features:\n  passive_latency:\n    enabled: true\n    delay_ms: 50\n    jitter_ms: 5\n" + kProfile,
+		{"passive latency fixed with jitter",
+		 "features:\n  passive_latency:\n    enabled: true\n    delay_ms: 50\n    jitter_ms: 5\n" + kProfile,
 		 "jitter_ms requires mode uniform or normal"},
-		{"passive latency uniform without jitter", "features:\n  passive_latency:\n    enabled: true\n    mode: uniform\n    delay_ms: 50\n" + kProfile,
+		{"passive latency uniform without jitter",
+		 "features:\n  passive_latency:\n    enabled: true\n    mode: uniform\n    delay_ms: 50\n" + kProfile,
 		 "requires a positive jitter_ms"},
 		{"passive latency bad mode", "features:\n  passive_latency:\n    mode: gaussian\n" + kProfile, "Invalid passive_latency mode in"},
-		{"passive latency bad direction", "features:\n  passive_latency:\n    direction: up\n" + kProfile, "Invalid passive_latency direction in"},
+		{"passive latency bad direction",
+		 "features:\n  passive_latency:\n    direction: up\n" + kProfile,
+		 "Invalid passive_latency direction in"},
 		{"passive latency inbound only without inbound delay",
 		 "features:\n  passive_latency:\n    enabled: true\n    direction: outbound\n    inbound_delay_ms: 40\n" + kProfile,
 		 "delay_ms must be positive for at least one direction"},
-		{"passive latency bad pause key", "features:\n  passive_latency:\n    pause_key: nonsense\n" + kProfile, "Invalid passive_latency pause_key in"},
-		{"passive latency reserved pause key", "features:\n  passive_latency:\n    enabled: true\n    delay_ms: 50\n    pause_key: q\n" + kProfile,
+		{"passive latency bad pause key",
+		 "features:\n  passive_latency:\n    pause_key: nonsense\n" + kProfile,
+		 "Invalid passive_latency pause_key in"},
+		{"passive latency reserved pause key",
+		 "features:\n  passive_latency:\n    enabled: true\n    delay_ms: 50\n    pause_key: q\n" + kProfile,
 		 "pause_key conflicts with a command key"},
-#ifdef LAGSW_FEATURE_NET_MONITOR
+#	ifdef LAGSW_FEATURE_NET_MONITOR
 		{"net monitor bad key", "features:\n  net_monitor:\n    key: nonsense\n" + kProfile, "Invalid net_monitor key in"},
-		{"net monitor bad pause key", "features:\n  net_monitor:\n    pause_key: nonsense\n" + kProfile, "Invalid net_monitor pause_key in"},
-		{"net monitor reserved key", "features:\n  net_monitor:\n    enabled: true\n    key: q\n" + kProfile, "net_monitor key conflicts with a command key"},
-		{"net monitor reset key as toggle", "features:\n  net_monitor:\n    enabled: true\n    key: r\n" + kProfile, "conflicts with net_monitor key"},
-		{"net monitor duplicate keys", "features:\n  net_monitor:\n    enabled: true\n    flows_key: g\n    export_key: G\n" + kProfile,
+		{"net monitor bad pause key",
+		 "features:\n  net_monitor:\n    pause_key: nonsense\n" + kProfile,
+		 "Invalid net_monitor pause_key in"},
+		{"net monitor reserved key",
+		 "features:\n  net_monitor:\n    enabled: true\n    key: q\n" + kProfile,
+		 "net_monitor key conflicts with a command key"},
+		{"net monitor reset key as toggle",
+		 "features:\n  net_monitor:\n    enabled: true\n    key: r\n" + kProfile,
+		 "conflicts with net_monitor key"},
+		{"net monitor duplicate keys",
+		 "features:\n  net_monitor:\n    enabled: true\n    flows_key: g\n    export_key: G\n" + kProfile,
 		 "net_monitor export_key conflicts with net_monitor flows_key"},
-		{"net monitor reserved pause key", "features:\n  net_monitor:\n    enabled: true\n    pause_key: tab\n" + kProfile,
+		{"net monitor reserved pause key",
+		 "features:\n  net_monitor:\n    enabled: true\n    pause_key: tab\n" + kProfile,
 		 "net_monitor pause_key conflicts with a command key"},
-		{"net monitor bad alert", "features:\n  net_monitor:\n    alert_retransmit: 101\n" + kProfile, "Invalid net_monitor alert_retransmit in"},
-		{"net monitor profile key", "features:\n  net_monitor:\n    enabled: true\n    key: x\n" + kProfile, "conflicts with an activation key of profile 'A'"},
-		{"net monitor pause key is a profile key", "features:\n  net_monitor:\n    enabled: true\n    pause_key: x\n" + kProfile,
+		{"net monitor bad alert",
+		 "features:\n  net_monitor:\n    alert_retransmit: 101\n" + kProfile,
+		 "Invalid net_monitor alert_retransmit in"},
+		{"net monitor profile key",
+		 "features:\n  net_monitor:\n    enabled: true\n    key: x\n" + kProfile,
+		 "conflicts with an activation key of profile 'A'"},
+		{"net monitor pause key is a profile key",
+		 "features:\n  net_monitor:\n    enabled: true\n    pause_key: x\n" + kProfile,
 		 "net_monitor pause_key conflicts with an activation key of profile 'A'"},
-		{"net monitor export key is a send key", "features:\n  net_monitor:\n    enabled: true\n    export_key: z\nprofiles:\n  - name: \"A\"\n    key: x\n    send_key: z\n",
+		{"net monitor export key is a send key",
+		 "features:\n  net_monitor:\n    enabled: true\n    export_key: z\nprofiles:\n  - name: \"A\"\n    key: x\n    send_key: z\n",
 		 "net_monitor export_key conflicts with the send_key of profile 'A'"},
-#endif
-		{"passive latency huge delay", "features:\n  passive_latency:\n    delay_ms: 600001\n" + kProfile, "Invalid passive_latency delay_ms in"},
-		{"passive latency zero max queued", "features:\n  passive_latency:\n    max_queued_packets: 0\n" + kProfile,
+#	endif
+		{"passive latency huge delay",
+		 "features:\n  passive_latency:\n    delay_ms: 600001\n" + kProfile,
+		 "Invalid passive_latency delay_ms in"},
+		{"passive latency zero max queued",
+		 "features:\n  passive_latency:\n    max_queued_packets: 0\n" + kProfile,
 		 "Invalid passive_latency max_queued_packets in"},
 #endif
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
-		{"same interfaces", "features:\n  forwarded_address_discovery:\n    enabled: true\n    port: 1\n    inbound: 2\n    outbound: 2\n" + kProfile,
+		{"same interfaces",
+		 "features:\n  forwarded_address_discovery:\n    enabled: true\n    port: 1\n    inbound: 2\n    outbound: 2\n" + kProfile,
 		 "different interfaces"},
-		{"interface index out of range", "features:\n  forwarded_address_discovery:\n    inbound: 4294967296\n" + kProfile, "Invalid inbound interface index in"},
+		{"interface index out of range",
+		 "features:\n  forwarded_address_discovery:\n    inbound: 4294967296\n" + kProfile,
+		 "Invalid inbound interface index in"},
 #endif
 #ifdef LAGSW_FEATURE_PCAP_FILES
-		{"pcap without profiles", "features:\n  pcap_files:\n    enabled: true\n" + kProfile, "pcap_files is enabled but enabled_for is missing"},
-		{"pcap unknown profile", "features:\n  pcap_files:\n    enabled: true\n    enabled_for: [Z]\n" + kProfile, "pcap_files enables unknown profile 'Z'"},
+		{"pcap without profiles",
+		 "features:\n  pcap_files:\n    enabled: true\n" + kProfile,
+		 "pcap_files is enabled but enabled_for is missing"},
+		{"pcap unknown profile",
+		 "features:\n  pcap_files:\n    enabled: true\n    enabled_for: [Z]\n" + kProfile,
+		 "pcap_files enables unknown profile 'Z'"},
 		{"empty pcap output dir", "features:\n  pcap_files:\n    output_dir: \"\"\n" + kProfile, "Invalid pcap_files output_dir in"},
 #endif
 #ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
-		{"bad countdown display", "features:\n  desync_countdown:\n    display: never\n" + kProfile, "Invalid desync_countdown display 'never' in"},
-		{"countdown percentage", "features:\n  desync_countdown:\n    duration_percent: 101\n" + kProfile, "Invalid desync_countdown duration_percent in"},
-		{"countdown unknown profile", "features:\n  desync_countdown:\n    enabled: true\n    enabled_for:\n      - Z\n" + kProfile,
+		{"bad countdown display",
+		 "features:\n  desync_countdown:\n    display: never\n" + kProfile,
+		 "Invalid desync_countdown display 'never' in"},
+		{"countdown percentage",
+		 "features:\n  desync_countdown:\n    duration_percent: 101\n" + kProfile,
+		 "Invalid desync_countdown duration_percent in"},
+		{"countdown unknown profile",
+		 "features:\n  desync_countdown:\n    enabled: true\n    enabled_for:\n      - Z\n" + kProfile,
 		 "desync_countdown enables unknown profile 'Z'"},
 #endif
 	};
@@ -378,7 +433,12 @@ void test_rejected_files()
 		const LoadResult result = load_text(test.yaml);
 		if (result.ok || result.log.find(test.message) == std::string::npos)
 		{
-			std::fprintf(stderr, "case '%s': expected failure containing '%s', got ok=%d log=%s\n", test.name, test.message, result.ok ? 1 : 0, result.log.c_str());
+			std::fprintf(stderr,
+						 "case '%s': expected failure containing '%s', got ok=%d log=%s\n",
+						 test.name,
+						 test.message,
+						 result.ok ? 1 : 0,
+						 result.log.c_str());
 			++test::failure_count();
 		}
 	}
@@ -429,9 +489,9 @@ void test_disabled_features_are_ignored()
 	{
 		if (section.compiled)
 			continue;
-		const std::string yaml = std::string("features:\n  ") + section.name +
-								 ":\n    enabled: true\n    nonsense: [1, 2]\n    enabled_for:\n      - Z\n    other: 3\n" + kProfile;
-		const LoadResult result = load_text(yaml);
+		const std::string yaml	 = std::string("features:\n  ") + section.name +
+								   ":\n    enabled: true\n    nonsense: [1, 2]\n    enabled_for:\n      - Z\n    other: 3\n" + kProfile;
+		const LoadResult  result = load_text(yaml);
 		CHECK(result.ok);
 		CHECK(result.log.find(std::string("Feature ") + section.name + " in ") != std::string::npos);
 		CHECK(result.log.find("not compiled into this build") != std::string::npos);
@@ -441,9 +501,11 @@ void test_disabled_features_are_ignored()
 void test_linux_bpf_settings()
 {
 	const LoadResult defaults = load_text(kProfile);
-	CHECK(defaults.ok && defaults.options.features.linux_bpf.tier == LinuxTier::automatic && defaults.options.features.linux_bpf.interfaces.empty());
+	CHECK(defaults.ok && defaults.options.features.linux_bpf.tier == LinuxTier::automatic &&
+		  defaults.options.features.linux_bpf.interfaces.empty());
 
-	const LoadResult listed = load_text("features:\n  linux_bpf:\n    tier: bpf\n    interfaces:\n      - eth0\n      - \"wlan0\"\n" + kProfile);
+	const LoadResult listed =
+		load_text("features:\n  linux_bpf:\n    tier: bpf\n    interfaces:\n      - eth0\n      - \"wlan0\"\n" + kProfile);
 	CHECK(listed.ok);
 	CHECK(listed.options.features.linux_bpf.tier == LinuxTier::bpf);
 	CHECK(listed.options.features.linux_bpf.interfaces == (std::vector<std::string>{"eth0", "wlan0"}));
@@ -453,7 +515,7 @@ void test_linux_bpf_settings()
 	CHECK(inline_list.options.features.linux_bpf.interfaces == (std::vector<std::string>{"lan0", "wan0"}));
 
 	CHECK(!load_text("features:\n  linux_bpf:\n    tier: sometimes\n" + kProfile).ok);
-	CHECK(!load_text("features:\n  linux_bpf:\n    tier: bpf\n" + kProfile).ok);	// the bpf tier needs somewhere to attach
+	CHECK(!load_text("features:\n  linux_bpf:\n    tier: bpf\n" + kProfile).ok);  // the bpf tier needs somewhere to attach
 	CHECK(!load_text("features:\n  linux_bpf:\n    interfaces: [\"a/b\"]\n" + kProfile).ok);
 	CHECK(!load_text("features:\n  linux_bpf:\n    interfaces: [averyveryverylongname]\n" + kProfile).ok);
 	CHECK(!load_text("features:\n  linux_bpf:\n    unknown: 1\n" + kProfile).ok);
@@ -473,7 +535,8 @@ void test_helpers()
 	CHECK(config::unquote("'x'") == "x" && config::unquote("\"x\"") == "x" && config::unquote("'x\"") == "'x\"");
 	CHECK(config::parse_key("a") == 'A' && config::parse_key("VK_SHIFT") == 0x10 && config::parse_key("0x41") == 0x41);
 	CHECK(!config::parse_key("nonsense"));
-	CHECK(config::parse_ulong("65535", 1, 65535) == 65535ul && !config::parse_ulong("65536", 1, 65535) && !config::parse_ulong("0", 1, 65535));
+	CHECK(config::parse_ulong("65535", 1, 65535) == 65535ul && !config::parse_ulong("65536", 1, 65535) &&
+		  !config::parse_ulong("0", 1, 65535));
 	CHECK(!config::parse_ulong("12x", 0, 100) && !config::parse_ulong("", 0, 100));
 	CHECK(config::parse_long("-3", -5, 5) == -3 && !config::parse_long("6", -5, 5));
 	CHECK(config::parse_ullong("5000", 1) == 5000ull && !config::parse_ullong("0", 1));

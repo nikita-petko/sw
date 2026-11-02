@@ -2,15 +2,20 @@
 
 #ifdef LAGSW_FEATURE_PASSIVE_LATENCY
 
-#include <random>
+#	include <random>
 
-#include "log.h"
+#	include "log.h"
 
 LOG_DEFAULT_GROUP(logging::group::passive_latency)
 
 namespace {
 /// Logs the outcome of one passive-latency send.
-void log_passive_send(const char* reason, const uint8_t* packet, uint32_t length, const backend::IoStatus status, uint32_t sent, const std::string& io_error)
+void log_passive_send(const char*			  reason,
+					  const uint8_t*		  packet,
+					  uint32_t				  length,
+					  const backend::IoStatus status,
+					  uint32_t				  sent,
+					  const std::string&	  io_error)
 {
 	if (status != backend::IoStatus::ok)
 	{
@@ -22,19 +27,24 @@ void log_passive_send(const char* reason, const uint8_t* packet, uint32_t length
 	if (!logging::group_accepts(logging::group::passive_latency_packet, logging::level::debug))
 		return;
 	const PacketAddresses addresses = packet_addresses(packet, length);
-	LOG_DEBUG_GROUP(logging::group::passive_latency_packet, "Passive latency %s: Length = %u, Src = %s, Dst = %s, SendLen = %u",
-			  reason,
-			  length,
-			  addresses.source.c_str(),
-			  addresses.destination.c_str(),
-			  sent);
+	LOG_DEBUG_GROUP(logging::group::passive_latency_packet,
+					"Passive latency %s: Length = %u, Src = %s, Dst = %s, SendLen = %u",
+					reason,
+					length,
+					addresses.source.c_str(),
+					addresses.destination.c_str(),
+					sent);
 }
 
 /// Sends one packet immediately, logging the outcome. Used for the fail-open overflow path and delayed releases.
-void send_passive_packet(backend::PacketChannel& handle, const uint8_t* packet, uint32_t length, const backend::PacketMeta& address, const char* reason)
+void send_passive_packet(backend::PacketChannel&	handle,
+						 const uint8_t*				packet,
+						 uint32_t					length,
+						 const backend::PacketMeta& address,
+						 const char*				reason)
 {
-	uint32_t	sent = 0;
-	std::string io_error;
+	uint32_t				sent = 0;
+	std::string				io_error;
 	const backend::IoStatus status = handle.send(packet, length, address, sent, io_error);
 	log_passive_send(reason, packet, length, status, sent, io_error);
 }
@@ -49,22 +59,23 @@ void PacketEngine::start_passive_latency()
 	DelayModelOptions model_options;
 	switch (passive.mode)
 	{
-	case PassiveLatencyMode::fixed:
-		model_options.kind = DelayModelKind::fixed;
-		break;
-	case PassiveLatencyMode::uniform:
-		model_options.kind = DelayModelKind::uniform;
-		break;
-	case PassiveLatencyMode::normal:
-		model_options.kind = DelayModelKind::normal;
-		break;
+		case PassiveLatencyMode::fixed:
+			model_options.kind = DelayModelKind::fixed;
+			break;
+		case PassiveLatencyMode::uniform:
+			model_options.kind = DelayModelKind::uniform;
+			break;
+		case PassiveLatencyMode::normal:
+			model_options.kind = DelayModelKind::normal;
+			break;
 	}
 	model_options.preserve_order = passive.preserve_order;
 	for (const bool outbound : {false, true})
 	{
-		const DelayDirection direction					  = outbound ? DelayDirection::outbound : DelayDirection::inbound;
-		model_options.directions[static_cast<int>(direction)] = {
-			passive.effective_delay_ms(outbound), passive.effective_jitter_ms(outbound), passive.effective_max_delay_ms(outbound)};
+		const DelayDirection direction						  = outbound ? DelayDirection::outbound : DelayDirection::inbound;
+		model_options.directions[static_cast<int>(direction)] = {passive.effective_delay_ms(outbound),
+																 passive.effective_jitter_ms(outbound),
+																 passive.effective_max_delay_ms(outbound)};
 	}
 	state_->passive_latency_model = std::make_unique<DelayModel>(model_options, std::random_device{}());
 
@@ -75,7 +86,7 @@ void PacketEngine::start_passive_latency()
 		spec.filter			 = passive.filter.value_or(options_.global_filter);
 		spec.include_forward = true;
 		spec.behaviour		 = backend::ShapeBehaviour::baseline;
-		spec.model			 = passive.mode == PassiveLatencyMode::fixed ? backend::ShapeModel::fixed
+		spec.model			 = passive.mode == PassiveLatencyMode::fixed	 ? backend::ShapeModel::fixed
 							   : passive.mode == PassiveLatencyMode::uniform ? backend::ShapeModel::uniform
 																			 : backend::ShapeModel::normal;
 		spec.delay_ms		 = static_cast<uint32_t>((std::max)(passive.effective_delay_ms(true), 0));
@@ -108,8 +119,8 @@ void PacketEngine::start_passive_latency()
 		LOG_DEBUG("Passive latency uses NFQUEUE, not kernel shaping: %s", reason.c_str());
 	}
 	backend::OpenOptions open_options;
-	open_options.filter   = passive.filter.value_or(options_.global_filter);
-	open_options.priority = 100;
+	open_options.filter			 = passive.filter.value_or(options_.global_filter);
+	open_options.priority		 = 100;
 	open_options.include_forward = true;
 	std::string open_error;
 	state_->passive_latency_handle = backend::open(open_options, open_error);
@@ -151,12 +162,12 @@ void PacketEngine::stop_passive_latency()
 void PacketEngine::passive_latency_recv()
 {
 	const PassiveLatencyOptions& passive = options_.features.passive_latency;
-	uint8_t						packet_data[0xFFFF];
+	uint8_t						 packet_data[0xFFFF];
 	while (!state_->passive_latency_stopping && !shutdown_)
 	{
-		backend::PacketMeta address;
-		uint32_t			received_length = 0;
-		std::string			io_error;
+		backend::PacketMeta		address;
+		uint32_t				received_length = 0;
+		std::string				io_error;
 		const backend::IoStatus status =
 			state_->passive_latency_handle->recv(packet_data, sizeof(packet_data), received_length, address, io_error);
 		if (status != backend::IoStatus::ok)
@@ -189,18 +200,19 @@ void PacketEngine::passive_latency_recv()
 			continue;
 		}
 
-		const DelayDirection direction = address.outbound ? DelayDirection::outbound : DelayDirection::inbound;
+		const DelayDirection direction	= address.outbound ? DelayDirection::outbound : DelayDirection::inbound;
 		const uint64_t		 now		= platform::tick_ms();
 		const uint64_t		 release_at = state_->passive_latency_model->release_at(direction, now);
 		if (logging::group_accepts(logging::group::passive_latency_packet, logging::level::debug))
 		{
 			const PacketAddresses addresses = packet_addresses(packet_data, received_length);
-			LOG_DEBUG_GROUP(logging::group::passive_latency_packet, "Passive latency recv: %s packet (delaying for %llums): Length = %u, Src = %s, Dst = %s",
-						   address.outbound ? "outbound" : "inbound",
-						   static_cast<unsigned long long>(release_at - now),
-						   received_length,
-						   addresses.source.c_str(),
-						   addresses.destination.c_str());
+			LOG_DEBUG_GROUP(logging::group::passive_latency_packet,
+							"Passive latency recv: %s packet (delaying for %llums): Length = %u, Src = %s, Dst = %s",
+							address.outbound ? "outbound" : "inbound",
+							static_cast<unsigned long long>(release_at - now),
+							received_length,
+							addresses.source.c_str(),
+							addresses.destination.c_str());
 		}
 		state_->passive_latency_queue.push(
 			make_packet_node(packet_data, received_length, address, 0, release_at, state_->passive_latency_next_receive_order++));
@@ -225,7 +237,7 @@ void PacketEngine::passive_latency_send()
 			if (ready_packets.empty())
 			{
 				const uint64_t next_release = state_->passive_latency_queue.top()->release_at;
-				const uint64_t wait_ms		 = next_release > now ? next_release - now : 0;
+				const uint64_t wait_ms		= next_release > now ? next_release - now : 0;
 				state_->passive_latency_changed.wait_for(lock, std::chrono::milliseconds(wait_ms));
 				continue;
 			}
@@ -240,7 +252,7 @@ void PacketEngine::passive_latency_send()
 
 bool PacketEngine::is_probe_traffic([[maybe_unused]] const uint8_t* packet, [[maybe_unused]] uint32_t length) const
 {
-#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
+#	ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	const RegionEnforcementOptions& region = options_.features.region_enforcement;
 	if (!region.enabled || region.probe_port == 0)
 		return false;
@@ -251,7 +263,7 @@ bool PacketEngine::is_probe_traffic([[maybe_unused]] const uint8_t* packet, [[ma
 		return swap_u16(parsed.tcp->SrcPort) == region.probe_port || swap_u16(parsed.tcp->DstPort) == region.probe_port;
 	if (parsed.udp != nullptr)
 		return swap_u16(parsed.udp->SrcPort) == region.probe_port || swap_u16(parsed.udp->DstPort) == region.probe_port;
-#endif
+#	endif
 	return false;
 }
 
@@ -316,7 +328,12 @@ void PacketEngine::flush_passive_latency_queue()
 	state_->passive_latency_handle->send_batch(items.data(), items.size());
 	for (size_t index = 0; index < pending_packets.size(); ++index)
 	{
-		log_passive_send("flush: sent packet", items[index].packet, items[index].length, items[index].status, items[index].sent, items[index].error);
+		log_passive_send("flush: sent packet",
+						 items[index].packet,
+						 items[index].length,
+						 items[index].status,
+						 items[index].sent,
+						 items[index].error);
 		destroy_packet_node(pending_packets[index]);
 	}
 }
@@ -324,7 +341,9 @@ void PacketEngine::flush_passive_latency_queue()
 std::string PacketEngine::describe_passive_latency() const
 {
 	const PassiveLatencyOptions& passive = options_.features.passive_latency;
-	const char*					 mode	 = passive.mode == PassiveLatencyMode::fixed ? "fixed" : passive.mode == PassiveLatencyMode::uniform ? "uniform" : "normal";
+	const char*					 mode	 = passive.mode == PassiveLatencyMode::fixed	 ? "fixed"
+										   : passive.mode == PassiveLatencyMode::uniform ? "uniform"
+																						 : "normal";
 	std::string					 text	 = mode;
 	for (const bool outbound : {true, false})
 	{
@@ -350,12 +369,12 @@ std::string PacketEngine::passive_latency_status() const
 	const PassiveLatencyOptions& passive = options_.features.passive_latency;
 	if (is_passive_latency_paused())
 		return "paused";
-	auto						 part	 = [&](bool outbound) {
-		   const int32_t mean = passive.effective_delay_ms(outbound);
-		   std::string	 text = std::to_string(mean) + "ms";
-		   if (passive.effective_jitter_ms(outbound) != 0)
-			   text += "+/-" + std::to_string(passive.effective_jitter_ms(outbound));
-		   return text;
+	auto part = [&](bool outbound) {
+		const int32_t mean = passive.effective_delay_ms(outbound);
+		std::string	  text = std::to_string(mean) + "ms";
+		if (passive.effective_jitter_ms(outbound) != 0)
+			text += "+/-" + std::to_string(passive.effective_jitter_ms(outbound));
+		return text;
 	};
 	const bool out_on = passive.effective_delay_ms(true) != 0;
 	const bool in_on  = passive.effective_delay_ms(false) != 0;

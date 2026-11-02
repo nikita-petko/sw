@@ -2,10 +2,10 @@
 
 // Defined by src/xmake.lua for this file only.
 #ifndef LAGSW_VERSION
-#define LAGSW_VERSION "unknown"
+#	define LAGSW_VERSION "unknown"
 #endif
 #ifndef LAGSW_GIT_HASH
-#define LAGSW_GIT_HASH "unknown"
+#	define LAGSW_GIT_HASH "unknown"
 #endif
 
 namespace version {

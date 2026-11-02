@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <cmath>
 
-DelayModel::DelayModel(const DelayModelOptions& options, uint64_t seed) : options_(options), rng_(seed) {}
+DelayModel::DelayModel(const DelayModelOptions& options, uint64_t seed) : options_(options), rng_(seed)
+{
+}
 
 uint64_t DelayModel::sample(DelayDirection direction)
 {

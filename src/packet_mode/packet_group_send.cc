@@ -25,8 +25,8 @@ public:
 	{
 		PacketMode::reset();
 		current_group_ = 0;
-		next_send_ = 0;
-		capturing_ = true;
+		next_send_	   = 0;
+		capturing_	   = true;
 		send_order_.clear();
 		group_packet_counts_.assign(static_cast<size_t>(options_.group_count), 0);
 		group_packets_remaining_.assign(static_cast<size_t>(options_.group_count), 0);
@@ -34,26 +34,24 @@ public:
 		group_packets_failed_.assign(static_cast<size_t>(options_.group_count), 0);
 		group_released_.assign(static_cast<size_t>(options_.group_count), false);
 		displayed_group_ = 0;
-		status_ = group_status("Capturing", 0);
-		LOG_ACTIVATE("Profile '%s': group 1/%d activated; capturing",
-					 options_.name.c_str(),
-					 options_.group_count);
+		status_			 = group_status("Capturing", 0);
+		LOG_ACTIVATE("Profile '%s': group 1/%d activated; capturing", options_.name.c_str(), options_.group_count);
 	}
 
-	void capture_packet(const uint8_t* packet,
-						uint32_t length,
+	void capture_packet(const uint8_t*			   packet,
+						uint32_t				   length,
 						const backend::PacketMeta& address,
-						int profile,
-						uint64_t now,
-						uint64_t receive_order,
-						PacketQueue& packets) override
+						int						   profile,
+						uint64_t				   now,
+						uint64_t				   receive_order,
+						PacketQueue&			   packets) override
 	{
 		const uint64_t release_at = capturing_ ? (std::numeric_limits<uint64_t>::max)() : now;
-		PacketNode* node = make_packet_node(packet, length, address, profile, release_at, receive_order);
+		PacketNode*	   node		  = make_packet_node(packet, length, address, profile, release_at, receive_order);
 		if (capturing_)
 		{
 			node->group_index = current_group_;
-			node->grouped = true;
+			node->grouped	  = true;
 			++group_packet_counts_[current_group_];
 		}
 		packets.push(node);
@@ -75,7 +73,7 @@ public:
 					 group_packet_counts_[current_group_]);
 			++current_group_;
 			displayed_group_ = current_group_;
-			status_ = group_status("Capturing", current_group_);
+			status_			 = group_status("Capturing", current_group_);
 			LOG_ACTIVATE("Profile '%s': group %zu/%d activated; capturing",
 						 options_.name.c_str(),
 						 current_group_ + 1,
@@ -102,8 +100,7 @@ public:
 		if (!node.grouped)
 			return;
 		const size_t group_index = node.group_index;
-		if (group_index >= group_released_.size() || !group_released_[group_index] ||
-			group_packets_remaining_[group_index] == 0)
+		if (group_index >= group_released_.size() || !group_released_[group_index] || group_packets_remaining_[group_index] == 0)
 			return;
 		--group_packets_remaining_[group_index];
 		if (succeeded)
@@ -113,7 +110,7 @@ public:
 		if (group_packets_remaining_[group_index] != 0)
 			return;
 
-		const size_t sent = group_packets_sent_[group_index];
+		const size_t sent	= group_packets_sent_[group_index];
 		const size_t failed = group_packets_failed_[group_index];
 		if (failed == 0)
 			LOG_ACTIVATE("Profile '%s': group %zu/%d sent (%zu packets)",
@@ -132,10 +129,7 @@ public:
 			status_ = group_status(failed == 0 ? "Sent" : "Send failures", group_index);
 	}
 
-	std::string status() const override
-	{
-		return status_;
-	}
+	std::string status() const override { return status_; }
 
 	void flush(PacketQueue& packets, std::vector<PacketNode*>& pending_packets) override
 	{
@@ -170,18 +164,18 @@ private:
 	{
 		if (next_send_ >= send_order_.size())
 			return;
-		const size_t group_to_send = send_order_[next_send_++];
-		displayed_group_ = group_to_send;
-		group_released_[group_to_send] = true;
+		const size_t group_to_send				= send_order_[next_send_++];
+		displayed_group_						= group_to_send;
+		group_released_[group_to_send]			= true;
 		group_packets_remaining_[group_to_send] = group_packet_counts_[group_to_send];
-		status_ = group_status("Sending", group_to_send);
+		status_									= group_status("Sending", group_to_send);
 		LOG_ACTIVATE("Profile '%s': sending group %zu/%d (%s order, %zu packets)",
 					 options_.name.c_str(),
 					 group_to_send + 1,
 					 options_.group_count,
-					 options_.group_order == PacketGroupOrder::fifo
-						 ? "fifo"
-						 : options_.group_order == PacketGroupOrder::lifo ? "lifo" : "random",
+					 options_.group_order == PacketGroupOrder::fifo	  ? "fifo"
+					 : options_.group_order == PacketGroupOrder::lifo ? "lifo"
+																	  : "random",
 					 group_packet_counts_[group_to_send]);
 		std::vector<PacketNode*> queued_packets;
 		while (!packets.empty())
@@ -197,10 +191,7 @@ private:
 		}
 		if (group_packets_remaining_[group_to_send] == 0)
 		{
-			LOG_ACTIVATE("Profile '%s': group %zu/%d sent (empty group)",
-						 options_.name.c_str(),
-						 group_to_send + 1,
-						 options_.group_count);
+			LOG_ACTIVATE("Profile '%s': group %zu/%d sent (empty group)", options_.name.c_str(), group_to_send + 1, options_.group_count);
 			status_ = group_status("Sent", group_to_send);
 		}
 	}
@@ -210,18 +201,18 @@ private:
 		return std::string(stage) + " group " + std::to_string(group + 1) + "/" + std::to_string(options_.group_count);
 	}
 
-	size_t current_group_ = 0;
-	size_t next_send_ = 0;
-	size_t displayed_group_ = 0;
-	bool capturing_ = true;
-	std::string status_;
+	size_t				current_group_	 = 0;
+	size_t				next_send_		 = 0;
+	size_t				displayed_group_ = 0;
+	bool				capturing_		 = true;
+	std::string			status_;
 	std::vector<size_t> send_order_;
 	std::vector<size_t> group_packet_counts_;
 	std::vector<size_t> group_packets_remaining_;
 	std::vector<size_t> group_packets_sent_;
 	std::vector<size_t> group_packets_failed_;
-	std::vector<bool> group_released_;
-	std::mt19937_64 random_engine_;
+	std::vector<bool>	group_released_;
+	std::mt19937_64		random_engine_;
 };
 }  // namespace
 

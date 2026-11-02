@@ -10,13 +10,13 @@ class RatioMode final : public PacketMode
 public:
 	explicit RatioMode(ProfileOptions options) : PacketMode(std::move(options), "ratio") {}
 
-	void capture_packet(const uint8_t*				 packet,
-						uint32_t					 length,
+	void capture_packet(const uint8_t*			   packet,
+						uint32_t				   length,
 						const backend::PacketMeta& address,
-						int						 profile,
-						uint64_t				 now,
-						uint64_t				 receive_order,
-						PacketQueue&			 packets) override
+						int						   profile,
+						uint64_t				   now,
+						uint64_t				   receive_order,
+						PacketQueue&			   packets) override
 	{
 		if (packets.empty())
 		{

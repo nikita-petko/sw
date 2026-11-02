@@ -118,8 +118,19 @@ void reset_fakes()
 
 void test_private_addresses_are_not_public()
 {
-	const char* local[] = {"",			"10.0.0.1",	  "10.255.255.255", "127.0.0.1",  "192.168.1.1", "169.254.10.10", "::1",
-						   "fe80::1",	"fc00::1",	  "fd12:3456::1",	"172.16.0.1", "172.20.5.5",	 "172.31.255.255"};
+	const char* local[] = {"",
+						   "10.0.0.1",
+						   "10.255.255.255",
+						   "127.0.0.1",
+						   "192.168.1.1",
+						   "169.254.10.10",
+						   "::1",
+						   "fe80::1",
+						   "fc00::1",
+						   "fd12:3456::1",
+						   "172.16.0.1",
+						   "172.20.5.5",
+						   "172.31.255.255"};
 	for (const char* address : local)
 	{
 		if (is_public_address(address))
@@ -130,8 +141,17 @@ void test_private_addresses_are_not_public()
 
 void test_public_addresses()
 {
-	const char* routable[] = {"8.8.8.8",	"34.13.202.203", "1.1.1.1",		"100.64.0.1", "100.1.1.1",	"192.169.0.1",
-							  "11.0.0.1", "172.15.255.255", "172.32.0.1", "2001:db8::1", "2606:4700::1111"};
+	const char* routable[] = {"8.8.8.8",
+							  "34.13.202.203",
+							  "1.1.1.1",
+							  "100.64.0.1",
+							  "100.1.1.1",
+							  "192.169.0.1",
+							  "11.0.0.1",
+							  "172.15.255.255",
+							  "172.32.0.1",
+							  "2001:db8::1",
+							  "2606:4700::1111"};
 	for (const char* address : routable)
 	{
 		if (!is_public_address(address))
@@ -145,7 +165,8 @@ void test_public_addresses()
 
 void test_extract_region_label()
 {
-	CHECK(extract_region_label(R"({"region": "Iowa", "country_name": "United States"})") == std::optional<std::string>("Iowa, United States"));
+	CHECK(extract_region_label(R"({"region": "Iowa", "country_name": "United States"})") ==
+		  std::optional<std::string>("Iowa, United States"));
 	CHECK(extract_region_label(R"({"region":"Iowa","country_name":"United States"})") == std::optional<std::string>("Iowa, United States"));
 	CHECK(extract_region_label("{\"region\":\t\"Hesse\",\"country_name\":  \"Germany\"}") == std::optional<std::string>("Hesse, Germany"));
 	CHECK(extract_region_label(R"({"country_name": "Singapore"})") == std::optional<std::string>("Singapore"));
@@ -163,7 +184,9 @@ void test_extract_region_label()
 void test_build_server_name_splits_the_us_into_longitude_bands()
 {
 	const auto name = [](const char* longitude) {
-		return build_server_name("34.1.2.19", std::string(R"({"region_code": "IA", "country_code": "US", "continent_code": "NA", "longitude": )") + longitude + "}");
+		return build_server_name(
+			"34.1.2.19",
+			std::string(R"({"region_code": "IA", "country_code": "US", "continent_code": "NA", "longitude": )") + longitude + "}");
 	};
 	CHECK(name("-122.4") == "IA-USW-19");
 	CHECK(name("-93.6") == "IA-USC-19");
@@ -178,8 +201,9 @@ void test_build_server_name_splits_the_us_into_longitude_bands()
 void test_build_server_name_for_other_regions()
 {
 	const auto name = [](const char* address, const char* region, const char* country, const char* continent, const char* longitude) {
-		return build_server_name(address, std::string("{\"region_code\": \"") + region + "\", \"country_code\": \"" + country + "\", \"continent_code\": \"" + continent +
-											  "\", \"longitude\": " + longitude + "}");
+		return build_server_name(address,
+								 std::string("{\"region_code\": \"") + region + "\", \"country_code\": \"" + country +
+									 "\", \"continent_code\": \"" + continent + "\", \"longitude\": " + longitude + "}");
 	};
 	CHECK(name("35.0.0.7", "HE", "DE", "EU", "8.6") == "HE-EUC-7");
 	CHECK(name("35.0.0.7", "ENG", "GB", "EU", "-9.0") == "ENG-EUW-7");
@@ -233,7 +257,8 @@ void test_cache_round_trip()
 		CHECK(found != loaded.end());
 		if (found == loaded.end())
 			continue;
-		CHECK(found->second.label == entry.label && found->second.server_name == entry.server_name && found->second.expires_at == entry.expires_at);
+		CHECK(found->second.label == entry.label && found->second.server_name == entry.server_name &&
+			  found->second.expires_at == entry.expires_at);
 	}
 }
 
@@ -277,8 +302,8 @@ void test_load_skips_expired_and_malformed_entries()
 	const std::string past	 = std::to_string(now_seconds() - 1000);
 	directory.write("region-cache.csv",
 					"1.1.1.1,Good,GOOD," + future + "\n" + "2.2.2.2,Expired,EXP," + past + "\n" + "3.3.3.3,TooFew," + future + "\n" +
-						"4.4.4.4,Too,Many,Fields," + future + "\n" + "5.5.5.5,BadExpiry,NAME,soon\n" + "6.6.6.6,\"Unterminated,NAME," + future + "\n" +
-						",NoAddress,NAME," + future + "\n" + "\n" + "7.7.7.7,\"Quoted, with comma\",Q," + future + "\n");
+						"4.4.4.4,Too,Many,Fields," + future + "\n" + "5.5.5.5,BadExpiry,NAME,soon\n" + "6.6.6.6,\"Unterminated,NAME," +
+						future + "\n" + ",NoAddress,NAME," + future + "\n" + "\n" + "7.7.7.7,\"Quoted, with comma\",Q," + future + "\n");
 	Cache cache;
 	load_region_cache(cache);
 	CHECK(cache.size() == 2);

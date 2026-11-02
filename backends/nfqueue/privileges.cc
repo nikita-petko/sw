@@ -13,39 +13,39 @@ LOG_DEFAULT_GROUP(logging::group::nfq)
 
 namespace nfq {
 namespace {
-bool has_effective_capability(int capability)
-{
-	__user_cap_header_struct header = {_LINUX_CAPABILITY_VERSION_3, 0};
-	__user_cap_data_struct	 data[_LINUX_CAPABILITY_U32S_3] = {};
-	if (::syscall(SYS_capget, &header, data) != 0)
-		return false;
-	return (data[capability / 32].effective >> (capability % 32)) & 1;
-}
-
-/// Hotkeys come from evdev; reading /dev/input needs root or the `input` group.
-void warn_if_keyboards_unreadable()
-{
-	DIR* directory = opendir("/dev/input");
-	if (!directory)
-		return;
-	bool found	  = false;
-	bool readable = false;
-	while (const dirent* entry = readdir(directory))
+	bool has_effective_capability(int capability)
 	{
-		if (std::strncmp(entry->d_name, "event", 5) != 0)
-			continue;
-		found = true;
-		if (::access((std::string("/dev/input/") + entry->d_name).c_str(), R_OK) == 0)
-		{
-			readable = true;
-			break;
-		}
+		__user_cap_header_struct header							= {_LINUX_CAPABILITY_VERSION_3, 0};
+		__user_cap_data_struct	 data[_LINUX_CAPABILITY_U32S_3] = {};
+		if (::syscall(SYS_capget, &header, data) != 0)
+			return false;
+		return (data[capability / 32].effective >> (capability % 32)) & 1;
 	}
-	closedir(directory);
-	LOG_DEBUG("input devices: event nodes found = %d, readable = %d", found ? 1 : 0, readable ? 1 : 0);
-	if (found && !readable)
-		LOG_WARN("Cannot read /dev/input/event*, so hotkeys will not work. Run as root or add your user to the 'input' group.");
-}
+
+	/// Hotkeys come from evdev; reading /dev/input needs root or the `input` group.
+	void warn_if_keyboards_unreadable()
+	{
+		DIR* directory = opendir("/dev/input");
+		if (!directory)
+			return;
+		bool found	  = false;
+		bool readable = false;
+		while (const dirent* entry = readdir(directory))
+		{
+			if (std::strncmp(entry->d_name, "event", 5) != 0)
+				continue;
+			found = true;
+			if (::access((std::string("/dev/input/") + entry->d_name).c_str(), R_OK) == 0)
+			{
+				readable = true;
+				break;
+			}
+		}
+		closedir(directory);
+		LOG_DEBUG("input devices: event nodes found = %d, readable = %d", found ? 1 : 0, readable ? 1 : 0);
+		if (found && !readable)
+			LOG_WARN("Cannot read /dev/input/event*, so hotkeys will not work. Run as root or add your user to the 'input' group.");
+	}
 }  // namespace
 
 bool check_privileges(std::string& error)
@@ -53,8 +53,9 @@ bool check_privileges(std::string& error)
 	if (!has_effective_capability(CAP_NET_ADMIN))
 	{
 		LOG_DEBUG("privilege check: CAP_NET_ADMIN is not effective (euid = %u)", static_cast<unsigned>(::geteuid()));
-		error = "lagsw needs CAP_NET_ADMIN to capture packets. Run it as root (for example `sudo ./lagsw ...` or scripts/bootstrap.sh) "
-				"or grant the binary the capability (`sudo setcap cap_net_admin+ep ./lagsw`).";
+		error =
+			"lagsw needs CAP_NET_ADMIN to capture packets. Run it as root (for example `sudo ./lagsw ...` or scripts/bootstrap.sh) "
+			"or grant the binary the capability (`sudo setcap cap_net_admin+ep ./lagsw`).";
 		return false;
 	}
 	LOG_DEBUG("privilege check passed (euid = %u)", static_cast<unsigned>(::geteuid()));

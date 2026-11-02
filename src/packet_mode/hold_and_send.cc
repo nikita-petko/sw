@@ -18,13 +18,13 @@ public:
 		held_packet_numbers_.clear();
 	}
 
-	void capture_packet(const uint8_t*				 packet,
-						uint32_t					 length,
+	void capture_packet(const uint8_t*			   packet,
+						uint32_t				   length,
 						const backend::PacketMeta& address,
-						int						 profile,
-						uint64_t				 now,
-						uint64_t				 receive_order,
-						PacketQueue&			 packets) override
+						int						   profile,
+						uint64_t				   now,
+						uint64_t				   receive_order,
+						PacketQueue&			   packets) override
 	{
 		uint32_t   sequence		   = 0;
 		uint32_t   acknowledgment  = 0;

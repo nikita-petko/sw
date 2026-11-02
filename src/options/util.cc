@@ -10,14 +10,14 @@ LOG_DEFAULT_GROUP(logging::group::config)
 
 namespace config {
 namespace {
-template <typename T, size_t N>
-std::optional<T> lookup(const std::string& value, const std::pair<const char*, T> (&table)[N])
-{
-	for (const auto& [name, result] : table)
-		if (value == name)
-			return result;
-	return std::nullopt;
-}
+	template<typename T, size_t N>
+	std::optional<T> lookup(const std::string& value, const std::pair<const char*, T> (&table)[N])
+	{
+		for (const auto& [name, result] : table)
+			if (value == name)
+				return result;
+		return std::nullopt;
+	}
 }  // namespace
 
 bool invalid(const Context& context, const std::string& what, const char* detail)
@@ -50,21 +50,22 @@ std::optional<bool> parse_bool(const std::string& value)
 
 std::optional<ProfileActivationMode> parse_activation_mode(const std::string& value)
 {
-	static const std::pair<const char*, ProfileActivationMode> table[] = {
-		{"toggle", ProfileActivationMode::toggle}, {"hold", ProfileActivationMode::hold}, {"period", ProfileActivationMode::period}};
+	static const std::pair<const char*, ProfileActivationMode> table[] = {{"toggle", ProfileActivationMode::toggle},
+																		  {"hold", ProfileActivationMode::hold},
+																		  {"period", ProfileActivationMode::period}};
 	return lookup(value, table);
 }
 
 std::optional<ProfileKeyMode> parse_key_mode(const std::string& value)
 {
-	static const std::pair<const char*, ProfileKeyMode> table[] = {
-		{"oneof", ProfileKeyMode::oneof}, {"combination", ProfileKeyMode::combination}};
+	static const std::pair<const char*, ProfileKeyMode> table[] = {{"oneof", ProfileKeyMode::oneof},
+																   {"combination", ProfileKeyMode::combination}};
 	return lookup(value, table);
 }
 
 std::optional<CaptureOptions::ClientAddressEnforcement> parse_client_address_enforcement(const std::string& value)
 {
-	using Enforcement									   = CaptureOptions::ClientAddressEnforcement;
+	using Enforcement										 = CaptureOptions::ClientAddressEnforcement;
 	static const std::pair<const char*, Enforcement> table[] = {{"none", Enforcement::none},
 																{"source", Enforcement::source},
 																{"destination", Enforcement::destination},
@@ -74,24 +75,24 @@ std::optional<CaptureOptions::ClientAddressEnforcement> parse_client_address_enf
 
 std::optional<CaptureOptions::ServerDirection> parse_server_direction(const std::string& value)
 {
-	using Direction									   = CaptureOptions::ServerDirection;
-	static const std::pair<const char*, Direction> table[] = {
-		{"source", Direction::source}, {"destination", Direction::destination}, {"both", Direction::both}};
+	using Direction										   = CaptureOptions::ServerDirection;
+	static const std::pair<const char*, Direction> table[] = {{"source", Direction::source},
+															  {"destination", Direction::destination},
+															  {"both", Direction::both}};
 	return lookup(value, table);
 }
 
 std::optional<PacketDelayMode> parse_delay_mode(const std::string& value)
 {
-	static const std::pair<const char*, PacketDelayMode> table[] = {
-		{"from_timestamp", PacketDelayMode::from_timestamp},
-		{"send_all_after_delay", PacketDelayMode::send_all_after_delay},
-		{"ratio", PacketDelayMode::ratio},
-		{"drop", PacketDelayMode::drop},
-		{"drop_and_send", PacketDelayMode::drop_and_send},
-		{"hold_and_send", PacketDelayMode::hold_and_send},
-		{"drop_until_toggle", PacketDelayMode::drop_until_toggle},
-		{"hold_until_deactivation", PacketDelayMode::hold_until_deactivation},
-		{"packet_group_send", PacketDelayMode::packet_group_send}};
+	static const std::pair<const char*, PacketDelayMode> table[] = {{"from_timestamp", PacketDelayMode::from_timestamp},
+																	{"send_all_after_delay", PacketDelayMode::send_all_after_delay},
+																	{"ratio", PacketDelayMode::ratio},
+																	{"drop", PacketDelayMode::drop},
+																	{"drop_and_send", PacketDelayMode::drop_and_send},
+																	{"hold_and_send", PacketDelayMode::hold_and_send},
+																	{"drop_until_toggle", PacketDelayMode::drop_until_toggle},
+																	{"hold_until_deactivation", PacketDelayMode::hold_until_deactivation},
+																	{"packet_group_send", PacketDelayMode::packet_group_send}};
 	return lookup(value, table);
 }
 
@@ -115,15 +116,17 @@ std::optional<SubsequentPacketHoldMode> parse_subsequent_packet_hold_mode(const 
 
 std::optional<RatioSelection> parse_ratio_selection(const std::string& value)
 {
-	static const std::pair<const char*, RatioSelection> table[] = {
-		{"first", RatioSelection::first}, {"last", RatioSelection::last}, {"random", RatioSelection::random}};
+	static const std::pair<const char*, RatioSelection> table[] = {{"first", RatioSelection::first},
+																   {"last", RatioSelection::last},
+																   {"random", RatioSelection::random}};
 	return lookup(value, table);
 }
 
 std::optional<PacketGroupOrder> parse_packet_group_order(const std::string& value)
 {
-	static const std::pair<const char*, PacketGroupOrder> table[] = {
-		{"fifo", PacketGroupOrder::fifo}, {"lifo", PacketGroupOrder::lifo}, {"random", PacketGroupOrder::random}};
+	static const std::pair<const char*, PacketGroupOrder> table[] = {{"fifo", PacketGroupOrder::fifo},
+																	 {"lifo", PacketGroupOrder::lifo},
+																	 {"random", PacketGroupOrder::random}};
 	return lookup(value, table);
 }
 
@@ -135,16 +138,19 @@ std::optional<DefaultView> parse_default_view(const std::string& value)
 
 std::optional<LinuxTier> parse_linux_tier(const std::string& value)
 {
-	static const std::pair<const char*, LinuxTier> table[] = {{"auto", LinuxTier::automatic}, {"nfqueue", LinuxTier::nfqueue}, {"bpf", LinuxTier::bpf}};
+	static const std::pair<const char*, LinuxTier> table[] = {{"auto", LinuxTier::automatic},
+															  {"nfqueue", LinuxTier::nfqueue},
+															  {"bpf", LinuxTier::bpf}};
 	return lookup(value, table);
 }
 
 #ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
 std::optional<DesyncCountdownDisplay> parse_countdown_display(const std::string& value)
 {
-	static const std::pair<const char*, DesyncCountdownDisplay> table[] = {{"alongside", DesyncCountdownDisplay::alongside},
-																		   {"override", DesyncCountdownDisplay::override_activation},
-																		   {"until_reactivated", DesyncCountdownDisplay::until_reactivated}};
+	static const std::pair<const char*, DesyncCountdownDisplay> table[] = {
+		{"alongside", DesyncCountdownDisplay::alongside},
+		{"override", DesyncCountdownDisplay::override_activation},
+		{"until_reactivated", DesyncCountdownDisplay::until_reactivated}};
 	return lookup(value, table);
 }
 #endif
@@ -152,15 +158,17 @@ std::optional<DesyncCountdownDisplay> parse_countdown_display(const std::string&
 #ifdef LAGSW_FEATURE_PASSIVE_LATENCY
 std::optional<PassiveLatencyMode> parse_passive_latency_mode(const std::string& value)
 {
-	static const std::pair<const char*, PassiveLatencyMode> table[] = {
-		{"fixed", PassiveLatencyMode::fixed}, {"uniform", PassiveLatencyMode::uniform}, {"normal", PassiveLatencyMode::normal}};
+	static const std::pair<const char*, PassiveLatencyMode> table[] = {{"fixed", PassiveLatencyMode::fixed},
+																	   {"uniform", PassiveLatencyMode::uniform},
+																	   {"normal", PassiveLatencyMode::normal}};
 	return lookup(value, table);
 }
 
 std::optional<PassiveLatencyDirection> parse_passive_latency_direction(const std::string& value)
 {
-	static const std::pair<const char*, PassiveLatencyDirection> table[] = {
-		{"both", PassiveLatencyDirection::both}, {"inbound", PassiveLatencyDirection::inbound}, {"outbound", PassiveLatencyDirection::outbound}};
+	static const std::pair<const char*, PassiveLatencyDirection> table[] = {{"both", PassiveLatencyDirection::both},
+																			{"inbound", PassiveLatencyDirection::inbound},
+																			{"outbound", PassiveLatencyDirection::outbound}};
 	return lookup(value, table);
 }
 #endif
@@ -196,8 +204,8 @@ std::optional<unsigned long> parse_ulong(const std::string& text, unsigned long 
 {
 	try
 	{
-		size_t			   consumed = 0;
-		const unsigned long value	= std::stoul(text, &consumed);
+		size_t				consumed = 0;
+		const unsigned long value	 = std::stoul(text, &consumed);
 		if (consumed != text.size() || value < min || value > max)
 			return std::nullopt;
 		return value;

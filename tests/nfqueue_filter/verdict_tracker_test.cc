@@ -105,7 +105,7 @@ void test_late_arrivals_from_before_a_wrap_sort_first()
 	nfq::VerdictTracker tracker;
 	tracker.add(0xFFFFFFFDu, 0);
 	tracker.add(1, 0);
-	tracker.add(0xFFFFFFFFu, 0);	// delivered out of order, but older than id 1
+	tracker.add(0xFFFFFFFFu, 0);  // delivered out of order, but older than id 1
 	const auto run = tracker.plan({1, 0xFFFFFFFFu, 0xFFFFFFFDu});
 	CHECK(run.ids == (Ids{0xFFFFFFFDu, 0xFFFFFFFFu, 1}));
 }

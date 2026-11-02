@@ -16,9 +16,9 @@ using namespace nfq::shaping;
 
 StageSpec spec_for(const std::string& filter, bool forward = false, bool include_forward = false)
 {
-	StageSpec	 spec;
-	std::string	 error;
-	uint32_t	 position = 0;
+	StageSpec	spec;
+	std::string error;
+	uint32_t	position = 0;
 	CHECK(nfq::compile_filter(filter, forward, spec.rules, error, position, include_forward));
 	spec.delay_ms = 100;
 	return spec;
@@ -38,23 +38,23 @@ void test_forward_and_output_rules_become_hook_bits()
 
 void test_inbound_traffic_cannot_be_served_unless_it_is_ignored()
 {
-	StageSpec spec = spec_for("tcp");
+	StageSpec  spec	   = spec_for("tcp");
 	const Plan refused = plan_stage(spec, 0);
 	CHECK(!refused.ok && refused.reason.find("inbound") != std::string::npos);
 
 	spec.ignore_inbound = true;
-	const Plan ignored = plan_stage(spec, 0);
+	const Plan ignored	= plan_stage(spec, 0);
 	CHECK(ignored.ok && ignored.stage.rule_count == 1);	 // only the output-hook rule is left
 
-	StageSpec only_inbound = spec_for("tcp and inbound");
+	StageSpec only_inbound		= spec_for("tcp and inbound");
 	only_inbound.ignore_inbound = true;
-	const Plan none = plan_stage(only_inbound, 0);
+	const Plan none				= plan_stage(only_inbound, 0);
 	CHECK(!none.ok && none.reason.find("only inbound") != std::string::npos);
 }
 
 void test_matches_are_translated_exactly()
 {
-	StageSpec spec = spec_for("tcp.Syn and not tcp.Ack and tcp.SrcPort != 80 and ip.DstAddr == 10.1.2.3 and ifIdx == 7", true);
+	StageSpec  spec = spec_for("tcp.Syn and not tcp.Ack and tcp.SrcPort != 80 and ip.DstAddr == 10.1.2.3 and ifIdx == 7", true);
 	const Plan plan = plan_stage(spec, 0);
 	CHECK(plan.ok);
 	if (!plan.ok)
@@ -66,8 +66,10 @@ void test_matches_are_translated_exactly()
 	CHECK(rule.matches[0].kind == LAGSW_MATCH_PROTOCOL && rule.matches[0].proto == IPPROTO_TCP && !rule.matches[0].negated);
 	CHECK(rule.matches[1].kind == LAGSW_MATCH_TCP_FLAG && rule.matches[1].flag == 0x02 && !rule.matches[1].negated);
 	CHECK(rule.matches[2].kind == LAGSW_MATCH_TCP_FLAG && rule.matches[2].flag == 0x10 && rule.matches[2].negated);
-	CHECK(rule.matches[3].kind == LAGSW_MATCH_PORT && rule.matches[3].endpoint == 0 && rule.matches[3].port == 80 && rule.matches[3].negated);
-	CHECK(rule.matches[4].kind == LAGSW_MATCH_ADDRESS && rule.matches[4].endpoint == 1 && !rule.matches[4].is_set && rule.matches[4].value == htonl(0x0A010203));
+	CHECK(rule.matches[3].kind == LAGSW_MATCH_PORT && rule.matches[3].endpoint == 0 && rule.matches[3].port == 80 &&
+		  rule.matches[3].negated);
+	CHECK(rule.matches[4].kind == LAGSW_MATCH_ADDRESS && rule.matches[4].endpoint == 1 && !rule.matches[4].is_set &&
+		  rule.matches[4].value == htonl(0x0A010203));
 	CHECK(rule.matches[5].kind == LAGSW_MATCH_IIF && rule.matches[5].value == 7);
 	CHECK(plan.stage.rules[1].matches[5].kind == LAGSW_MATCH_OIF);
 }
@@ -89,22 +91,23 @@ void test_address_lists_become_shared_sets()
 
 void test_behaviours_and_delays()
 {
-	StageSpec spec = spec_for("tcp and outbound");
-	spec.behaviour = Behaviour::drop;
-	spec.delay_ms  = 0;
+	StageSpec spec	= spec_for("tcp and outbound");
+	spec.behaviour	= Behaviour::drop;
+	spec.delay_ms	= 0;
 	const Plan drop = plan_stage(spec, 0);
 	CHECK(drop.ok && drop.stage.mode == LAGSW_MODE_DROP && drop.stage.active == 0);
 
-	spec.behaviour = Behaviour::fixed_delay;
+	spec.behaviour	= Behaviour::fixed_delay;
 	const Plan zero = plan_stage(spec, 0);
 	CHECK(!zero.ok && zero.reason.find("until deactivation") != std::string::npos);
 
-	spec.delay_ms = 250;
+	spec.delay_ms	 = 250;
 	const Plan fixed = plan_stage(spec, 0);
-	CHECK(fixed.ok && fixed.stage.mode == LAGSW_MODE_DELAY && fixed.stage.delay_ns == 250000000ull && fixed.stage.max_delay_ns == 250000000ull);
+	CHECK(fixed.ok && fixed.stage.mode == LAGSW_MODE_DELAY && fixed.stage.delay_ns == 250000000ull &&
+		  fixed.stage.max_delay_ns == 250000000ull);
 	CHECK(fixed.stage.preserve_order == 0 && fixed.stage.jitter_ns == 0);
 
-	spec.behaviour = Behaviour::batch_delay;
+	spec.behaviour	 = Behaviour::batch_delay;
 	const Plan batch = plan_stage(spec, 0);
 	CHECK(batch.ok && batch.stage.mode == LAGSW_MODE_BATCH);
 
@@ -141,7 +144,9 @@ void test_limits_are_reported_not_approximated()
 	const Plan too_many_rules = plan_stage(spec_for("(" + filter + ") and outbound"), 0);
 	CHECK(!too_many_rules.ok && too_many_rules.reason.find("rules") != std::string::npos);
 
-	const Plan too_many_conditions = plan_stage(spec_for("tcp.Syn and not tcp.Ack and not tcp.Fin and not tcp.Rst and not tcp.Psh and not tcp.Urg and tcp.DstPort == 1 and ip.DstAddr == 1.2.3.4 and outbound"), 0);
+	const Plan too_many_conditions = plan_stage(spec_for("tcp.Syn and not tcp.Ack and not tcp.Fin and not tcp.Rst and not tcp.Psh and not "
+														 "tcp.Urg and tcp.DstPort == 1 and ip.DstAddr == 1.2.3.4 and outbound"),
+												0);
 	CHECK(!too_many_conditions.ok && too_many_conditions.reason.find("conditions") != std::string::npos);
 }
 
@@ -157,7 +162,7 @@ void test_normal_scores_follow_the_standard_normal_distribution()
 	const double mean = sum / scores.size() / LAGSW_NORMAL_SCALE;
 	const double sd	  = std::sqrt(square / scores.size()) / LAGSW_NORMAL_SCALE;
 	CHECK(std::fabs(mean) < 1e-4);
-	CHECK(sd > 0.98 && sd < 1.0);	// the midpoint table cuts the tails at about 3.3 sigma
+	CHECK(sd > 0.98 && sd < 1.0);  // the midpoint table cuts the tails at about 3.3 sigma
 	for (size_t index = 1; index < scores.size(); ++index)
 		CHECK(scores[index] >= scores[index - 1]);
 	CHECK(scores.front() < -3000000 && scores.back() > 3000000);

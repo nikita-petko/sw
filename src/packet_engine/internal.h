@@ -16,15 +16,15 @@
 #include <unordered_set>
 #include <vector>
 
-#include "packet_engine.h"
-#include "platform.h"
-#include "packet_backend.h"
-#include "packet_headers.h"
-#include "packet_engine_util.h"
-#include "region_lookup.h"
 #include "../packet_mode/packet_mode.h"
+#include "packet_backend.h"
+#include "packet_engine.h"
+#include "packet_engine_util.h"
+#include "packet_headers.h"
+#include "platform.h"
+#include "region_lookup.h"
 #ifdef LAGSW_FEATURE_PASSIVE_LATENCY
-#include "../passive_latency/delay_model.h"
+#	include "../passive_latency/delay_model.h"
 #endif
 
 /// Runtime resources and packet queues owned by one active profile.
@@ -38,21 +38,21 @@ struct PacketEngine::Session
 	{
 	}
 
-	int									  profile;
+	int profile;
 	/// Capture channel; null when the profile runs as a kernel-shaping stage (then there are no worker threads).
 	std::unique_ptr<backend::PacketChannel> handle;
-	std::unique_ptr<backend::ShapeStage>	  shape;
-	std::atomic<bool>			   stopping = false;
-	std::mutex					   packet_mutex;
-	std::condition_variable		   packet_changed;
-	uint64_t					   next_receive_order = 0;
-	PacketQueue					   delayed_packets;
-	PacketMode*					   mode;
+	std::unique_ptr<backend::ShapeStage>	shape;
+	std::atomic<bool>						stopping = false;
+	std::mutex								packet_mutex;
+	std::condition_variable					packet_changed;
+	uint64_t								next_receive_order = 0;
+	PacketQueue								delayed_packets;
+	PacketMode*								mode;
 #ifdef LAGSW_FEATURE_PCAP_FILES
-	PcapCapture					   pcap;
+	PcapCapture pcap;
 #endif
-	std::thread					   receive_thread;
-	std::thread					   send_thread;
+	std::thread receive_thread;
+	std::thread send_thread;
 };
 
 /// Shared mutable runtime state for packet-engine workers and status queries.
@@ -100,18 +100,18 @@ struct PacketEngine::State
 #endif
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 	std::unique_ptr<backend::PacketChannel> probe_handle;
-	std::thread						probe_thread;
+	std::thread								probe_thread;
 	std::unique_ptr<backend::PacketChannel> region_enforcement_handle;
-	std::thread						region_enforcement_recv_thread;
-	std::thread						region_enforcement_send_thread;
-	std::mutex						region_enforcement_mutex;
-	std::condition_variable			region_enforcement_changed;
-	std::atomic<bool>				region_enforcement_stopping = false;
-	mutable std::mutex				probe_mutex;
-	bool							probe_received	 = false;
-	uint64_t						probe_window_end = 0;
-	uint64_t						next_check_time	 = 0;
-	std::unordered_set<std::string> probed_addresses_in_window;
+	std::thread								region_enforcement_recv_thread;
+	std::thread								region_enforcement_send_thread;
+	std::mutex								region_enforcement_mutex;
+	std::condition_variable					region_enforcement_changed;
+	std::atomic<bool>						region_enforcement_stopping = false;
+	mutable std::mutex						probe_mutex;
+	bool									probe_received	 = false;
+	uint64_t								probe_window_end = 0;
+	uint64_t								next_check_time	 = 0;
+	std::unordered_set<std::string>			probed_addresses_in_window;
 
 	/// A packet buffered until its region-enforcement release time.
 	struct DelayedEnforcementPacket
@@ -127,24 +127,24 @@ struct PacketEngine::State
 	std::unique_ptr<backend::PacketChannel> passive_latency_handle;
 	/// Set instead of passive_latency_handle when the baseline runs in the kernel.
 	std::unique_ptr<backend::ShapeStage> passive_latency_shape;
-	std::thread						passive_latency_recv_thread;
-	std::thread						passive_latency_send_thread;
-	std::mutex						passive_latency_mutex;
-	std::condition_variable			passive_latency_changed;
-	std::atomic<bool>				passive_latency_stopping = false;
-	std::unique_ptr<DelayModel>		passive_latency_model;
+	std::thread							 passive_latency_recv_thread;
+	std::thread							 passive_latency_send_thread;
+	std::mutex							 passive_latency_mutex;
+	std::condition_variable				 passive_latency_changed;
+	std::atomic<bool>					 passive_latency_stopping = false;
+	std::unique_ptr<DelayModel>			 passive_latency_model;
 	/// Guarded by passive_latency_mutex.
-	bool							passive_latency_paused = false;
-	uint64_t						passive_latency_next_receive_order = 0;
-	PacketQueue						passive_latency_queue;
+	bool		passive_latency_paused			   = false;
+	uint64_t	passive_latency_next_receive_order = 0;
+	PacketQueue passive_latency_queue;
 #endif
 
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 	std::unique_ptr<backend::PacketChannel> fad_handle;
-	std::thread						fad_thread;
-	mutable std::mutex				fad_mutex;
-	std::string						fad_client_source_address;
-	std::string						fad_client_destination_address;
+	std::thread								fad_thread;
+	mutable std::mutex						fad_mutex;
+	std::string								fad_client_source_address;
+	std::string								fad_client_destination_address;
 #endif
 };
 

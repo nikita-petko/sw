@@ -2,36 +2,36 @@
 
 #ifdef LAGSW_FEATURE_NET_MONITOR
 
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
+#	include <algorithm>
+#	include <cmath>
+#	include <cstdio>
 
-#include "format.h"
-#include "json.h"
-#include "log.h"
-#include "packet_engine_util.h"
-#include "packet_headers.h"
-#include "platform.h"
+#	include "format.h"
+#	include "json.h"
+#	include "log.h"
+#	include "packet_engine_util.h"
+#	include "packet_headers.h"
+#	include "platform.h"
 
 LOG_DEFAULT_GROUP(logging::group::backend)
 
 namespace {
 using Clock = std::chrono::steady_clock;
 
-constexpr size_t kHistory			= 600;	// seconds of history kept; wide terminals show as much as fits
-constexpr size_t kRttWindow			= 256;	// RTT samples used for the percentiles
-constexpr size_t kPendingPerFlow	= 128;
-constexpr size_t kMaxFlowsPerServer = 256;
-constexpr size_t kMaxPorts			= 64;
-constexpr double kStallMs			= 250;	// an inbound gap at least this long counts as a stall
-constexpr size_t kMaxEvents			= 200;
-constexpr size_t kRetransmitWindow	= 10;	// seconds of history behind the retransmit alert
-constexpr uint64_t kMinAlertData	= 20;	// data packets needed in that window before a retransmit percentage means anything
-constexpr size_t kEventRows			= 4;
-constexpr auto	 kStatusLifetime	= std::chrono::seconds(8);
-constexpr auto	 kCaptureRetry		= std::chrono::seconds(5);
-constexpr auto	 kTickInterval		= std::chrono::seconds(1);
-constexpr auto	 kFrameInterval		= std::chrono::milliseconds(200);
+constexpr size_t   kHistory			  = 600;  // seconds of history kept; wide terminals show as much as fits
+constexpr size_t   kRttWindow		  = 256;  // RTT samples used for the percentiles
+constexpr size_t   kPendingPerFlow	  = 128;
+constexpr size_t   kMaxFlowsPerServer = 256;
+constexpr size_t   kMaxPorts		  = 64;
+constexpr double   kStallMs			  = 250;  // an inbound gap at least this long counts as a stall
+constexpr size_t   kMaxEvents		  = 200;
+constexpr size_t   kRetransmitWindow  = 10;	 // seconds of history behind the retransmit alert
+constexpr uint64_t kMinAlertData	  = 20;	 // data packets needed in that window before a retransmit percentage means anything
+constexpr size_t   kEventRows		  = 4;
+constexpr auto	   kStatusLifetime	  = std::chrono::seconds(8);
+constexpr auto	   kCaptureRetry	  = std::chrono::seconds(5);
+constexpr auto	   kTickInterval	  = std::chrono::seconds(1);
+constexpr auto	   kFrameInterval	  = std::chrono::milliseconds(200);
 
 const char* const kReset  = "\033[0m";
 const char* const kDim	  = "\033[90m";
@@ -128,19 +128,32 @@ const char* service_name(uint16_t port)
 {
 	switch (port)
 	{
-		case 53: return "dns";
-		case 80: return "http";
-		case 443: return "https/quic";
-		case 3074: return "xbox live";
-		case 3478: return "stun";
-		case 3479: return "turn";
-		case 3480: return "turn";
-		case 3544: return "teredo";
-		case 4380: return "steam";
-		case 5222: return "xmpp";
-		case 9308: return "playstation";
-		case 27015: return "source";
-		default: return "";
+		case 53:
+			return "dns";
+		case 80:
+			return "http";
+		case 443:
+			return "https/quic";
+		case 3074:
+			return "xbox live";
+		case 3478:
+			return "stun";
+		case 3479:
+			return "turn";
+		case 3480:
+			return "turn";
+		case 3544:
+			return "teredo";
+		case 4380:
+			return "steam";
+		case 5222:
+			return "xmpp";
+		case 9308:
+			return "playstation";
+		case 27015:
+			return "source";
+		default:
+			return "";
 	}
 }
 
@@ -178,8 +191,8 @@ std::string bar(double fraction, size_t width)
 /// Whole-second spans, scaled from seconds up to days.
 std::string format_age(double seconds)
 {
-	char			 text[32];
-	const long long	 total = static_cast<long long>(seconds);
+	char			text[32];
+	const long long total = static_cast<long long>(seconds);
 	if (total < 60)
 		std::snprintf(text, sizeof(text), "%llds", total);
 	else if (total < 3600)
@@ -217,8 +230,12 @@ std::string format_ms_delta(double value)
 std::string format_clock(uint64_t seconds)
 {
 	char text[24];
-	std::snprintf(text, sizeof(text), "%02llu:%02llu:%02llu", static_cast<unsigned long long>(seconds / 3600),
-				  static_cast<unsigned long long>(seconds / 60 % 60), static_cast<unsigned long long>(seconds % 60));
+	std::snprintf(text,
+				  sizeof(text),
+				  "%02llu:%02llu:%02llu",
+				  static_cast<unsigned long long>(seconds / 3600),
+				  static_cast<unsigned long long>(seconds / 60 % 60),
+				  static_cast<unsigned long long>(seconds % 60));
 	return text;
 }
 
@@ -270,7 +287,8 @@ std::vector<std::string> chart_rows(const std::deque<double>& values, size_t wid
 		line.append(width - count, ' ');
 	for (size_t i = values.size() - count; i < values.size(); ++i)
 	{
-		const size_t levels = values[i] <= 0 ? 0 : std::max<size_t>(1, static_cast<size_t>(values[i] / top * static_cast<double>(rows * 8) + 0.5));
+		const size_t levels =
+			values[i] <= 0 ? 0 : std::max<size_t>(1, static_cast<size_t>(values[i] / top * static_cast<double>(rows * 8) + 0.5));
 		for (size_t row = 0; row < rows; ++row)
 		{
 			const size_t from = (rows - 1 - row) * 8;
@@ -284,8 +302,13 @@ std::vector<std::string> chart_rows(const std::deque<double>& values, size_t wid
 
 /// Like chart_rows(), but also shows the per-second spread: a darker bar up to the lowest value, the mean above it and a
 /// thin line up to the highest value. A single row cannot show the spread and falls back to the plain chart.
-std::vector<std::string> band_rows(const std::deque<double>& mean, const std::deque<double>& low, const std::deque<double>& high, size_t width,
-								   double floor, const char* color, size_t rows)
+std::vector<std::string> band_rows(const std::deque<double>& mean,
+								   const std::deque<double>& low,
+								   const std::deque<double>& high,
+								   size_t					 width,
+								   double					 floor,
+								   const char*				 color,
+								   size_t					 rows)
 {
 	if (rows <= 1 || low.size() != mean.size() || high.size() != mean.size())
 		return chart_rows(mean, width, floor, color, rows);
@@ -383,9 +406,7 @@ void NetMonitor::Conditions::add(const Conditions& other)
 	bytes_down += other.bytes_down;
 }
 
-NetMonitor::NetMonitor(const PacketEngine& engine, const PacketEngineOptions& options)
-: engine_(engine)
-, options_(options)
+NetMonitor::NetMonitor(const PacketEngine& engine, const PacketEngineOptions& options) : engine_(engine), options_(options)
 {
 }
 
@@ -421,8 +442,8 @@ void NetMonitor::toggle()
 		for (const ServerOptions& server : servers)
 			add_server_locked(server);
 		reset_locked();
-		view_			= View::overview;
-		has_selection_	= false;
+		view_		   = View::overview;
+		has_selection_ = false;
 		status_message_.clear();
 		open_error_.clear();
 	}
@@ -441,8 +462,8 @@ void NetMonitor::toggle()
 	logging::set_suspended(true);
 	std::printf("\033[?1049h\033[?25l");
 	std::fflush(stdout);
-	active_			= true;
-	render_thread_	= std::thread(&NetMonitor::render_loop, this);
+	active_		   = true;
+	render_thread_ = std::thread(&NetMonitor::render_loop, this);
 }
 
 void NetMonitor::stop()
@@ -673,30 +694,30 @@ void NetMonitor::reset_locked()
 	ports_.clear();
 	std::fill(std::begin(size_up_), std::end(size_up_), 0);
 	std::fill(std::begin(size_down_), std::end(size_down_), 0);
-	peak_bps_up_	 = 0;
-	peak_bps_down_	 = 0;
-	peak_pps_		 = 0;
-	sum_pps_		 = 0;
-	queued_			 = Series{};
-	peak_queued_	 = 0;
-	cpu_			 = Series{};
-	nic_problems_	 = Series{};
-	system_has_prev_ = false;
-	total_packets_	 = 0;
-	other_packets_	 = 0;
+	peak_bps_up_	  = 0;
+	peak_bps_down_	  = 0;
+	peak_pps_		  = 0;
+	sum_pps_		  = 0;
+	queued_			  = Series{};
+	peak_queued_	  = 0;
+	cpu_			  = Series{};
+	nic_problems_	  = Series{};
+	system_has_prev_  = false;
+	total_packets_	  = 0;
+	other_packets_	  = 0;
 	unparsed_packets_ = 0;
-	capture_errors_	 = 0;
-	profile_active_	 = Series{};
-	alerts_active_	 = Series{};
+	capture_errors_	  = 0;
+	profile_active_	  = Series{};
+	alerts_active_	  = Series{};
 	events_.clear();
-	has_selection_	 = false;
+	has_selection_ = false;
 	profile_state_.assign(options_.profiles.size(), false);
 	for (size_t i = 0; i < profile_state_.size(); ++i)
 		profile_state_[i] = engine_.is_running(static_cast<int>(i) + 1);
 	profile_stats_.assign(options_.profiles.size(), ProfileStats{});
-	baseline_		 = Conditions{};
-	elapsed_ticks_	 = 0;
-	last_tick_		 = Clock::now();
+	baseline_	   = Conditions{};
+	elapsed_ticks_ = 0;
+	last_tick_	   = Clock::now();
 }
 
 void NetMonitor::clear_transient_locked()
@@ -753,8 +774,8 @@ void NetMonitor::record(const uint8_t* packet, uint32_t length)
 	++total_packets_;
 	// The direction comes from which endpoint is the server: the backend flag is unreliable for forwarded traffic,
 	// which the nfqueue backend always reports as outbound.
-	bool		 outbound = false;
-	auto		 found	  = servers_.find(endpoint_address(parsed, false));
+	bool outbound = false;
+	auto found	  = servers_.find(endpoint_address(parsed, false));
 	if (found == servers_.end())
 	{
 		found	 = servers_.find(endpoint_address(parsed, true));
@@ -827,8 +848,8 @@ void NetMonitor::record(const uint8_t* packet, uint32_t length)
 	{
 		if (stats.has_in)
 		{
-			const double gap = elapsed_ms(stats.last_in, now);
-			stats.max_gap_ms = std::max(stats.max_gap_ms, gap);
+			const double gap	  = elapsed_ms(stats.last_in, now);
+			stats.max_gap_ms	  = std::max(stats.max_gap_ms, gap);
 			stats.tick_max_gap_ms = std::max(stats.tick_max_gap_ms, gap);
 			if (gap >= kStallMs)
 				++stats.stalls;
@@ -998,7 +1019,7 @@ void NetMonitor::record(const uint8_t* packet, uint32_t length)
 	}
 	if (!tcp.Ack)
 		return;
-	const uint32_t	  ack = swap_u32(tcp.AckNum);
+	const uint32_t	  ack	  = swap_u32(tcp.AckNum);
 	bool			  matched = false;
 	Clock::time_point sent;
 	while (!flow.pending.empty() && !seq_gt(flow.pending.front().end_seq, ack))
@@ -1089,7 +1110,7 @@ void NetMonitor::tick()
 		const uint64_t retrans_now = stats.retrans_up + stats.retrans_down;
 		stats.retrans.push(static_cast<double>(retrans_now - stats.retrans_prev));
 		retrans += retrans_now - stats.retrans_prev;
-		stats.retrans_prev = retrans_now;
+		stats.retrans_prev		= retrans_now;
 		const uint64_t data_now = stats.data_up + stats.data_down;
 		stats.data_pkts.push(static_cast<double>(data_now - stats.data_prev));
 		data_tick += data_now - stats.data_prev;
@@ -1097,8 +1118,11 @@ void NetMonitor::tick()
 		if (stats.up.packets + stats.down.packets > 0)
 		{
 			const double data = static_cast<double>(stats.data_up + stats.data_down);
-			stats.score.push(stability_score(data > 0 ? 100.0 * static_cast<double>(retrans_now) / data : 0, stats.jitter_ms,
-											 stats.interarrival_jitter_ms, stats.resets, stats.stalls));
+			stats.score.push(stability_score(data > 0 ? 100.0 * static_cast<double>(retrans_now) / data : 0,
+											 stats.jitter_ms,
+											 stats.interarrival_jitter_ms,
+											 stats.resets,
+											 stats.stalls));
 		}
 		evaluate_alerts_locked(stats.label, stats);
 		for (const bool active : stats.alert_active)
@@ -1112,7 +1136,8 @@ void NetMonitor::tick()
 			{
 				flow.detail->bps_down.push(static_cast<double>(flow.bytes_down_tick));
 				flow.detail->bps_up.push(static_cast<double>(flow.bytes_up_tick));
-				flow.detail->rtt.push(flow.rtt_tick_count > 0 ? flow.rtt_tick_sum_ms / flow.rtt_tick_count : last_value(flow.detail->rtt.values));
+				flow.detail->rtt.push(flow.rtt_tick_count > 0 ? flow.rtt_tick_sum_ms / flow.rtt_tick_count
+															  : last_value(flow.detail->rtt.values));
 			}
 			flow.bytes_down_tick = flow.bytes_up_tick = 0;
 			flow.rtt_tick_sum_ms					  = 0;
@@ -1136,14 +1161,14 @@ void NetMonitor::tick()
 			port.rtt.push(port.tick_rtt_sum_ms / port.tick_rtt_count);
 		else
 			port.rtt.push(last_value(port.rtt.values));
-		port.pkts_up   = static_cast<double>(port.up.packets_tick);
-		port.pkts_down = static_cast<double>(port.down.packets_tick);
-		port.rate_up   = static_cast<double>(port.up.bytes_tick);
-		port.rate_down = static_cast<double>(port.down.bytes_tick);
+		port.pkts_up		 = static_cast<double>(port.up.packets_tick);
+		port.pkts_down		 = static_cast<double>(port.down.packets_tick);
+		port.rate_up		 = static_cast<double>(port.up.bytes_tick);
+		port.rate_down		 = static_cast<double>(port.down.bytes_tick);
 		port.up.packets_tick = port.down.packets_tick = 0;
 		port.up.bytes_tick = port.down.bytes_tick = 0;
-		port.tick_rtt_sum_ms = 0;
-		port.tick_rtt_count	 = 0;
+		port.tick_rtt_sum_ms					  = 0;
+		port.tick_rtt_count						  = 0;
 	}
 	peak_bps_up_   = std::max(peak_bps_up_, bps_up);
 	peak_bps_down_ = std::max(peak_bps_down_, bps_down);
@@ -1296,7 +1321,7 @@ void NetMonitor::evaluate_alerts_locked(const std::string& label, ServerStats& s
 		raise_alert_locked(label, stats, alert_retransmit, false, "");
 	else
 	{
-		const size_t count = std::min(kRetransmitWindow, std::min(stats.retrans.values.size(), stats.data_pkts.values.size()));
+		const size_t count		   = std::min(kRetransmitWindow, std::min(stats.retrans.values.size(), stats.data_pkts.values.size()));
 		double		 retransmitted = 0, data = 0;
 		for (size_t i = 0; i < count; ++i)
 		{
@@ -1306,7 +1331,12 @@ void NetMonitor::evaluate_alerts_locked(const std::string& label, ServerStats& s
 		if (data >= static_cast<double>(kMinAlertData))
 		{
 			const double percent = 100.0 * retransmitted / data;
-			std::snprintf(detail, sizeof(detail), "%.1f%% in the last %zu s is above %u%%", percent, kRetransmitWindow, limits.alert_retransmit_percent);
+			std::snprintf(detail,
+						  sizeof(detail),
+						  "%.1f%% in the last %zu s is above %u%%",
+						  percent,
+						  kRetransmitWindow,
+						  limits.alert_retransmit_percent);
 			raise_alert_locked(label, stats, alert_retransmit, percent > limits.alert_retransmit_percent, detail);
 		}
 	}
@@ -1315,7 +1345,11 @@ void NetMonitor::evaluate_alerts_locked(const std::string& label, ServerStats& s
 		raise_alert_locked(label, stats, alert_stall, false, "");
 	else
 	{
-		std::snprintf(detail, sizeof(detail), "no packet from the server for %.0f ms (limit %u ms)", stats.tick_max_gap_ms, limits.alert_stall_ms);
+		std::snprintf(detail,
+					  sizeof(detail),
+					  "no packet from the server for %.0f ms (limit %u ms)",
+					  stats.tick_max_gap_ms,
+					  limits.alert_stall_ms);
 		raise_alert_locked(label, stats, alert_stall, stats.tick_max_gap_ms >= limits.alert_stall_ms, detail);
 	}
 }
@@ -1335,7 +1369,9 @@ void NetMonitor::log_alert_summary()
 				text += std::string(text.empty() ? "" : ", ") + names[kind] + " x" + std::to_string(stats.alert_count[kind]);
 		}
 		if (total > 0)
-			LOG_WARN("Net monitor: %s raised %llu alert(s) while the view was open (%s)", stats.label.c_str(), static_cast<unsigned long long>(total),
+			LOG_WARN("Net monitor: %s raised %llu alert(s) while the view was open (%s)",
+					 stats.label.c_str(),
+					 static_cast<unsigned long long>(total),
 					 text.c_str());
 	}
 }
@@ -1347,9 +1383,9 @@ void NetMonitor::render_loop()
 	{
 		// New servers need a new capture filter, which cannot be done while the capture thread needs the lock.
 		refresh_servers();
-		const int columns = platform::console_width();
-		const int rows	  = platform::console_height();
-		const int frame_rows = rows - logging::pinned_status_rows(rows);
+		const int	columns	   = platform::console_width();
+		const int	rows	   = platform::console_height();
+		const int	frame_rows = rows - logging::pinned_status_rows(rows);
 		std::string frame;
 		{
 			std::lock_guard<std::mutex> lock(mutex_);
@@ -1360,7 +1396,7 @@ void NetMonitor::render_loop()
 				tick();
 				last_tick_ += kTickInterval;
 			}
-			frame = view_ == View::flows		? render_flow_view(columns, frame_rows)
+			frame = view_ == View::flows	  ? render_flow_view(columns, frame_rows)
 					: view_ == View::profiles ? render_profile_view(columns, frame_rows)
 											  : render_frame(columns, frame_rows);
 		}
@@ -1377,20 +1413,25 @@ void NetMonitor::render_loop()
 std::string NetMonitor::render_header(size_t width, std::vector<std::string>& warnings)
 {
 	(void)width;
-	const bool		  paused	= paused_;
-	const NetMonitorOptions& monitor = options_.features.net_monitor;
+	const bool				 paused	   = paused_;
+	const NetMonitorOptions& monitor   = options_.features.net_monitor;
 	const std::string		 close_key = format_key(monitor.key);
-	std::string		  out;
-	const auto		  line = [&out](const std::string& text) { out += text + "\033[K\n"; };
+	std::string				 out;
+	const auto				 line = [&out](const std::string& text) { out += text + "\033[K\n"; };
 
 	std::string status;
 	if (!status_message_.empty() && Clock::now() < status_until_)
 		status = std::string("  ") + kYellow + status_message_ + kReset;
-	line(std::string(kBold) + " NETMONITOR " + kReset + (paused ? std::string(kYellow) + "[PAUSED]" : std::string(kGreen) + "[MEASURING]") + kReset +
-		 "  " + (view_ == View::flows ? "flows" : view_ == View::profiles ? "profiles" : "overview") + "  measured " + format_clock(elapsed_ticks_) + status);
-	line(std::string(kDim) + " " + format_key(monitor.pause_key) + " pause | " + format_key(monitor.reset_key) + " reset | " + format_key(monitor.flows_key) +
-		 " " + (view_ == View::flows ? "overview" : "flows") + " | " + format_key(monitor.profiles_key) + " " +
-		 (view_ == View::profiles ? "overview" : "profiles") + " | " + format_key(monitor.export_key) + " export | " + close_key + " close | q quit" + kReset);
+	line(std::string(kBold) + " NETMONITOR " + kReset + (paused ? std::string(kYellow) + "[PAUSED]" : std::string(kGreen) + "[MEASURING]") +
+		 kReset + "  " +
+		 (view_ == View::flows		? "flows"
+		  : view_ == View::profiles ? "profiles"
+									: "overview") +
+		 "  measured " + format_clock(elapsed_ticks_) + status);
+	line(std::string(kDim) + " " + format_key(monitor.pause_key) + " pause | " + format_key(monitor.reset_key) + " reset | " +
+		 format_key(monitor.flows_key) + " " + (view_ == View::flows ? "overview" : "flows") + " | " + format_key(monitor.profiles_key) +
+		 " " + (view_ == View::profiles ? "overview" : "profiles") + " | " + format_key(monitor.export_key) + " export | " + close_key +
+		 " close | q quit" + kReset);
 
 	uint64_t packets_up = 0, packets_down = 0;
 	for (const auto& entry : servers_)
@@ -1400,19 +1441,22 @@ std::string NetMonitor::render_header(size_t width, std::vector<std::string>& wa
 	}
 	const std::string backend_text = std::string(backend::name()) + (capture_description_.empty() ? "" : " (" + capture_description_ + ")");
 	line(std::string(kDim) + " capture " + backend_text + " | " + std::to_string(servers_.size()) + " server(s) | matched " +
-		 std::to_string(packets_up + packets_down) + " | other " + std::to_string(other_packets_) + " | unparsed " + std::to_string(unparsed_packets_) +
-		 " | errors " + std::to_string(capture_errors_) + kReset);
+		 std::to_string(packets_up + packets_down) + " | other " + std::to_string(other_packets_) + " | unparsed " +
+		 std::to_string(unparsed_packets_) + " | errors " + std::to_string(capture_errors_) + kReset);
 
 	warnings.clear();
 	if (!open_error_.empty())
 		warnings.push_back(std::string(kRed) + open_error_ + kReset);
 	if (!paused && elapsed_ticks_ >= 5 && packets_up + packets_down == 0)
-		warnings.push_back(std::string(kYellow) + "no packets from the configured servers were captured yet; check the servers and that the capture sees their traffic" +
-						   kReset);
+		warnings.push_back(
+			std::string(kYellow) +
+			"no packets from the configured servers were captured yet; check the servers and that the capture sees their traffic" + kReset);
 	else if (!paused && elapsed_ticks_ >= 10 && packets_up == 0 && packets_down > 0)
-		warnings.push_back(std::string(kYellow) + "inbound packets are captured but no outbound ones; outbound traffic is not reaching the capture" + kReset);
+		warnings.push_back(std::string(kYellow) +
+						   "inbound packets are captured but no outbound ones; outbound traffic is not reaching the capture" + kReset);
 	else if (!paused && elapsed_ticks_ >= 10 && packets_down == 0 && packets_up > 0)
-		warnings.push_back(std::string(kYellow) + "outbound packets are captured but no inbound ones; inbound traffic is not reaching the capture" + kReset);
+		warnings.push_back(std::string(kYellow) +
+						   "outbound packets are captured but no inbound ones; inbound traffic is not reaching the capture" + kReset);
 	if (unparsed_packets_ >= 20 && unparsed_packets_ * 10 > total_packets_)
 		warnings.push_back(std::string(kYellow) + "more than a tenth of the captured packets could not be parsed" + kReset);
 	for (const std::string& warning : warnings)
@@ -1422,20 +1466,20 @@ std::string NetMonitor::render_header(size_t width, std::vector<std::string>& wa
 
 std::string NetMonitor::render_frame(int console_columns, int console_rows)
 {
-	const size_t width		= static_cast<size_t>(console_columns > 0 ? std::max(console_columns, 60) : 100);
-	const bool	 paused		= paused_;
+	const size_t width	= static_cast<size_t>(console_columns > 0 ? std::max(console_columns, 60) : 100);
+	const bool	 paused = paused_;
 	// While paused, silence is measured up to the moment of the pause.
 	const auto	 now		= paused ? paused_at_ : Clock::now();
 	const size_t label_cols = std::clamp<size_t>(width / 8, 16, 24);
 	const size_t value_cols = 13;
 	const size_t chart_cols = std::min<size_t>(kHistory, width - label_cols - value_cols - 4);
 
-	std::string out = "\033[H";
+	std::string out	 = "\033[H";
 	auto		line = [&out](const std::string& text) { out += text + "\033[K\n"; };
 
 	std::vector<std::string> warnings;
-	const std::string		 header = render_header(width, warnings);
-	uint64_t packets_up = 0, packets_down = 0, bytes_up = 0, bytes_down = 0, resets = 0, tcp = 0, udp = 0;
+	const std::string		 header		= render_header(width, warnings);
+	uint64_t				 packets_up = 0, packets_down = 0, bytes_up = 0, bytes_down = 0, resets = 0, tcp = 0, udp = 0;
 	for (const auto& entry : servers_)
 	{
 		const ServerStats& stats = entry.second;
@@ -1463,13 +1507,13 @@ std::string NetMonitor::render_frame(int console_columns, int console_rows)
 	}
 
 	// Spare terminal rows make every chart taller. The last row is left empty so the frame never scrolls.
-	const size_t chart_count = 6 + (focus ? 5 : 0) + 1 + 2;
-	const size_t table_rows	 = server_order_.size();
-	size_t		 port_rows	 = std::max<size_t>(1, std::min<size_t>(ports_.size(), 6));
-	const int	 base_lines	 = 4 + static_cast<int>(warnings.size()) + 1 + 6 + 2 + 1 + 1 + 1 + (focus ? 1 + 5 + 11 : 1) + 1 +
-							   (1 + 1 + static_cast<int>(port_rows) + 1) + 4 + 4 + (1 + static_cast<int>(kEventRows) + 1) + 4 + 1 +
-							   static_cast<int>(table_rows) + 1 + 1;
-	const int	 spare		 = console_rows > 0 ? console_rows - 1 - base_lines : 0;
+	const size_t chart_count	= 6 + (focus ? 5 : 0) + 1 + 2;
+	const size_t table_rows		= server_order_.size();
+	size_t		 port_rows		= std::max<size_t>(1, std::min<size_t>(ports_.size(), 6));
+	const int	 base_lines		= 4 + static_cast<int>(warnings.size()) + 1 + 6 + 2 + 1 + 1 + 1 + (focus ? 1 + 5 + 11 : 1) + 1 +
+								  (1 + 1 + static_cast<int>(port_rows) + 1) + 4 + 4 + (1 + static_cast<int>(kEventRows) + 1) + 4 + 1 +
+								  static_cast<int>(table_rows) + 1 + 1;
+	const int	 spare			= console_rows > 0 ? console_rows - 1 - base_lines : 0;
 	const size_t rows_per_chart = std::clamp<int>(1 + spare / static_cast<int>(chart_count), 1, 8);
 	size_t		 table_limit	= table_rows;
 	if (spare < 0)
@@ -1488,13 +1532,20 @@ std::string NetMonitor::render_frame(int console_columns, int console_rows)
 	auto chart = [&](const std::string& name, const std::string& value, const Series& series, double floor, const char* color) {
 		const std::vector<std::string> rows = chart_rows(series.values, chart_cols, floor, color, rows_per_chart);
 		for (size_t row = 0; row < rows.size(); ++row)
-			line(" " + (row == 0 ? pad(name, label_cols) + pad_left(value, value_cols) : std::string(label_cols + value_cols, ' ')) + "  " + rows[row]);
+			line(" " + (row == 0 ? pad(name, label_cols) + pad_left(value, value_cols) : std::string(label_cols + value_cols, ' ')) + "  " +
+				 rows[row]);
 	};
-	auto band_chart = [&](const std::string& name, const std::string& value, const Series& series, const Series& low, const Series& high, double floor,
-						  const char* color) {
+	auto band_chart = [&](const std::string& name,
+						  const std::string& value,
+						  const Series&		 series,
+						  const Series&		 low,
+						  const Series&		 high,
+						  double			 floor,
+						  const char*		 color) {
 		const std::vector<std::string> rows = band_rows(series.values, low.values, high.values, chart_cols, floor, color, rows_per_chart);
 		for (size_t row = 0; row < rows.size(); ++row)
-			line(" " + (row == 0 ? pad(name, label_cols) + pad_left(value, value_cols) : std::string(label_cols + value_cols, ' ')) + "  " + rows[row]);
+			line(" " + (row == 0 ? pad(name, label_cols) + pad_left(value, value_cols) : std::string(label_cols + value_cols, ' ')) + "  " +
+				 rows[row]);
 	};
 	auto marker = [&](const std::string& name, const std::string& value, const Series& series, const char* color) {
 		line(" " + pad(name, label_cols) + pad_left(value, value_cols) + "  " + marker_row(series.values, chart_cols, color));
@@ -1511,8 +1562,8 @@ std::string NetMonitor::render_frame(int console_columns, int console_rows)
 			count += flow.second.tcp && !flow.second.closed ? 1 : 0;
 		return count;
 	};
-	auto count_text = [](double value) { return std::to_string(static_cast<uint64_t>(value)); };
-	auto score_of	= [](const ServerStats& stats) { return stats.score.values.empty() ? -1.0 : stats.score.values.back(); };
+	auto count_text	 = [](double value) { return std::to_string(static_cast<uint64_t>(value)); };
+	auto score_of	 = [](const ServerStats& stats) { return stats.score.values.empty() ? -1.0 : stats.score.values.back(); };
 	auto score_arrow = [](const ServerStats& stats) {
 		const auto& values = stats.score.values;
 		if (values.size() < 11)
@@ -1526,19 +1577,31 @@ std::string NetMonitor::render_frame(int console_columns, int console_rows)
 	chart("packets/s up", count_text(last_value(total_.pps_up.values)), total_.pps_up, 10, kCyan);
 	chart("bandwidth down", format_rate(last_value(total_.bps_down.values)), total_.bps_down, 1024, kGreen);
 	chart("bandwidth up", format_rate(last_value(total_.bps_up.values)), total_.bps_up, 1024, kGreen);
-	band_chart("latency (RTT)", format_ms(total_.last_rtt_ms, total_.last_rtt_ms > 0), total_.rtt, total_.rtt_min, total_.rtt_max, 50,
+	band_chart("latency (RTT)",
+			   format_ms(total_.last_rtt_ms, total_.last_rtt_ms > 0),
+			   total_.rtt,
+			   total_.rtt_min,
+			   total_.rtt_max,
+			   50,
 			   rtt_color(total_.last_rtt_ms));
 	chart("retransmits/s", count_text(last_value(total_.retrans.values)), total_.retrans, 5, kRed);
 	// These two rows share the time axis of the charts above: a mark means a profile was active, or an alert was raised, in that second.
-	marker("profiles active", std::to_string(static_cast<uint64_t>(last_value(profile_active_.values))) + "/" + std::to_string(options_.profiles.size()),
-		   profile_active_, "\033[35m");
+	marker("profiles active",
+		   std::to_string(static_cast<uint64_t>(last_value(profile_active_.values))) + "/" + std::to_string(options_.profiles.size()),
+		   profile_active_,
+		   "\033[35m");
 	marker("alerts", std::to_string(static_cast<uint64_t>(last_value(alerts_active_.values))), alerts_active_, kRed);
 	line(std::string(kDim) + " peak bandwidth  down " + format_rate(peak_bps_down_) + "   up " + format_rate(peak_bps_up_) + kReset);
 	{
 		char		 text[160];
 		const double average = elapsed_ticks_ > 0 ? sum_pps_ / static_cast<double>(elapsed_ticks_) : 0;
-		std::snprintf(text, sizeof(text), " burstiness  peak %.0f pkt/s vs average %.0f pkt/s (%.1fx)   up/down bytes %.2f", peak_pps_, average,
-					  average > 0 ? peak_pps_ / average : 0.0, bytes_down > 0 ? static_cast<double>(bytes_up) / static_cast<double>(bytes_down) : 0.0);
+		std::snprintf(text,
+					  sizeof(text),
+					  " burstiness  peak %.0f pkt/s vs average %.0f pkt/s (%.1fx)   up/down bytes %.2f",
+					  peak_pps_,
+					  average,
+					  average > 0 ? peak_pps_ / average : 0.0,
+					  bytes_down > 0 ? static_cast<double>(bytes_up) / static_cast<double>(bytes_down) : 0.0);
 		line(std::string(kDim) + text + kReset);
 	}
 	line("");
@@ -1548,13 +1611,20 @@ std::string NetMonitor::render_frame(int console_columns, int console_rows)
 		const std::vector<double> window(focus->recent_rtt.begin(), focus->recent_rtt.end());
 		const bool				  has_rtt = focus->rtt_samples > 0;
 		const double			  average = has_rtt ? focus->rtt_sum_ms / static_cast<double>(focus->rtt_samples) : 0;
-		const double			  loss_up = 100.0 * static_cast<double>(focus->retrans_up) / static_cast<double>(std::max<uint64_t>(1, focus->data_up));
-		const double			  loss_down = 100.0 * static_cast<double>(focus->retrans_down) / static_cast<double>(std::max<uint64_t>(1, focus->data_down));
-		const uint64_t			  packets = focus->up.packets + focus->down.packets;
-		const uint64_t			  bytes	  = focus->up.bytes + focus->down.bytes;
+		const double loss_up = 100.0 * static_cast<double>(focus->retrans_up) / static_cast<double>(std::max<uint64_t>(1, focus->data_up));
+		const double loss_down =
+			100.0 * static_cast<double>(focus->retrans_down) / static_cast<double>(std::max<uint64_t>(1, focus->data_down));
+		const uint64_t packets = focus->up.packets + focus->down.packets;
+		const uint64_t bytes   = focus->up.bytes + focus->down.bytes;
 
 		line(std::string(kBold) + " Selected server: " + kReset + focus->label + " [" + focus_address + "]");
-		band_chart("latency (RTT)", format_ms(focus->last_rtt_ms, has_rtt), focus->rtt, focus->rtt_min, focus->rtt_max, 50, rtt_color(focus->last_rtt_ms));
+		band_chart("latency (RTT)",
+				   format_ms(focus->last_rtt_ms, has_rtt),
+				   focus->rtt,
+				   focus->rtt_min,
+				   focus->rtt_max,
+				   50,
+				   rtt_color(focus->last_rtt_ms));
 		chart("packets/s down", count_text(last_value(focus->pps_down.values)), focus->pps_down, 10, kCyan);
 		chart("packets/s up", count_text(last_value(focus->pps_up.values)), focus->pps_up, 10, kCyan);
 		chart("retransmits/s", count_text(last_value(focus->retrans.values)), focus->retrans, 5, kRed);
@@ -1576,39 +1646,64 @@ std::string NetMonitor::render_frame(int console_columns, int console_rows)
 				const double fraction = static_cast<double>(focus->rtt_hist[i]) / static_cast<double>(samples);
 				char		 percent[16];
 				std::snprintf(percent, sizeof(percent), "%.0f%%", fraction * 100);
-				spread += std::string(" ") + kDim + kRttLabels[i] + " " + kReset + kCyan + (focus->rtt_hist[i] > 0 ? blocks[std::min<size_t>(7, static_cast<size_t>(fraction * 7.999))] : " ") +
-						  kReset + percent;
+				spread += std::string(" ") + kDim + kRttLabels[i] + " " + kReset + kCyan +
+						  (focus->rtt_hist[i] > 0 ? blocks[std::min<size_t>(7, static_cast<size_t>(fraction * 7.999))] : " ") + kReset +
+						  percent;
 			}
 			line(spread);
 		}
-		line(" RTT jitter " + format_ms(focus->jitter_ms, has_rtt) + "   arrival jitter " + format_ms(focus->interarrival_jitter_ms, focus->has_in) +
-			 "   silence " + (focus->has_in ? format_ms(elapsed_ms(focus->last_in, now)) : std::string("-")) + "   longest gap " +
+		line(" RTT jitter " + format_ms(focus->jitter_ms, has_rtt) + "   arrival jitter " +
+			 format_ms(focus->interarrival_jitter_ms, focus->has_in) + "   silence " +
+			 (focus->has_in ? format_ms(elapsed_ms(focus->last_in, now)) : std::string("-")) + "   longest gap " +
 			 format_ms(focus->max_gap_ms, focus->has_in));
 		char loss[192];
-		std::snprintf(loss, sizeof(loss), " retransmits  up %s%.2f%%%s (%llu)   down %s%.2f%%%s (%llu)   resets %llu", loss_color(loss_up), loss_up, kReset,
-					  static_cast<unsigned long long>(focus->retrans_up), loss_color(loss_down), loss_down, kReset,
-					  static_cast<unsigned long long>(focus->retrans_down), static_cast<unsigned long long>(focus->resets));
+		std::snprintf(loss,
+					  sizeof(loss),
+					  " retransmits  up %s%.2f%%%s (%llu)   down %s%.2f%%%s (%llu)   resets %llu",
+					  loss_color(loss_up),
+					  loss_up,
+					  kReset,
+					  static_cast<unsigned long long>(focus->retrans_up),
+					  loss_color(loss_down),
+					  loss_down,
+					  kReset,
+					  static_cast<unsigned long long>(focus->retrans_down),
+					  static_cast<unsigned long long>(focus->resets));
 		line(loss);
 		char handshake[160];
 		if (focus->handshakes > 0)
-			std::snprintf(handshake, sizeof(handshake), " handshakes  %llu   last %s   avg %s   min %s   max %s   SYN retries %llu   half-open %zu",
-						  static_cast<unsigned long long>(focus->handshakes), format_ms(focus->last_handshake_ms).c_str(),
-						  format_ms(focus->handshake_sum_ms / static_cast<double>(focus->handshakes)).c_str(), format_ms(focus->handshake_min_ms).c_str(),
-						  format_ms(focus->handshake_max_ms).c_str(), static_cast<unsigned long long>(focus->syn_retries), half_open(*focus));
+			std::snprintf(handshake,
+						  sizeof(handshake),
+						  " handshakes  %llu   last %s   avg %s   min %s   max %s   SYN retries %llu   half-open %zu",
+						  static_cast<unsigned long long>(focus->handshakes),
+						  format_ms(focus->last_handshake_ms).c_str(),
+						  format_ms(focus->handshake_sum_ms / static_cast<double>(focus->handshakes)).c_str(),
+						  format_ms(focus->handshake_min_ms).c_str(),
+						  format_ms(focus->handshake_max_ms).c_str(),
+						  static_cast<unsigned long long>(focus->syn_retries),
+						  half_open(*focus));
 		else
-			std::snprintf(handshake, sizeof(handshake), " handshakes  none seen yet (open a new connection to measure)   SYN retries %llu   half-open %zu",
-						  static_cast<unsigned long long>(focus->syn_retries), half_open(*focus));
+			std::snprintf(handshake,
+						  sizeof(handshake),
+						  " handshakes  none seen yet (open a new connection to measure)   SYN retries %llu   half-open %zu",
+						  static_cast<unsigned long long>(focus->syn_retries),
+						  half_open(*focus));
 		line(handshake);
 		line(" protocol  TCP " + std::to_string(focus->tcp_packets) + " | UDP " + std::to_string(focus->udp_packets) + "   avg packet " +
 			 std::to_string(packets ? bytes / packets : 0) + " B   total " + std::to_string(packets) + " packets, " +
 			 format_size(static_cast<double>(bytes)));
 		line(" TCP health  duplicate ACKs up " + std::to_string(focus->dup_acks_up) + " / down " + std::to_string(focus->dup_acks_down) +
-			 "   zero-window " + std::to_string(focus->zero_windows) + "   stalls (gap >= " + format_ms(kStallMs) + ") " + std::to_string(focus->stalls));
+			 "   zero-window " + std::to_string(focus->zero_windows) + "   stalls (gap >= " + format_ms(kStallMs) + ") " +
+			 std::to_string(focus->stalls));
 		line(" TCP flags   SYN " + std::to_string(focus->syn_packets) + "  FIN " + std::to_string(focus->fin_packets) + "  RST " +
-			 std::to_string(focus->resets) + "  PSH " + std::to_string(focus->psh_packets) + "  pure ACK " + std::to_string(focus->pure_acks));
+			 std::to_string(focus->resets) + "  PSH " + std::to_string(focus->psh_packets) + "  pure ACK " +
+			 std::to_string(focus->pure_acks));
 		const double minutes = elapsed_ticks_ > 0 ? static_cast<double>(elapsed_ticks_) / 60.0 : 0;
 		char		 flows[160];
-		std::snprintf(flows, sizeof(flows), " TCP flows   active %zu   opened %llu   churn %.1f/min (source port changes per minute)", active_flows(*focus),
+		std::snprintf(flows,
+					  sizeof(flows),
+					  " TCP flows   active %zu   opened %llu   churn %.1f/min (source port changes per minute)",
+					  active_flows(*focus),
 					  static_cast<unsigned long long>(focus->flows_opened),
 					  static_cast<double>(focus->flows_opened) / std::max(minutes, 1.0 / 60));
 		line(flows);
@@ -1616,16 +1711,17 @@ std::string NetMonitor::render_frame(int console_columns, int console_rows)
 		{
 			const int hops = initial_ttl(focus->last_ttl) - focus->last_ttl;
 			line(" path        TTL " + std::to_string(focus->last_ttl) + " (~" + std::to_string(hops) + " hops)   route changes " +
-				 std::to_string(focus->ttl_changes) + "   DSCP " + std::to_string(focus->last_dscp) + " (" + std::to_string(focus->dscp_changes) +
-				 " changes)   ECN-CE marks " + std::to_string(focus->ecn_marked));
+				 std::to_string(focus->ttl_changes) + "   DSCP " + std::to_string(focus->last_dscp) + " (" +
+				 std::to_string(focus->dscp_changes) + " changes)   ECN-CE marks " + std::to_string(focus->ecn_marked));
 		}
 		else
 			line(std::string(kDim) + " path        no inbound packet seen yet" + kReset);
 		const double score = score_of(*focus);
 		char		 score_text[64];
 		std::snprintf(score_text, sizeof(score_text), "%.0f/100", score);
-		line(std::string(" stability   ") + (score >= 0 ? std::string(score_color(score)) + score_text + " " + score_arrow(*focus) + kReset : "-") +
-			 kDim + "   (retransmits, jitter, stalls and resets since the view opened)" + kReset);
+		line(std::string(" stability   ") +
+			 (score >= 0 ? std::string(score_color(score)) + score_text + " " + score_arrow(*focus) + kReset : "-") + kDim +
+			 "   (retransmits, jitter, stalls and resets since the view opened)" + kReset);
 	}
 	else
 		line(std::string(kDim) + " No configured server is selected; showing all servers only." + kReset);
@@ -1639,9 +1735,10 @@ std::string NetMonitor::render_frame(int console_columns, int console_rows)
 		return a->up.packets + a->down.packets > b->up.packets + b->down.packets;
 	});
 	const size_t port_trend = width > 96 ? std::min<size_t>(kHistory, width - 96) : 0;
-	line(std::string(kBold) + " Ports (server side, top " + std::to_string(port_rows) + " of " + std::to_string(ports_.size()) + ")" + kReset);
-	line(std::string(kDim) + " " + pad("port", 22) + pad_left("pkt/s v", 9) + pad_left("pkt/s ^", 9) + pad_left("rate v", 14) + pad_left("rate ^", 14) +
-		 pad_left("RTT", 10) + "  trend" + kReset);
+	line(std::string(kBold) + " Ports (server side, top " + std::to_string(port_rows) + " of " + std::to_string(ports_.size()) + ")" +
+		 kReset);
+	line(std::string(kDim) + " " + pad("port", 22) + pad_left("pkt/s v", 9) + pad_left("pkt/s ^", 9) + pad_left("rate v", 14) +
+		 pad_left("rate ^", 14) + pad_left("RTT", 10) + "  trend" + kReset);
 	if (ranked.empty())
 		line(std::string(kDim) + " no traffic seen yet" + kReset);
 	for (size_t i = 0; i < std::min(port_rows, ranked.size()); ++i)
@@ -1663,8 +1760,9 @@ std::string NetMonitor::render_frame(int console_columns, int console_rows)
 		uint64_t		sum		= 0;
 		for (size_t i = 0; i < kSizeBuckets; ++i)
 			sum += buckets[i];
-		std::string	 text	  = std::string(" ") + (direction == 0 ? "down  " : "up    ");
-		const size_t bar_cols = static_cast<size_t>(std::clamp<int>((static_cast<int>(width) - 8) / static_cast<int>(kSizeBuckets) - 18, 4, 40));
+		std::string	 text = std::string(" ") + (direction == 0 ? "down  " : "up    ");
+		const size_t bar_cols =
+			static_cast<size_t>(std::clamp<int>((static_cast<int>(width) - 8) / static_cast<int>(kSizeBuckets) - 18, 4, 40));
 		for (size_t i = 0; i < kSizeBuckets; ++i)
 		{
 			const double fraction = sum ? static_cast<double>(buckets[i]) / static_cast<double>(sum) : 0;
@@ -1682,12 +1780,13 @@ std::string NetMonitor::render_frame(int console_columns, int console_rows)
 		for (size_t i = 0; i < options_.profiles.size(); ++i)
 			active += engine_.is_running(static_cast<int>(i) + 1) ? 1 : 0;
 		chart("packets queued", std::to_string(static_cast<uint64_t>(last_value(queued_.values))), queued_, 4, kYellow);
-		std::string info = " profiles active " + std::to_string(active) + "/" + std::to_string(options_.profiles.size()) + "   queue peak " +
-						   std::to_string(peak_queued_) + "   next release in " + format_ms(static_cast<double>(engine_.next_batch_in_ms()));
-#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+		std::string info = " profiles active " + std::to_string(active) + "/" + std::to_string(options_.profiles.size()) +
+						   "   queue peak " + std::to_string(peak_queued_) + "   next release in " +
+						   format_ms(static_cast<double>(engine_.next_batch_in_ms()));
+#	ifdef LAGSW_FEATURE_PASSIVE_LATENCY
 		if (engine_.is_passive_latency_enabled())
 			info += "   passive latency " + engine_.passive_latency_status() + (engine_.is_passive_latency_paused() ? " [paused]" : "");
-#endif
+#	endif
 		line(info);
 	}
 	line("");
@@ -1715,66 +1814,76 @@ std::string NetMonitor::render_frame(int console_columns, int console_rows)
 		char cpu[24];
 		std::snprintf(cpu, sizeof(cpu), "%.1f%%", last_value(cpu_.values));
 		chart("lagsw CPU", system_prev_.cpu_available ? cpu : "n/a", cpu_, 10, kGreen);
-		chart("NIC errors+drops/s", system_prev_.nic_available ? count_text(last_value(nic_problems_.values)) : "n/a", nic_problems_, 5, kRed);
+		chart("NIC errors+drops/s",
+			  system_prev_.nic_available ? count_text(last_value(nic_problems_.values)) : "n/a",
+			  nic_problems_,
+			  5,
+			  kRed);
 	}
 	line("");
 
 	const size_t name_cols	= std::clamp<size_t>(width / 5, 14, 40);
 	const size_t trend_cols = std::min<size_t>(kHistory, width > name_cols + 75 ? width - name_cols - 75 : 0);
-	line(std::string(kBold) + " " + pad("Server", name_cols) + pad_left("pkt/s v", 9) + pad_left("pkt/s ^", 9) + pad_left("RTT", 10) + pad_left("avg", 10) +
-		 pad_left("jitter", 9) + pad_left("retx%", 8) + pad_left("silent", 9) + pad_left("score", 7) + "  RTT trend" + kReset);
+	line(std::string(kBold) + " " + pad("Server", name_cols) + pad_left("pkt/s v", 9) + pad_left("pkt/s ^", 9) + pad_left("RTT", 10) +
+		 pad_left("avg", 10) + pad_left("jitter", 9) + pad_left("retx%", 8) + pad_left("silent", 9) + pad_left("score", 7) + "  RTT trend" +
+		 kReset);
 	// The authoritative server leads the table; the others follow by average packets per second over the charted window.
-	const auto average_usage = [](const ServerStats& stats)
-	{
+	const auto average_usage = [](const ServerStats& stats) {
 		const size_t samples = std::min(stats.pps_up.values.size(), stats.pps_down.values.size());
 		if (samples == 0)
 			return 0.0;
 		double sum = 0;
 		for (size_t i = 0; i < samples; ++i)
-			sum += stats.pps_up.values[stats.pps_up.values.size() - samples + i] + stats.pps_down.values[stats.pps_down.values.size() - samples + i];
+			sum += stats.pps_up.values[stats.pps_up.values.size() - samples + i] +
+				   stats.pps_down.values[stats.pps_down.values.size() - samples + i];
 		return sum / static_cast<double>(samples);
 	};
 	std::vector<std::string> table_order = server_order_;
-	std::stable_sort(table_order.begin(), table_order.end(),
-					 [&](const std::string& a, const std::string& b)
-					 {
-						 const bool a_leads = engine_.is_authoritative_server() && a == focus_address;
-						 const bool b_leads = engine_.is_authoritative_server() && b == focus_address;
-						 if (a_leads != b_leads)
-							 return a_leads;
-						 return average_usage(servers_.at(a)) > average_usage(servers_.at(b));
-					 });
+	std::stable_sort(table_order.begin(), table_order.end(), [&](const std::string& a, const std::string& b) {
+		const bool a_leads = engine_.is_authoritative_server() && a == focus_address;
+		const bool b_leads = engine_.is_authoritative_server() && b == focus_address;
+		if (a_leads != b_leads)
+			return a_leads;
+		return average_usage(servers_.at(a)) > average_usage(servers_.at(b));
+	});
 	size_t shown = 0;
 	for (const std::string& address : table_order)
 	{
 		if (shown++ >= table_limit)
 			break;
-		const ServerStats& stats	= servers_.at(address);
-		const bool		   seen		= stats.up.packets + stats.down.packets > 0;
-		const double	   data		= static_cast<double>(stats.data_up + stats.data_down);
-		const double	   retx		= data > 0 ? 100.0 * static_cast<double>(stats.retrans_up + stats.retrans_down) / data : 0;
-		const bool		   has_rtt	= stats.rtt_samples > 0;
-		const double	   average	= has_rtt ? stats.rtt_sum_ms / static_cast<double>(stats.rtt_samples) : 0;
-		const bool		   current	= &stats == focus;
-		const double	   score	= score_of(stats);
+		const ServerStats& stats   = servers_.at(address);
+		const bool		   seen	   = stats.up.packets + stats.down.packets > 0;
+		const double	   data	   = static_cast<double>(stats.data_up + stats.data_down);
+		const double	   retx	   = data > 0 ? 100.0 * static_cast<double>(stats.retrans_up + stats.retrans_down) / data : 0;
+		const bool		   has_rtt = stats.rtt_samples > 0;
+		const double	   average = has_rtt ? stats.rtt_sum_ms / static_cast<double>(stats.rtt_samples) : 0;
+		const bool		   current = &stats == focus;
+		const double	   score   = score_of(stats);
 		char			   retx_text[16], score_text[16];
 		std::snprintf(retx_text, sizeof(retx_text), "%.1f", retx);
 		std::snprintf(score_text, sizeof(score_text), "%.0f", score);
 		bool alerting = false;
 		for (const bool active : stats.alert_active)
 			alerting = alerting || active;
-		line(std::string(alerting ? kRed : current ? kBold : "") + (alerting ? "!" : current ? ">" : " ") + pad(stats.label, name_cols) + kReset +
-			 pad_left(seen ? count_text(last_value(stats.pps_down.values)) : "-", 9) + pad_left(seen ? count_text(last_value(stats.pps_up.values)) : "-", 9) +
-			 (has_rtt ? rtt_color(stats.last_rtt_ms) : kDim) + pad_left(format_ms(stats.last_rtt_ms, has_rtt), 10) + kReset +
-			 pad_left(format_ms(average, has_rtt), 10) + pad_left(format_ms(stats.jitter_ms, has_rtt), 9) + (data > 0 ? loss_color(retx) : kDim) +
-			 pad_left(data > 0 ? retx_text : "-", 8) + kReset + pad_left(stats.has_in ? format_ms(elapsed_ms(stats.last_in, now)) : "-", 9) +
-			 (score >= 0 ? score_color(score) : kDim) + pad_left(score >= 0 ? score_text : "-", 7) + kReset + "  " +
+		line(std::string(alerting  ? kRed
+						 : current ? kBold
+								   : "") +
+			 (alerting	? "!"
+			  : current ? ">"
+						: " ") +
+			 pad(stats.label, name_cols) + kReset + pad_left(seen ? count_text(last_value(stats.pps_down.values)) : "-", 9) +
+			 pad_left(seen ? count_text(last_value(stats.pps_up.values)) : "-", 9) + (has_rtt ? rtt_color(stats.last_rtt_ms) : kDim) +
+			 pad_left(format_ms(stats.last_rtt_ms, has_rtt), 10) + kReset + pad_left(format_ms(average, has_rtt), 10) +
+			 pad_left(format_ms(stats.jitter_ms, has_rtt), 9) + (data > 0 ? loss_color(retx) : kDim) +
+			 pad_left(data > 0 ? retx_text : "-", 8) + kReset +
+			 pad_left(stats.has_in ? format_ms(elapsed_ms(stats.last_in, now)) : "-", 9) + (score >= 0 ? score_color(score) : kDim) +
+			 pad_left(score >= 0 ? score_text : "-", 7) + kReset + "  " +
 			 sparkline(stats.rtt.values, trend_cols, 50, has_rtt ? rtt_color(stats.last_rtt_ms) : kDim));
 	}
 	line("");
 	line(std::string(kDim) + " Totals: " + std::to_string(packets_down) + " down / " + std::to_string(packets_up) + " up packets, " +
-		 format_size(static_cast<double>(bytes_down)) + " down / " + format_size(static_cast<double>(bytes_up)) + " up, TCP " + std::to_string(tcp) +
-		 " / UDP " + std::to_string(udp) + ", resets " + std::to_string(resets) + kReset);
+		 format_size(static_cast<double>(bytes_down)) + " down / " + format_size(static_cast<double>(bytes_up)) + " up, TCP " +
+		 std::to_string(tcp) + " / UDP " + std::to_string(udp) + ", resets " + std::to_string(resets) + kReset);
 	out += "\033[J";
 	return out;
 }
@@ -1794,7 +1903,7 @@ std::string NetMonitor::render_flow_view(int console_columns, int console_rows)
 	out += render_header(width, warnings);
 	line("");
 
-	const std::vector<FlowRef> flows = sorted_flows_locked();
+	const std::vector<FlowRef> flows		  = sorted_flows_locked();
 	size_t					   selected_index = flows.size();
 	for (size_t i = 0; i < flows.size(); ++i)
 		if (has_selection_ && flows[i].address == selection_.address && flows[i].key == selection_.key)
@@ -1805,19 +1914,21 @@ std::string NetMonitor::render_flow_view(int console_columns, int console_rows)
 	// Header, column titles, a blank line, the detail block (title, three charts, one line) and the footer stay; the rest is the list.
 	const int	 fixed	   = 4 + static_cast<int>(warnings.size()) + 2 + 1 + 5 + 1;
 	const size_t list_rows = console_rows > 0 ? static_cast<size_t>(std::max(3, console_rows - 1 - fixed)) : 20;
-	const size_t first	   = flows.size() <= list_rows ? 0 : std::min(flows.size() - list_rows, selected_index > list_rows / 2 ? selected_index - list_rows / 2 : size_t{0});
+	const size_t first = flows.size() <= list_rows ? 0
+												   : std::min(flows.size() - list_rows,
+															  selected_index > list_rows / 2 ? selected_index - list_rows / 2 : size_t{0});
 
 	const size_t name_cols = std::clamp<size_t>(width > 77 ? width - 77 : 0, 10, 28);
 	line(std::string(kBold) + " Flows" + kReset + kDim + "  one row per connection (TCP) or port pair (UDP); Up/Down select" + kReset);
-	line(std::string(kDim) + " " + pad("server", name_cols) + pad("proto", 6) + pad_left("client", 8) + pad_left("server", 8) + "  " + pad("state", 13) +
-		 pad_left("down", 11) + pad_left("up", 11) + pad_left("RTT", 9) + pad_left("idle", 9) + kReset);
+	line(std::string(kDim) + " " + pad("server", name_cols) + pad("proto", 6) + pad_left("client", 8) + pad_left("server", 8) + "  " +
+		 pad("state", 13) + pad_left("down", 11) + pad_left("up", 11) + pad_left("RTT", 9) + pad_left("idle", 9) + kReset);
 	if (flows.empty())
 		line(std::string(kDim) + " no flows seen yet" + kReset);
 	for (size_t i = first; i < std::min(flows.size(), first + list_rows); ++i)
 	{
-		const Flow& flow	 = *flows[i].flow;
-		const bool	selected = i == selected_index;
-		const double idle	 = elapsed_ms(flow.last_seen, now) / 1000.0;
+		const Flow&	 flow	  = *flows[i].flow;
+		const bool	 selected = i == selected_index;
+		const double idle	  = elapsed_ms(flow.last_seen, now) / 1000.0;
 		std::string	 state;
 		const char*	 color = kDim;
 		if (!flow.tcp)
@@ -1847,9 +1958,11 @@ std::string NetMonitor::render_flow_view(int console_columns, int console_rows)
 			state = "established";
 			color = kGreen;
 		}
-		line(std::string(selected ? kBold : "") + (selected ? ">" : " ") + pad(flows[i].stats->label, name_cols) + pad(flow.tcp ? "tcp" : "udp", 6) +
-			 pad_left(std::to_string(flow.client_port), 8) + pad_left(std::to_string(flow.server_port), 8) + "  " + kReset + color + pad(state, 13) + kReset +
-			 pad_left(format_size(static_cast<double>(flow.bytes_down)), 11) + pad_left(format_size(static_cast<double>(flow.bytes_up)), 11) +
+		line(std::string(selected ? kBold : "") + (selected ? ">" : " ") + pad(flows[i].stats->label, name_cols) +
+			 pad(flow.tcp ? "tcp" : "udp", 6) + pad_left(std::to_string(flow.client_port), 8) +
+			 pad_left(std::to_string(flow.server_port), 8) + "  " + kReset + color + pad(state, 13) + kReset +
+			 pad_left(format_size(static_cast<double>(flow.bytes_down)), 11) +
+			 pad_left(format_size(static_cast<double>(flow.bytes_up)), 11) +
 			 pad_left(format_ms(flow.last_rtt_ms, flow.rtt_samples > 0), 9) + pad_left(format_age(idle), 9));
 	}
 	line("");
@@ -1858,8 +1971,8 @@ std::string NetMonitor::render_flow_view(int console_columns, int console_rows)
 	{
 		const FlowRef& ref	= flows[selected_index];
 		const Flow&	   flow = *ref.flow;
-		line(std::string(kBold) + " Selected flow: " + kReset + ref.stats->label + " [" + ref.address + "]  " + (flow.tcp ? "tcp" : "udp") + " port " +
-			 std::to_string(flow.client_port) + " -> " + std::to_string(flow.server_port));
+		line(std::string(kBold) + " Selected flow: " + kReset + ref.stats->label + " [" + ref.address + "]  " + (flow.tcp ? "tcp" : "udp") +
+			 " port " + std::to_string(flow.client_port) + " -> " + std::to_string(flow.server_port));
 		const auto chart = [&](const std::string& name, const std::string& value, const Series* series, double floor, const char* color) {
 			line(" " + pad(name, label_cols) + pad_left(value, value_cols) + "  " +
 				 (series ? sparkline(series->values, chart_cols, floor, color) : std::string(kDim) + "collecting..." + kReset));
@@ -1867,12 +1980,15 @@ std::string NetMonitor::render_flow_view(int console_columns, int console_rows)
 		const FlowDetail* detail = flow.detail.get();
 		chart("down", detail ? format_rate(last_value(detail->bps_down.values)) : "-", detail ? &detail->bps_down : nullptr, 1024, kGreen);
 		chart("up", detail ? format_rate(last_value(detail->bps_up.values)) : "-", detail ? &detail->bps_up : nullptr, 1024, kGreen);
-		chart("latency (RTT)", detail ? format_ms(last_value(detail->rtt.values), flow.rtt_samples > 0) : "-", detail ? &detail->rtt : nullptr, 50,
+		chart("latency (RTT)",
+			  detail ? format_ms(last_value(detail->rtt.values), flow.rtt_samples > 0) : "-",
+			  detail ? &detail->rtt : nullptr,
+			  50,
 			  rtt_color(flow.last_rtt_ms));
 		const double average = flow.rtt_samples > 0 ? flow.rtt_sum_ms / static_cast<double>(flow.rtt_samples) : 0;
-		line(" age " + format_age(elapsed_ms(flow.first_seen, now) / 1000.0) + "   packets " + std::to_string(flow.packets_down) + " down / " +
-			 std::to_string(flow.packets_up) + " up   RTT last " + format_ms(flow.last_rtt_ms, flow.rtt_samples > 0) + " avg " +
-			 format_ms(average, flow.rtt_samples > 0) + " (" + std::to_string(flow.rtt_samples) + " samples)" +
+		line(" age " + format_age(elapsed_ms(flow.first_seen, now) / 1000.0) + "   packets " + std::to_string(flow.packets_down) +
+			 " down / " + std::to_string(flow.packets_up) + " up   RTT last " + format_ms(flow.last_rtt_ms, flow.rtt_samples > 0) +
+			 " avg " + format_ms(average, flow.rtt_samples > 0) + " (" + std::to_string(flow.rtt_samples) + " samples)" +
 			 (flow.tcp ? std::string("   retransmits are counted per server") : std::string("   no RTT for UDP")));
 	}
 	else
@@ -1908,22 +2024,26 @@ std::string NetMonitor::render_profile_view(int console_columns, int console_row
 	const size_t status_cols = width > name_cols + 60 ? width - name_cols - 60 : 0;
 
 	line(std::string(kBold) + " Profile activity" + kReset + kDim + "  since the view opened or was reset" + kReset);
-	line(std::string(kDim) + " " + pad("profile", name_cols) + pad("state", 9) + pad_left("runs", 6) + pad_left("active", 9) + pad_left("share", 7) +
-		 pad_left("now", 9) + pad_left("last", 9) + pad_left("longest", 9) + (status_cols > 0 ? "  " + pad("status", status_cols - 2) : std::string()) +
-		 kReset);
+	line(std::string(kDim) + " " + pad("profile", name_cols) + pad("state", 9) + pad_left("runs", 6) + pad_left("active", 9) +
+		 pad_left("share", 7) + pad_left("now", 9) + pad_left("last", 9) + pad_left("longest", 9) +
+		 (status_cols > 0 ? "  " + pad("status", status_cols - 2) : std::string()) + kReset);
 	if (count == 0)
 		line(std::string(kDim) + " no profiles are configured" + kReset);
 	for (size_t i = 0; i < shown; ++i)
 	{
-		const bool				 running = i < profile_state_.size() && profile_state_[i];
-		const ProfileStats		 empty;
-		const ProfileStats&		 stats	 = i < profile_stats_.size() ? profile_stats_[i] : empty;
-		const uint64_t			 longest = std::max(stats.longest_ticks, stats.current_ticks);
-		const std::string		 share	 = elapsed_ticks_ > 0 ? std::to_string(static_cast<int>(100.0 * static_cast<double>(stats.active.ticks) / static_cast<double>(elapsed_ticks_) + 0.5)) + "%" : "-";
-		const std::string		 status	 = running ? engine_.profile_packet_status(static_cast<int>(i) + 1) : std::string();
+		const bool			running = i < profile_state_.size() && profile_state_[i];
+		const ProfileStats	empty;
+		const ProfileStats& stats	= i < profile_stats_.size() ? profile_stats_[i] : empty;
+		const uint64_t		longest = std::max(stats.longest_ticks, stats.current_ticks);
+		const std::string share	 = elapsed_ticks_ > 0
+									   ? std::to_string(static_cast<int>(
+											 100.0 * static_cast<double>(stats.active.ticks) / static_cast<double>(elapsed_ticks_) + 0.5)) +
+											 "%"
+									   : "-";
+		const std::string status = running ? engine_.profile_packet_status(static_cast<int>(i) + 1) : std::string();
 		line(" " + pad(options_.profiles[i].name, name_cols) + (running ? kGreen : kDim) + pad(running ? "active" : "idle", 9) + kReset +
-			 pad_left(std::to_string(stats.activations), 6) + pad_left(format_age(static_cast<double>(stats.active.ticks)), 9) + pad_left(share, 7) +
-			 pad_left(running ? format_age(static_cast<double>(stats.current_ticks)) : "-", 9) +
+			 pad_left(std::to_string(stats.activations), 6) + pad_left(format_age(static_cast<double>(stats.active.ticks)), 9) +
+			 pad_left(share, 7) + pad_left(running ? format_age(static_cast<double>(stats.current_ticks)) : "-", 9) +
 			 pad_left(stats.last_ticks > 0 ? format_age(static_cast<double>(stats.last_ticks)) : "-", 9) +
 			 pad_left(longest > 0 ? format_age(static_cast<double>(longest)) : "-", 9) +
 			 (status_cols > 0 ? "  " + std::string(kDim) + pad(status, status_cols - 2) + kReset : std::string()));
@@ -1932,38 +2052,42 @@ std::string NetMonitor::render_profile_view(int console_columns, int console_row
 		line(std::string(kDim) + " ... " + std::to_string(count - shown) + " more profile(s) do not fit" + kReset);
 	line("");
 
-	line(std::string(kBold) + " Network while active" + kReset + kDim + "  compared with the seconds in which no profile was active" + kReset);
+	line(std::string(kBold) + " Network while active" + kReset + kDim + "  compared with the seconds in which no profile was active" +
+		 kReset);
 	line(std::string(kDim) + " " + pad("profile", name_cols) + pad_left("time", 9) + pad_left("RTT", 10) + pad_left("vs idle", 10) +
 		 pad_left("retrans", 9) + pad_left("down", 14) + kReset);
-	const auto average_rtt = [](const Conditions& c) { return c.rtt_samples > 0 ? c.rtt_sum_ms / static_cast<double>(c.rtt_samples) : 0.0; };
-	const auto row		   = [&](const std::string& name, const Conditions& c, bool compare) {
-		   char		   text[24] = "-";
-		   const char* delta_color = kDim;
-		   std::string delta	   = "-";
-		   if (compare && c.rtt_samples > 0 && baseline_.rtt_samples > 0)
-		   {
-		   const double difference = average_rtt(c) - average_rtt(baseline_);
-		   delta				   = format_ms_delta(difference);
-			   delta_color = difference > 20 ? kRed : difference > 5 ? kYellow : kGreen;
-		   }
-		   const double loss = c.data_packets > 0 ? 100.0 * static_cast<double>(c.retransmits) / static_cast<double>(c.data_packets) : 0;
-		   if (c.data_packets > 0)
-			   std::snprintf(text, sizeof(text), "%.1f%%", loss);
-		   else
-			   std::snprintf(text, sizeof(text), "-");
-		   const std::string loss_text = text;
-		   line(" " + pad(name, name_cols) + pad_left(format_age(static_cast<double>(c.ticks)), 9) + (c.rtt_samples > 0 ? rtt_color(average_rtt(c)) : kDim) +
-				pad_left(format_ms(average_rtt(c), c.rtt_samples > 0), 10) + kReset + delta_color + pad_left(delta, 10) + kReset +
-				(c.data_packets > 0 ? loss_color(loss) : kDim) + pad_left(loss_text, 9) + kReset +
-				pad_left(c.ticks > 0 ? format_rate(static_cast<double>(c.bytes_down) / static_cast<double>(c.ticks)) : "-", 14));
+	const auto average_rtt = [](const Conditions& c) {
+		return c.rtt_samples > 0 ? c.rtt_sum_ms / static_cast<double>(c.rtt_samples) : 0.0;
+	};
+	const auto row = [&](const std::string& name, const Conditions& c, bool compare) {
+		char		text[24]	= "-";
+		const char* delta_color = kDim;
+		std::string delta		= "-";
+		if (compare && c.rtt_samples > 0 && baseline_.rtt_samples > 0)
+		{
+			const double difference = average_rtt(c) - average_rtt(baseline_);
+			delta					= format_ms_delta(difference);
+			delta_color				= difference > 20 ? kRed : difference > 5 ? kYellow : kGreen;
+		}
+		const double loss = c.data_packets > 0 ? 100.0 * static_cast<double>(c.retransmits) / static_cast<double>(c.data_packets) : 0;
+		if (c.data_packets > 0)
+			std::snprintf(text, sizeof(text), "%.1f%%", loss);
+		else
+			std::snprintf(text, sizeof(text), "-");
+		const std::string loss_text = text;
+		line(" " + pad(name, name_cols) + pad_left(format_age(static_cast<double>(c.ticks)), 9) +
+			 (c.rtt_samples > 0 ? rtt_color(average_rtt(c)) : kDim) + pad_left(format_ms(average_rtt(c), c.rtt_samples > 0), 10) + kReset +
+			 delta_color + pad_left(delta, 10) + kReset + (c.data_packets > 0 ? loss_color(loss) : kDim) + pad_left(loss_text, 9) + kReset +
+			 pad_left(c.ticks > 0 ? format_rate(static_cast<double>(c.bytes_down) / static_cast<double>(c.ticks)) : "-", 14));
 	};
 	row("no profile active", baseline_, false);
 	for (size_t i = 0; i < shown; ++i)
 		row(options_.profiles[i].name, i < profile_stats_.size() ? profile_stats_[i].active : Conditions{}, true);
 	line("");
-	line(std::string(kDim) + " A second counts for every profile that was active during it; profiles active together share their seconds." + kReset);
+	line(std::string(kDim) + " A second counts for every profile that was active during it; profiles active together share their seconds." +
+		 kReset);
 	out += "\033[J";
 	return out;
 }
 
-#endif  // LAGSW_FEATURE_NET_MONITOR
+#endif	// LAGSW_FEATURE_NET_MONITOR

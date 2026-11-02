@@ -12,15 +12,15 @@ namespace {
 /// A snapshot of one profile's counters for the state report.
 struct ProfileReport
 {
-	bool	 active				 = false;
-	uint64_t enabled_time_current = 0;
-	uint64_t last_enabled_time	 = 0;
-	uint64_t enabled_time_min	 = 0;
-	uint64_t enabled_time_total	 = 0;
-	uint64_t enabled_time_max	 = 0;
-	uint64_t enabled_count		 = 0;
-	uint64_t packets_caught		 = 0;
-	uint64_t delayed_packets_sent = 0;
+	bool	 active				   = false;
+	uint64_t enabled_time_current  = 0;
+	uint64_t last_enabled_time	   = 0;
+	uint64_t enabled_time_min	   = 0;
+	uint64_t enabled_time_total	   = 0;
+	uint64_t enabled_time_max	   = 0;
+	uint64_t enabled_count		   = 0;
+	uint64_t packets_caught		   = 0;
+	uint64_t delayed_packets_sent  = 0;
 	uint64_t teardown_packets_sent = 0;
 };
 
@@ -38,9 +38,9 @@ struct DiscoveryReport
 /// One state line per log group that has logged or muted anything, e.g. "discovery.packet  err 0, warn 0, info 0, debug 12 (muted 3)".
 std::vector<std::string> log_group_lines()
 {
-	const auto&				   registry = logging::groups();
-	const auto				   stats	= logging::group_stats();
-	size_t					   name_width = 0;
+	const auto& registry   = logging::groups();
+	const auto	stats	   = logging::group_stats();
+	size_t		name_width = 0;
 	for (size_t index = 0; index < registry.size(); ++index)
 		if (stats[index].written() != 0 || stats[index].muted != 0)
 			name_width = (std::max)(name_width, std::strlen(registry[index].name));
@@ -53,8 +53,8 @@ std::vector<std::string> log_group_lines()
 			continue;
 		std::string name = registry[index].name;
 		name.resize(name_width, ' ');
-		std::string line = name + "  err " + highlight(std::to_string(counts.by_level[static_cast<size_t>(logging::level::error)])) + ", warn " +
-						   highlight(std::to_string(counts.by_level[static_cast<size_t>(logging::level::warn)])) + ", info " +
+		std::string line = name + "  err " + highlight(std::to_string(counts.by_level[static_cast<size_t>(logging::level::error)])) +
+						   ", warn " + highlight(std::to_string(counts.by_level[static_cast<size_t>(logging::level::warn)])) + ", info " +
 						   highlight(std::to_string(counts.by_level[static_cast<size_t>(logging::level::info)])) + ", debug " +
 						   highlight(std::to_string(counts.by_level[static_cast<size_t>(logging::level::debug)]));
 		if (counts.muted != 0)
@@ -129,10 +129,11 @@ void log_discovery_report(size_t width, const PacketEngineOptions& options, cons
 		return region == report.regions.end() ? "" : " (" + region->second + ")";
 	};
 	LOG_INFO("%s", format_state_divider(width, "server discovery").c_str());
-	log_state_line(width,
-				   "authoritative:   " +
-					   highlight(report.discovered_server.empty() ? "none" : report.discovered_server + region_suffix(report.discovered_server)) +
-					   (report.authoritative ? " (selected)" : " (observed)"));
+	log_state_line(
+		width,
+		"authoritative:   " +
+			highlight(report.discovered_server.empty() ? "none" : report.discovered_server + region_suffix(report.discovered_server)) +
+			(report.authoritative ? " (selected)" : " (observed)"));
 	log_state_line(width, "ranked servers:  " + highlight(std::to_string(report.counts.size())));
 	for (size_t index = 0; index < report.counts.size(); ++index)
 	{
@@ -158,8 +159,8 @@ void PacketEngine::print_state() const
 		active_profiles = state_->active_profiles;
 	}
 
-	const size_t	queued_packets	= pending_packets();
-	const uint64_t	next_release_in = next_batch_in_ms();
+	const size_t   queued_packets  = pending_packets();
+	const uint64_t next_release_in = next_batch_in_ms();
 #ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 	DiscoveryReport discovery;
 	{
@@ -195,8 +196,8 @@ void PacketEngine::print_state() const
 			report.last_enabled_time  = stats.last_enabled_time;
 			report.enabled_count	  = stats.enabled_count;
 		}
-		report.packets_caught		= stats.packets_caught.load();
-		report.delayed_packets_sent = stats.delayed_packets_sent.load();
+		report.packets_caught		 = stats.packets_caught.load();
+		report.delayed_packets_sent	 = stats.delayed_packets_sent.load();
 		report.teardown_packets_sent = stats.teardown_packets_sent.load();
 		log_profile_report(state_width, index + 1, options_.profiles[index], report);
 	}

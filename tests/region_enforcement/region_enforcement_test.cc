@@ -12,11 +12,11 @@
 
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 
-#include "fakes.h"
-#include "log.h"
-#include "packet_engine.h"
-#include "support/capture.h"
-#include "support/packets.h"
+#	include "fakes.h"
+#	include "log.h"
+#	include "packet_engine.h"
+#	include "support/capture.h"
+#	include "support/packets.h"
 
 namespace {
 using namespace packets;
@@ -37,14 +37,17 @@ ServerOptions server(const char* address, const char* name = "", const char* gro
 }
 
 /// An engine configuration with region enforcement on. `servers` default to two EU servers and one NA server.
-PacketEngineOptions enforcement_options(std::vector<ServerOptions> servers = {server("34.0.0.1", "eu1", "EU"), server("34.0.0.2", "eu2", "EU"), server("35.0.0.1", "na1", "NA")},
-										uint16_t probe_port = kProbePort, bool enabled = true)
+PacketEngineOptions enforcement_options(std::vector<ServerOptions> servers	  = {server("34.0.0.1", "eu1", "EU"),
+																				 server("34.0.0.2", "eu2", "EU"),
+																				 server("35.0.0.1", "na1", "NA")},
+										uint16_t				   probe_port = kProbePort,
+										bool					   enabled	  = true)
 {
 	PacketEngineOptions options;
-	options.profiles								  = {profile("A")};
-	options.servers									  = std::move(servers);
-	options.features.region_enforcement.enabled		  = enabled;
-	options.features.region_enforcement.probe_port	  = probe_port;
+	options.profiles							   = {profile("A")};
+	options.servers								   = std::move(servers);
+	options.features.region_enforcement.enabled	   = enabled;
+	options.features.region_enforcement.probe_port = probe_port;
 	return options;
 }
 
@@ -64,8 +67,8 @@ size_t occurrences(const std::string& text, const std::string& needle)
 	return count;
 }
 
-const std::string kOutsideEu	 = "region_enforcement:35.0.0.1,:55002";
-const std::string kOutsideNa	 = "region_enforcement:34.0.0.1,34.0.0.2,:55002";
+const std::string kOutsideEu = "region_enforcement:35.0.0.1,:55002";
+const std::string kOutsideNa = "region_enforcement:34.0.0.1,34.0.0.2,:55002";
 
 Bytes syn_to(std::array<uint8_t, 4> server_address)
 {
@@ -88,7 +91,8 @@ void test_regions_come_from_server_groups()
 void test_regions_fall_back_to_server_names()
 {
 	fakes::reset();
-	PacketEngine ungrouped(enforcement_options({server("1.1.1.1", "alpha"), server("2.2.2.2", "beta"), server("3.3.3.3"), server("4.4.4.4", "alpha")}));
+	PacketEngine ungrouped(
+		enforcement_options({server("1.1.1.1", "alpha"), server("2.2.2.2", "beta"), server("3.3.3.3"), server("4.4.4.4", "alpha")}));
 	CHECK((ungrouped.configured_regions() == std::vector<std::string>{"alpha", "beta", "3.3.3.3"}));
 
 	// As soon as one server has a group, only groups count as regions.
@@ -120,7 +124,8 @@ void test_cycling_the_enforced_region()
 	PacketEngine empty(enforcement_options({}));
 	empty.cycle_enforced_region(1);
 	CHECK(empty.current_enforced_region() == "none");
-	CHECK(fakes::channels().size() == 4);  // the channels opened by the EU, NA, NA and EU steps of the first engine; "none" and the empty engine open none
+	CHECK(fakes::channels().size() ==
+		  4);  // the channels opened by the EU, NA, NA and EU steps of the first engine; "none" and the empty engine open none
 }
 
 void test_servers_outside_the_enforced_region_are_captured()
@@ -213,11 +218,11 @@ void test_probe_detection_logs_each_server_once_per_window()
 	CHECK(engine.region_enforcement_status() == "Waiting for probes...");
 
 	const std::string log = logged([&] {
-		probe->inject(syn_to({34, 0, 0, 1}), 0, true);		// a probe sent to an EU server
-		probe->inject(syn_ack_from({34, 0, 0, 1}), 0, false);	// the same server answering: not announced again
-		probe->inject(syn_to({34, 0, 0, 2}), 0, true);		// another EU server in the same window
-		probe->inject(syn_to({35, 0, 0, 1}), 0, true);		// outside the enforced region: only a debug message
-		probe->inject(syn_to({8, 8, 8, 8}), 0, true);		// not a configured server
+		probe->inject(syn_to({34, 0, 0, 1}), 0, true);		   // a probe sent to an EU server
+		probe->inject(syn_ack_from({34, 0, 0, 1}), 0, false);  // the same server answering: not announced again
+		probe->inject(syn_to({34, 0, 0, 2}), 0, true);		   // another EU server in the same window
+		probe->inject(syn_to({35, 0, 0, 1}), 0, true);		   // outside the enforced region: only a debug message
+		probe->inject(syn_to({8, 8, 8, 8}), 0, true);		   // not a configured server
 		wait_until([&] { return probe->consumed() == 7; });
 		std::this_thread::sleep_for(std::chrono::milliseconds(200));
 	});
@@ -256,7 +261,9 @@ void test_delayed_packets_are_released_after_about_a_second()
 	CHECK(elapsed >= 900);
 
 	auto sent = channel->sent_packets();
-	std::sort(sent.begin(), sent.end(), [](const fakes::SentPacket& left, const fakes::SentPacket& right) { return left.meta.timestamp < right.meta.timestamp; });
+	std::sort(sent.begin(), sent.end(), [](const fakes::SentPacket& left, const fakes::SentPacket& right) {
+		return left.meta.timestamp < right.meta.timestamp;
+	});
 	CHECK(sent.size() == 3);
 	for (size_t index = 0; index < sent.size() && index < packets.size(); ++index)
 	{
