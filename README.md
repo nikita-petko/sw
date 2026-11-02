@@ -360,6 +360,7 @@ servers:
 | Field | Required | Description |
 | --- | --- | --- |
 | `global_filter` | No | Capture filter used by profiles that do not define `filter`. Defaults to `tcp.DstPort == 55000 or tcp.SrcPort == 55000`. |
+| `default_view` | No | View shown at startup: `log` (default) or `net_monitor`. `net_monitor` opens the full-screen network statistics view and requires `features.net_monitor.enabled: true`; otherwise loading fails. |
 | `servers` | No | A list of server addresses, or a mapping of server groups with an optional `addresses` list. |
 | `features` | No | Optional feature configuration, including server discovery, PCAP capture, desynchronization countdown, forwarded-address discovery, and region enforcement. |
 | `profiles` | Yes | A non-empty list of profile definitions. |

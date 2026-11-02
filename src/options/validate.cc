@@ -292,6 +292,22 @@ bool validate_net_monitor(const char* path, const PacketEngineOptions& options)
 }
 #endif
 
+bool validate_default_view([[maybe_unused]] const char* path, [[maybe_unused]] const PacketEngineOptions& options)
+{
+	if (options.default_view != DefaultView::net_monitor)
+		return true;
+#ifdef LAGSW_FEATURE_NET_MONITOR
+	if (!options.features.net_monitor.enabled)
+	{
+		LOG_ERROR("default_view net_monitor requires the net_monitor feature to be enabled in %s", path);
+		return false;
+	}
+#else
+	LOG_WARN("default_view net_monitor is ignored in %s because the net_monitor feature is not compiled into this build", path);
+#endif
+	return true;
+}
+
 bool validate_features([[maybe_unused]] const char* path, [[maybe_unused]] const PacketEngineOptions& options)
 {
 #ifdef LAGSW_FEATURE_SERVER_DISCOVERY
@@ -338,7 +354,7 @@ bool validate_profiles(const char* path, const PacketEngineOptions& options)
 		LOG_ERROR("No profiles found in %s", path);
 		return false;
 	}
-	return validate_features(path, options);
+	return validate_default_view(path, options) && validate_features(path, options);
 }
 
 }  // namespace config

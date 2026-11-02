@@ -150,6 +150,8 @@ int main(int argc, char* argv[])
 	ProfileController controller(engine, options);
 #ifdef LAGSW_FEATURE_NET_MONITOR
 	NetMonitor		  net_monitor(engine, options);
+	if (options.default_view == DefaultView::net_monitor)
+		net_monitor.toggle();
 #endif
 
 	while (true)

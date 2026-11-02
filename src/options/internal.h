@@ -37,6 +37,7 @@ std::optional<RetransmissionMode>			parse_retransmission_mode(const std::string&
 std::optional<SubsequentPacketHoldMode>		parse_subsequent_packet_hold_mode(const std::string& value);
 std::optional<RatioSelection>				parse_ratio_selection(const std::string& value);
 std::optional<PacketGroupOrder>				parse_packet_group_order(const std::string& value);
+std::optional<DefaultView>					parse_default_view(const std::string& value);
 #ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
 std::optional<DesyncCountdownDisplay>		parse_countdown_display(const std::string& value);
 #endif

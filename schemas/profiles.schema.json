@@ -12,6 +12,12 @@
       "description": "Fallback capture filter expression applied to profiles that do not define a specific filter.",
       "default": "tcp.DstPort == 55000 or tcp.SrcPort == 55000"
     },
+    "default_view": {
+      "type": "string",
+      "enum": ["log", "net_monitor"],
+      "description": "View shown at startup. net_monitor opens the full-screen network statistics view and requires features.net_monitor.enabled.",
+      "default": "log"
+    },
     "servers": {
       "type": "object",
       "description": "Configured target servers: pre-known addresses and named server groups. Automatic discovery is configured by features.server_discovery.",

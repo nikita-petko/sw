@@ -738,6 +738,8 @@ private:
 			options_.global_filter = unquote(value);
 			return Status::ok;
 		}
+		if (indent == 0 && key == "default_view")
+			return to_status(assign_enum(context_, value, parse_default_view, options_.default_view, "default_view", ": expected log or net_monitor"));
 		return Status::unhandled;
 	}
 

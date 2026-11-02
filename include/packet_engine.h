@@ -382,6 +382,15 @@ struct FeaturesOptions
 #endif
 };
 
+/// The view that is shown when the program starts.
+enum class DefaultView
+{
+	/// The scrolling log with the status line.
+	log,
+	/// The full-screen network statistics view; needs the net_monitor feature to be enabled.
+	net_monitor,
+};
+
 /// Complete configuration used to construct a packet engine.
 struct PacketEngineOptions
 {
@@ -399,6 +408,8 @@ struct PacketEngineOptions
 	std::optional<std::string> client_destination_address;
 	/// Whether to resolve server and client regions.
 	bool resolve_region = false;
+	/// View shown at startup.
+	DefaultView default_view = DefaultView::log;
 	/// Optional feature settings.
 	FeaturesOptions features;
 };

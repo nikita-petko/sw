@@ -95,6 +95,7 @@ void test_shipped_profiles()
 void test_every_setting()
 {
 	const LoadResult result = load_text(R"(global_filter: "tcp"
+default_view: net_monitor
 servers:
   addresses: ["1.1.1.1:one", '2.2.2.2', 3.3.3.3:three]
   GROUP:
@@ -191,7 +192,8 @@ profiles:
 	CHECK(result.ok);
 	const PacketEngineOptions& o = result.options;
 	CHECK(o.global_filter == "tcp");
-	CHECK(o.servers.size() == 4);  // the repeated address is ignored
+	CHECK(o.default_view == DefaultView::net_monitor);
+	CHECK(o.servers.size() == 4);  // the repeated address is ignored  // the repeated address is ignored
 	CHECK(o.servers[3].group == "GROUP" && o.servers[3].name == "four");
 	CHECK(o.servers[1].name == "2.2.2.2");
 #ifdef LAGSW_FEATURE_SERVER_DISCOVERY
@@ -297,6 +299,10 @@ void test_rejected_files()
 		{"unknown servers key", "servers:\n  nonsense: 1\n" + kProfile, "Invalid servers configuration key 'nonsense' in"},
 		{"unknown features key", "features:\n  nonsense: 1\n" + kProfile, "Invalid features configuration key 'nonsense' in"},
 		{"discovery setting in servers", "servers:\n  discovery_port: 55000\n" + kProfile, "Invalid servers configuration key 'discovery_port' in"},
+		{"bad default view", "default_view: table\n" + kProfile, "Invalid default_view in"},
+#ifdef LAGSW_FEATURE_NET_MONITOR
+		{"default view net monitor without feature", "default_view: net_monitor\n" + kProfile, "default_view net_monitor requires the net_monitor feature"},
+#endif
 #ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 		{"server discovery without port", "features:\n  server_discovery:\n    enabled: true\n" + kProfile, "port is missing or invalid"},
 		{"zero server discovery port", "features:\n  server_discovery:\n    port: 0\n" + kProfile, "Invalid server_discovery port in"},

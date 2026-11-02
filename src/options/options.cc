@@ -36,6 +36,7 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 	options.client_source_address.reset();
 	options.client_destination_address.reset();
 	options.resolve_region = false;
+	options.default_view   = DefaultView::log;
 	options.features	   = {};
 	bool config_loaded	   = false;
 

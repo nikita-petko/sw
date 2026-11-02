@@ -127,6 +127,12 @@ std::optional<PacketGroupOrder> parse_packet_group_order(const std::string& valu
 	return lookup(value, table);
 }
 
+std::optional<DefaultView> parse_default_view(const std::string& value)
+{
+	static const std::pair<const char*, DefaultView> table[] = {{"log", DefaultView::log}, {"net_monitor", DefaultView::net_monitor}};
+	return lookup(value, table);
+}
+
 #ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
 std::optional<DesyncCountdownDisplay> parse_countdown_display(const std::string& value)
 {
