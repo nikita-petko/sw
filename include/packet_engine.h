@@ -322,13 +322,13 @@ struct NetfilterMonitorOptions
 };
 #endif
 
-#ifdef LAGSW_FEATURE_NET_MONITOR
 /// Upper-cases a letter key so configured and pressed keys compare equal.
 constexpr int normalize_key(int key)
 {
 	return key >= 'a' && key <= 'z' ? key - 'a' + 'A' : key;
 }
 
+#ifdef LAGSW_FEATURE_NET_MONITOR
 /// Settings for the full-screen network statistics view, see pocs/net_monitor.md.
 struct NetMonitorOptions
 {
@@ -359,6 +359,12 @@ struct NetMonitorOptions
 	/// JSON Lines file that receives one record per server and second while the view is open; empty disables logging.
 	std::string log_file;
 };
+#endif
+
+#ifdef LAGSW_FEATURE_CONFIG_TUI
+/// Key that returns to the profile loader/editor while running, see pocs/config_tui.md. It is fixed, not configurable,
+/// and profiles that use it for something else fail to load.
+constexpr int kConfigTuiKey = 'I';
 #endif
 
 /// Which Linux data plane a profile or the passive latency uses.
@@ -413,6 +419,9 @@ struct FeaturesOptions
 #ifdef LAGSW_FEATURE_NET_MONITOR
 	/// Net-monitor feature settings.
 	NetMonitorOptions net_monitor;
+#endif
+#ifdef LAGSW_FEATURE_CONFIG_TUI
+	/// Config-TUI feature settings.
 #endif
 };
 

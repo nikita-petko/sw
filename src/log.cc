@@ -45,6 +45,8 @@ std::vector<std::string> extra_status_lines;
 bool					 suspended = false;
 std::vector<std::string> suspended_backlog;
 constexpr size_t		 max_suspended_backlog = 500;
+bool					 capturing = false;
+std::vector<std::string> captured;
 
 // The banner is pinned to the first row by a scroll region covering the rest of the console.
 std::string banner;
@@ -405,6 +407,12 @@ static void write_impl(const char* group_name, level message_level, const char* 
 
 	char message[max_log_message];
 	std::vsnprintf(message, sizeof(message), format, arguments);
+	if (capturing)
+	{
+		if (message_level == level::error)
+			captured.emplace_back(message);
+		return;
+	}
 
 	std::string line = std::string(color) + "[" + level_name(message_level) + "] ";
 	if (group_name != nullptr && show_groups.load())
@@ -481,6 +489,20 @@ void set_status(const std::string& status, const std::string& right_status)
 		print_status_block(status, right_status);
 	}
 	std::fflush(stdout);
+}
+
+void begin_capture()
+{
+	std::lock_guard lock(log_mutex);
+	capturing = true;
+	captured.clear();
+}
+
+std::vector<std::string> end_capture()
+{
+	std::lock_guard lock(log_mutex);
+	capturing = false;
+	return std::move(captured);
 }
 
 void set_extra_status(const std::vector<std::string>& lines)

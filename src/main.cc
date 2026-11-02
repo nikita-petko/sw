@@ -1,5 +1,10 @@
+#include <optional>
+#include <utility>
 #include <string>
 
+#ifdef LAGSW_FEATURE_CONFIG_TUI
+#include "config_tui.h"
+#endif
 #include "format.h"
 #include "log.h"
 #include "net_monitor.h"
@@ -54,16 +59,19 @@ enum class KeyAction
 	none,	  ///< Not a command key; poll the profile activation keys.
 	handled,  ///< Handled; skip the profile activation keys this round.
 	quit,
+	config,	  ///< Leave for the profile loader/editor.
 };
 
 #ifdef LAGSW_FEATURE_NET_MONITOR
-KeyAction handle_command_key(PacketEngine& engine, NetMonitor& net_monitor, int key)
+KeyAction handle_command_key(PacketEngine& engine, NetMonitor& net_monitor, int key, int config_key)
 #else
-KeyAction handle_command_key(PacketEngine& engine, int key)
+KeyAction handle_command_key(PacketEngine& engine, int key, int config_key)
 #endif
 {
 	if (key == 'q' || key == 'Q' || key == platform::key::backspace)
 		return KeyAction::quit;
+	if (config_key != platform::key::none && key != platform::key::none && normalize_key(key) == config_key)
+		return KeyAction::config;
 #ifdef LAGSW_FEATURE_NET_MONITOR
 	if (net_monitor.is_toggle_key(key))
 	{
@@ -93,6 +101,96 @@ KeyAction handle_command_key(PacketEngine& engine, int key)
 		return KeyAction::none;
 	return KeyAction::handled;
 }
+
+/// Why run_session() returned.
+enum class SessionEnd
+{
+	quit,
+	open_config,
+};
+
+/// Runs the engine with `options` until the user quits or asks for the profile loader/editor.
+SessionEnd run_session(const PacketEngineOptions& options)
+{
+#ifdef LAGSW_FEATURE_PCAP_FILES
+	if (options.features.pcap_files.enabled)
+		LOG_WARN("PCAP file capture is enabled for debugging. Do not use it during normal operation.");
+#endif
+	log_loaded_profiles(options);
+
+	PacketEngine engine(options);
+#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
+	const char* region_keys_help = "left/right to cycle enforced server, ";
+#else
+	const char* region_keys_help = "";
+#endif
+#ifdef LAGSW_FEATURE_NET_MONITOR
+	const std::string net_monitor_help = options.features.net_monitor.enabled ? format_key(options.features.net_monitor.key) + " for the net monitor, " : "";
+#else
+	const std::string net_monitor_help;
+#endif
+#ifdef LAGSW_FEATURE_CONFIG_TUI
+	const int		   config_key	   = normalize_key(kConfigTuiKey);
+	const std::string config_tui_help = format_key(kConfigTuiKey) + " for the profile loader/editor, ";
+#else
+	const int		   config_key = platform::key::none;
+	const std::string config_tui_help;
+#endif
+	LOG_INFO("Hold a configured profile key to start/stop packet capture, pgup/pgdn to cycle servers, %s%s%s'q' or backspace to quit.",
+			 region_keys_help, net_monitor_help.c_str(), config_tui_help.c_str());
+	engine.start_workers();
+	StatusLine		  status_line(engine, options);
+	ProfileController controller(engine, options);
+#ifdef LAGSW_FEATURE_NET_MONITOR
+	NetMonitor		  net_monitor(engine, options);
+	if (options.default_view == DefaultView::net_monitor)
+		net_monitor.toggle();
+#endif
+
+	SessionEnd end = SessionEnd::quit;
+	while (true)
+	{
+		const int key = platform::read_key();
+		if (key != -1)
+			LOG_DEBUG_GROUP(logging::group::input, "Input received: %d", key);
+
+		const KeyAction action = 
+#ifdef LAGSW_FEATURE_NET_MONITOR
+			handle_command_key(engine, net_monitor, key, config_key);
+#else
+			handle_command_key(engine, key, config_key);
+#endif
+		if (action == KeyAction::quit)
+			break;
+		if (action == KeyAction::config)
+		{
+			end = SessionEnd::open_config;
+			break;
+		}
+		if (action == KeyAction::handled)
+			continue;
+		controller.update();
+	}
+
+#ifdef LAGSW_FEATURE_NET_MONITOR
+	net_monitor.stop();
+#endif
+	engine.teardown();
+	engine.stop_workers();
+	status_line.stop();
+	logging::clear_status();
+	return end;
+}
+
+/// The file named by --config, or empty.
+std::string config_argument(int argc, char* argv[])
+{
+	std::string path;
+	for (int index = 1; index + 1 < argc; ++index)
+		if (std::string(argv[index]) == "--config")
+			path = argv[++index];
+	return path;
+}
 }  // namespace
 
 int main(int argc, char* argv[])
@@ -116,69 +214,52 @@ int main(int argc, char* argv[])
 	}
 
 	PacketEngineOptions options;
-	if (!parse_options(argc, argv, options))
+	std::string			active_config = config_argument(argc, argv);
+	bool				config_missing = false;
+	if (!parse_options(argc, argv, options, nullptr, &config_missing))
 		return 0;
+	// Ctrl+C must not kill the process while the terminal is in a special mode
+	platform::ignore_interrupt();
+#ifdef LAGSW_FEATURE_CONFIG_TUI
+	if (config_missing)
+	{
+		const config_tui::Choice choice = config_tui::run(std::nullopt);
+		if (choice.outcome != config_tui::Outcome::run)
+			return 0;
+		active_config = choice.path;
+		if (!parse_options(argc, argv, options, &active_config))
+			return 0;
+	}
+#endif
 	std::string privilege_error;
 	if (!backend::check_privileges(privilege_error))
 	{
 		LOG_ERROR("%s", privilege_error.c_str());
 		return 1;
 	}
-#ifdef LAGSW_FEATURE_PCAP_FILES
-	if (options.features.pcap_files.enabled)
-		LOG_WARN("PCAP file capture is enabled for debugging. Do not use it during normal operation.");
-#endif
-	log_loaded_profiles(options);
 
-	platform::ignore_interrupt();
-
-	PacketEngine engine(options);
-#ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
-	const char* region_keys_help = "left/right to cycle enforced server, ";
-#else
-	const char* region_keys_help = "";
-#endif
-#ifdef LAGSW_FEATURE_NET_MONITOR
-	const std::string net_monitor_help = options.features.net_monitor.enabled ? format_key(options.features.net_monitor.key) + " for the net monitor, " : "";
-#else
-	const std::string net_monitor_help;
-#endif
-	LOG_INFO("Hold a configured profile key to start/stop packet capture, pgup/pgdn to cycle servers, %s%s'q' or backspace to quit.",
-			 region_keys_help, net_monitor_help.c_str());
-	engine.start_workers();
-	StatusLine		  status_line(engine, options);
-	ProfileController controller(engine, options);
-#ifdef LAGSW_FEATURE_NET_MONITOR
-	NetMonitor		  net_monitor(engine, options);
-	if (options.default_view == DefaultView::net_monitor)
-		net_monitor.toggle();
-#endif
-
-	while (true)
+	while (run_session(options) == SessionEnd::open_config)
 	{
-		const int key = platform::read_key();
-		if (key != -1)
-			LOG_DEBUG_GROUP(logging::group::input, "Input received: %d", key);
-
-		const KeyAction action = 
-#ifdef LAGSW_FEATURE_NET_MONITOR
-			handle_command_key(engine, net_monitor, key);
-#else
-			handle_command_key(engine, key);
-#endif
-		if (action == KeyAction::quit)
+#ifdef LAGSW_FEATURE_CONFIG_TUI
+		// The engine is stopped while the profile is chosen; the new file is loaded before the old options are dropped,
+		// so a file that fails to load leaves the running configuration in place.
+		const config_tui::Choice choice = config_tui::run(active_config.empty() ? std::nullopt : std::optional<std::string>(active_config));
+		if (choice.outcome == config_tui::Outcome::quit)
 			break;
-		if (action == KeyAction::handled)
-			continue;
-		controller.update();
-	}
-
-#ifdef LAGSW_FEATURE_NET_MONITOR
-	net_monitor.stop();
+		if (choice.outcome == config_tui::Outcome::run)
+		{
+			PacketEngineOptions next;
+			if (parse_options(argc, argv, next, &choice.path))
+			{
+				options		  = std::move(next);
+				active_config = choice.path;
+			}
+			else
+				LOG_ERROR("Could not load %s; continuing with the previous profile file", choice.path.c_str());
+		}
+#else
+		break;
 #endif
-	engine.teardown();
-	engine.stop_workers();
-	status_line.stop();
-	logging::clear_status();
+	}
 	return 0;
 }

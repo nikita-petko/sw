@@ -36,22 +36,21 @@ as if it had been passed with `--config`; nothing downstream knows the differenc
 
 ## Swapping back to the TUI
 
-While running, a hotkey (`features.config_tui.key`, default `C`) returns to the TUI. It is handled like the net
+While running, the fixed hotkey `I` returns to the TUI. It is handled like the net
 monitor's view key and is only active when the TUI is compiled in.
 
-1. **Suspend**: the running engine is paused (packet channels are closed so nothing queues in the kernel, and the
-   traffic being shaped is released, never held). `logging::set_suspended()` holds log lines back while the TUI is shown
-   and replays them afterwards. Open views (for example the net monitor) are closed first.
-2. **Edit/switch**: the TUI opens on the editor for the **currently loaded file** (`Esc` from there reaches the loader
-   view to switch profile). Everything in the loader and editor works as at start-up.
-3. **Resume**, depending on what the user did:
-   - `Esc`/cancel, or nothing changed: the engine resumes with the already loaded options, unchanged.
-   - Saved the current file (`Ctrl+S`) or picked another one and confirmed (`Ctrl+R`): the file is parsed and validated
-     with the production loader **before** anything is torn down. If it is invalid the user stays in the editor with the
-     error shown, and the old configuration keeps being the active one. If it is valid, the engine is stopped, the new
-     options are applied and the engine is started again, ending in the profile's `initial_view`.
-   - Quit from the TUI (`q`): the app exits.
-4. The file that is now active is moved to the top of the recent list, exactly as when chosen at start-up.
+1. **Stop**: the engine is stopped completely (channels closed, traffic released, status lines cleared) and the TUI
+   opens on the alternate screen. `logging::set_suspended()` holds log lines back and replays them afterwards.
+2. **Edit/switch**: the TUI opens on the editor for the **currently loaded file** (`Esc` reaches the loader to switch
+   profile). Everything works as at start-up.
+3. **Resume**:
+   - `Esc`/cancel: the engine is rebuilt from the same options (it is always fully restarted, even when nothing
+     changed). Unsaved edits are discarded.
+   - Saved (`Ctrl+S`) and run (`Ctrl+R`), or another file chosen with `Ctrl+R`/Enter on the loader: the file is parsed
+     and validated with the production loader into a fresh options object; only on success is it swapped in. On failure
+     an error is logged and the previous options keep running.
+   - `q`: the app exits.
+4. The active file is moved to the top of the recent list.
 
 Restart rules for a swap:
 
@@ -60,8 +59,7 @@ Restart rules for a swap:
   with the engine.
 - Privileges, the platform backend and the console are kept; only profile-dependent state is rebuilt, so no elevation
   prompt or driver reload is needed.
-- A failed restart (for example the new profile's backend cannot open) rolls back: the previous options are restored and
-  started again, and the error is shown in the TUI.
+- A profile that fails to load rolls back: the previous options are started again and the error is logged.
 - The CLI options other than `--config` (flags given on the command line) stay in force across swaps and win over the
   profile values as they do at start-up.
 
@@ -121,6 +119,8 @@ so it can be fixed in place. Entries are never removed automatically.
 - `Ctrl+S` validates with the production loader and writes the file (atomic rename, original kept as `<file>.bak` once
   per session). Invalid content can be saved only after an explicit confirmation, and is then marked `!` in the list.
 - `Ctrl+R` saves and starts the program with this file, going to `initial_view`.
+- `Tab` (form tab) or `Ctrl+T` switches tabs; on the raw tab `Tab` inserts two spaces. Loader: `Ctrl+R` runs the
+  selected file, `n` new, `o` open path, `d` forget.
 - `Esc` goes back to the loader view, asking first when there are unsaved changes.
 
 ## Implementation sketch
@@ -141,14 +141,21 @@ so it can be fixed in place. Entries are never removed automatically.
 - The TUI needs an interactive terminal. When stdin/stdout is not a TTY and `--config` is absent, keep failing with the
   current error instead of waiting for input.
 
+## Implementation status
+
+Implemented (see `include/config_tui.h`, `src/config_tui/`, `tests/config_tui/`): optional `--config`, recent list with
+`!` markers, loader, line-based form editor (comments preserved; choices come from a table keyed by key name, not the
+JSON schema) and raw editor, atomic save with `.bak`, new-profile template, hotkey swap with rollback, the
+fixed `I` hotkey, always available when the `config_tui` build feature is on (no profile setting; a profile that uses
+`I` as a key fails to load). Not implemented: schema-driven form, keeping unsaved edits across a cancelled swap. The
+Windows platform code is written but untested.
+
 ## Open questions
 
 - Which TUI primitives to use: reuse the net monitor's raw-terminal/alt-screen helpers, or add a small widget layer.
 - Comment preservation when saving a form-edited file (a YAML round-trip library versus raw-text edits for the touched
   keys only).
 - Whether the editor may create files outside `profiles/` or only in a configured directory.
-- Whether unsaved edits should survive a swap that was cancelled (proposed: yes, kept in memory for the session).
-- Whether the hotkey should be disabled for profiles that set `features.config_tui.enabled: false`, for unattended runs.
 - Whether `--config` should also record the file in the recent list (proposed: no, since that path skips the TUI
   entirely).
 

@@ -15,6 +15,7 @@
 #pragma warning(pop)
 #include <objbase.h>
 #include <timeapi.h>
+#include <io.h>
 #include <cstdio>
 #include <cstdlib>
 
@@ -150,6 +151,19 @@ std::string data_directory()
 	if (!local_app_data || *local_app_data == '\0')
 		return {};
 	return std::string(local_app_data) + "\\lagsw";
+}
+
+std::string config_directory()
+{
+	const char* app_data = std::getenv("APPDATA");
+	if (!app_data || *app_data == '\0')
+		return {};
+	return std::string(app_data) + "\\lagsw";
+}
+
+bool is_interactive()
+{
+	return _isatty(_fileno(stdin)) && _isatty(_fileno(stdout));
 }
 
 void make_directory(const std::string& path)

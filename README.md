@@ -6,11 +6,11 @@
 
 ### Windows (WinDivert)
 
-![](https://share.cdn.vmminfra.dev/petko-new/2026/10/powershell_04MIiHw9Ux.png)
+![](https://share.cdn.vmminfra.dev/petko-new/2026/11/WindowsTerminal_vOGiisF8U3.png)
 
 ### Linux (nftables + NFQUEUE)
 
-![](https://share.cdn.vmminfra.dev/petko-linux/261029_01h56m38s_screenshot.png)
+![](https://share.cdn.vmminfra.dev/petko-linux/261102_16h28m13s_screenshot.png)
 
 `lagsw` is a console utility that temporarily delays matching network
 packets. On Windows it uses the embedded [WinDivert](win_divert/README) driver
@@ -81,6 +81,7 @@ profiles file is skipped with a warning. Toggle them when configuring:
 | `forwarded_address_discovery` | `--forwarded_address_discovery=y\|n` | `y` |
 | `netfilter_monitor` | `--netfilter_monitor=y\|n` | `y` |
 | `net_monitor` | `--net_monitor=y\|n` | `y` |
+| `config_tui` | `--config_tui=y\|n` | `y` |
 
 ```powershell
 xmake f -m release --pcap_files=y --region_enforcement=n
@@ -107,6 +108,7 @@ xmake build packet_test && xmake run packet_test visible   # only cases whose na
 | `engine_test` | `PacketEngine` with its real worker threads against an in-memory capture backend: profile lifecycle, packet release and flushing, server selection, server and forwarded-address discovery, region resolution, desync countdown and the state report |
 | `region_enforcement_test` | region enforcement on the same in-memory backend: enforced-region cycle, which servers are delayed, delayed release and flushing, probe detection (only built with `--region_enforcement=y`) |
 | `passive_latency_test` | passive latency on the same in-memory backend: channel setup and priority, delayed release, ordering, overflow fail-open, teardown flushing (only built with `--passive_latency=y`) |
+| `config_tui_test` | config TUI: recent-files list and markers, YAML outline, form and raw editing, safe save with `.bak`, discard/invalid-save prompts |
 | `net_monitor_test` | net monitor on the same in-memory backend: sniff channel setup, passive RTT and retransmission measurement, pause/reset, ports, packet sizes, handshakes, TCP health, flows, chart and frame rendering |
 | `format_test` | text formatting of profile options |
 | `nfqueue_filter_test` | capture-filter to nftables compiler (not built on Windows) |
@@ -315,7 +317,7 @@ Options:
 
 | Option | Description |
 | --- | --- |
-| `--config <file>` | Load profiles from a YAML file. Required. |
+| `--config <file>` | Load profiles from a YAML file. Optional: without it, an interactive terminal opens the config TUI to pick, create or edit a profile file (see [`pocs/config_tui.md`](pocs/config_tui.md)). |
 | `--log-level <level>`, `-l <level>` | Set the minimum log level: `error`, `warn`, `info`, or `debug`. |
 | `--log-group <rules>`, `-g <rules>` | Mute or unmute log groups, a comma-separated list such as `-discovery.packet,-packet.recv`. A bare or `+` name enables a group, a `-` prefix disables it, and `all` matches every group and discards earlier rules. The most specific rule wins and a parent such as `discovery` covers its children. Only debug and info messages are muted; warnings and errors always show. Every group is on by default except the chatty per-packet groups (`packet.recv`, `packet.send`, `packet.drop`, `discovery.packet`, `forwarded.packet`, `enforcement.packet`, `nfq.packet`), which are marked `[off by default]` in `--print-log-groups`; enable them with e.g. `-g +discovery.packet`. Naming a parent such as `+discovery` also enables its children, and `all` enables every group. |
 | `--show-log-groups` | Prefix each log line with its group, e.g. `[DEBUG] [discovery.packet] ...`. Off by default. |
@@ -333,6 +335,10 @@ While the program is running:
   Press it again to deactivate the profile.
 - Activate a `hold` profile by holding its configured key or combination.
   Releasing the key deactivates it.
+- Press `I` (fixed; profiles that use it as an activation key, `send_key` or net monitor/passive latency key fail to
+  load while the `config_tui` build feature is on) to return to the config TUI, edit or
+  switch profile files and resume without restarting the app. The engine is restarted from the chosen file; if it
+  fails to load, the previous configuration stays active.
 - Press the configured `net_monitor` key (when the feature is enabled) to open
   the net monitor, a full-screen view with live network statistics and charts
   for the configured servers (see [`pocs/net_monitor.md`](pocs/net_monitor.md)).

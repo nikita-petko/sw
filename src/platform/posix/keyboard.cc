@@ -41,6 +41,8 @@ namespace {
 		termios raw = original_terminal;
 		// keeps ISIG so Ctrl+C still stops the application
 		raw.c_lflag &= static_cast<tcflag_t>(~(ICANON | ECHO));
+		// Enter arrives as a carriage return and Ctrl+S/Ctrl+Q reach the application instead of pausing the output
+		raw.c_iflag &= static_cast<tcflag_t>(~(ICRNL | IXON));
 		raw.c_cc[VMIN]	= 0;
 		raw.c_cc[VTIME] = 0;
 		if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0)
@@ -267,6 +269,70 @@ int read_key()
 			return key::page_down;
 	}
 	return key::none;
+}
+
+int read_edit_key()
+{
+	if (g_terminate_requested.load())
+		return edit_key::terminate;
+	enter_raw_terminal();
+	const int value = read_byte();
+	if (value < 0)
+		return edit_key::none;
+	if (value == 127 || value == 8)
+		return edit_key::backspace;
+	if (value == '\r' || value == '\n')
+		return edit_key::enter;
+	if (value == '\t')
+		return edit_key::tab;
+	if (value >= 1 && value <= 26)
+		return edit_key::ctrl(static_cast<char>('A' + value - 1));
+	if (value != 0x1B)
+		return value < 0x20 ? edit_key::none : value;
+	const int next = read_byte();
+	if (next < 0)
+		return edit_key::escape;
+	if (next != '[' && next != 'O')
+		return edit_key::none;
+	const int code = read_byte();
+	switch (code)
+	{
+		case 'A':
+			return edit_key::up;
+		case 'B':
+			return edit_key::down;
+		case 'C':
+			return edit_key::right;
+		case 'D':
+			return edit_key::left;
+		case 'H':
+			return edit_key::home;
+		case 'F':
+			return edit_key::end;
+	}
+	if (code >= '1' && code <= '8')
+	{
+		// the sequences that end in '~'; anything with modifiers (";5~") is swallowed up to its final byte
+		int last = read_byte();
+		while (last >= 0 && last != '~' && !(last >= 'A' && last <= 'Z'))
+			last = read_byte();
+		switch (code)
+		{
+			case '1':
+			case '7':
+				return edit_key::home;
+			case '3':
+				return edit_key::del;
+			case '4':
+			case '8':
+				return edit_key::end;
+			case '5':
+				return edit_key::page_up;
+			case '6':
+				return edit_key::page_down;
+		}
+	}
+	return edit_key::none;
 }
 
 bool is_key_held(int code)

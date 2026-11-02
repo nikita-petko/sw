@@ -4,9 +4,11 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "internal.h"
 #include "log.h"
+#include "platform.h"
 
 LOG_DEFAULT_GROUP(logging::group::config)
 
@@ -28,8 +30,27 @@ logging::level parse_log_level(const std::string& value)
 }
 }  // namespace
 
-bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
+std::string check_profiles_file(const std::string& path)
 {
+	PacketEngineOptions options;
+	options.global_filter = kDefaultFilter;
+	logging::begin_capture();
+	const bool				 ok		  = config::load_profiles(path.c_str(), options) && config::validate_filters(path.c_str(), options);
+	std::vector<std::string> messages = logging::end_capture();
+	if (ok)
+		return {};
+	return messages.empty() ? "invalid profile file" : messages.front();
+}
+
+bool parse_options(int argc, char* argv[], PacketEngineOptions& options, const std::string* config_override, bool* config_missing)
+{
+#ifdef LAGSW_FEATURE_CONFIG_TUI
+	const bool tui_available = config_missing != nullptr && platform::is_interactive();
+#else
+	const bool tui_available = false;
+#endif
+	if (config_missing)
+		*config_missing = false;
 	options.global_filter = kDefaultFilter;
 	options.profiles.clear();
 	options.initial_server.reset();
@@ -40,6 +61,13 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 	options.features	   = {};
 	bool config_loaded	   = false;
 
+	if (config_override)
+	{
+		config_loaded = true;
+		if (!config::load_profiles(config_override->c_str(), options))
+			return false;
+	}
+
 	for (int index = 1; index < argc; ++index)
 	{
 		if (std::strcmp(argv[index], "--config") == 0)
@@ -49,8 +77,11 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 				LOG_ERROR("--config requires a profiles YAML file");
 				return false;
 			}
+			++index;
+			if (config_override)
+				continue;
 			config_loaded = true;
-			if (!config::load_profiles(argv[++index], options))
+			if (!config::load_profiles(argv[index], options))
 				return false;
 		}
 		else if (std::strcmp(argv[index], "--log-level") == 0 || std::strcmp(argv[index], "-l") == 0)
@@ -138,7 +169,7 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 		else if (std::strcmp(argv[index], "--help") == 0 || std::strcmp(argv[index], "-h") == 0 || argc == 1)
 		{
 			std::printf("Usage: %s [options]\nOptions:\n", argv[0]);
-			std::printf("  --config <file> Load profiles from YAML\n");
+			std::printf("  --config <file> Load profiles from YAML; without it the profile loader/editor opens on a terminal\n");
 			std::printf("  --log-level, -l <level> Set log level: error, warn, info, or debug\n");
 			std::printf("  --log-group, -g <rules> Toggle log groups, e.g. -region,+discovery.packet or all,-packet.recv\n");
 			std::printf("                          Chatty per-packet groups are off by default; 'all' enables every group\n");
@@ -153,6 +184,11 @@ bool parse_options(int argc, char* argv[], PacketEngineOptions& options)
 			std::printf("  --help, -h              Show this help message\n");
 			return false;
 		}
+	}
+	if (!config_loaded && tui_available)
+	{
+		*config_missing = true;
+		return true;
 	}
 	if (!config_loaded)
 	{

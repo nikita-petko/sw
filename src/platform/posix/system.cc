@@ -153,6 +153,20 @@ std::string data_directory()
 	return {};
 }
 
+std::string config_directory()
+{
+	if (const char* config_home = std::getenv("XDG_CONFIG_HOME"); config_home && *config_home)
+		return std::string(config_home) + "/lagsw";
+	if (const char* home = std::getenv("HOME"); home && *home)
+		return std::string(home) + "/.config/lagsw";
+	return {};
+}
+
+bool is_interactive()
+{
+	return isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+}
+
 void make_directory(const std::string& path)
 {
 	// parents are created too since ~/.local/share may not exist yet

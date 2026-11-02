@@ -54,6 +54,11 @@ void set_suspended(bool suspend);
 int pinned_status_rows(int console_rows);
 /// Writes a full-screen view frame, then redraws the status lines over the bottom rows of the console.
 void write_frame(const std::string& frame, int console_rows);
+/// Starts collecting error messages as plain text instead of writing anything to the console, until
+/// end_capture(). Used to show the loader's complaints inside a full-screen view. Not nestable.
+void begin_capture();
+/// Stops collecting and returns the error messages collected since begin_capture().
+std::vector<std::string> end_capture();
 /// Sets the lines shown below the persistent status line; an empty list removes them. Takes effect on the next set_status().
 void set_extra_status(const std::vector<std::string>& lines);
 /// Clears the persistent status line.

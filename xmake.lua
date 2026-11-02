@@ -58,6 +58,7 @@ local features = {
     {name = "forwarded_address_discovery", default = true,  description = "Discover client addresses of forwarded (shared) traffic"},
     {name = "netfilter_monitor",           default = true,  description = "Show NFQUEUE/nftables health on an extra status line (Linux nfqueue backend)"},
     {name = "net_monitor",                 default = true,  description = "Full-screen network statistics view (packets/s, latency, retransmits, charts) opened with a key"},
+    {name = "config_tui",                  default = true,  description = "Terminal UI to create and edit profile files, shown when --config is missing and reopened with a key"},
 }
 for _, feature in ipairs(features) do
     option(feature.name)
@@ -78,6 +79,7 @@ includes("tests/packet")
 includes("tests/modes")
 includes("tests/region")
 includes("tests/engine")
+includes("tests/config_tui")
 includes("tests/region_enforcement")
 includes("tests/passive_latency")
 includes("tests/net_monitor")

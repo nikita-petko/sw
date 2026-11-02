@@ -27,6 +27,34 @@ inline constexpr int right	   = 0x27;
 inline constexpr int down	   = 0x28;
 }  // namespace key
 
+/// Key codes returned by read_edit_key(). Printable characters are reported as themselves; everything else is a value
+/// above the byte range, so no key can be confused with a typed character.
+namespace edit_key {
+inline constexpr int none	   = -1;
+inline constexpr int ctrl_flag = 0x10000;
+inline constexpr int special   = 0x20000;
+inline constexpr int escape	   = special + 1;
+inline constexpr int enter	   = special + 2;
+inline constexpr int tab	   = special + 3;
+inline constexpr int backspace = special + 4;
+inline constexpr int del	   = special + 5;
+inline constexpr int home	   = special + 6;
+inline constexpr int end	   = special + 7;
+inline constexpr int up		   = special + 8;
+inline constexpr int down	   = special + 9;
+inline constexpr int left	   = special + 10;
+inline constexpr int right	   = special + 11;
+inline constexpr int page_up   = special + 12;
+inline constexpr int page_down = special + 13;
+/// The process was asked to terminate (SIGTERM/SIGHUP on POSIX).
+inline constexpr int terminate = special + 14;
+/// Ctrl plus a letter ('A'-'Z').
+constexpr int ctrl(char letter)
+{
+	return ctrl_flag | letter;
+}
+}  // namespace edit_key
+
 /// Monotonic milliseconds since an arbitrary point (system boot on Windows).
 uint64_t tick_ms();
 /// Sleeps the calling thread.
@@ -68,6 +96,11 @@ SystemCounters system_counters();
 
 /// Per-user directory for lagsw's persistent files (not created); empty when unavailable.
 std::string data_directory();
+/// Per-user directory for lagsw's settings, such as the list of recently opened profile files (not created); empty
+/// when unavailable.
+std::string config_directory();
+/// Whether both input and output are an interactive terminal.
+bool		is_interactive();
 /// Creates a directory (and ignores the error if it already exists).
 void		make_directory(const std::string& path);
 /// Atomically replaces `destination` with `source`; returns false and removes `source` on failure.
@@ -75,6 +108,9 @@ bool		replace_file(const std::string& source, const std::string& destination);
 
 /// Returns the next pending key press (a key:: constant, or an ASCII character), or key::none.
 int	 read_key();
+/// Like read_key(), but for text editing: reports typed characters, Escape, Enter, Delete, Home/End and Ctrl+letter
+/// as edit_key codes, or edit_key::none when nothing is pending.
+int	 read_edit_key();
 /// Returns whether the key is currently held down, system wide.
 bool is_key_held(int key);
 

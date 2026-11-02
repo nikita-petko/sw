@@ -360,6 +360,36 @@ namespace {
 		return true;
 	}
 
+#ifdef LAGSW_FEATURE_CONFIG_TUI
+	bool validate_config_tui(const char* path, const PacketEngineOptions& options)
+	{
+		const auto reserved = [](int candidate) { return normalize_key(candidate) == normalize_key(kConfigTuiKey); };
+		const auto fail		= [&](const char* what) {
+			LOG_ERROR("%s uses the key reserved for the config TUI (%c) in %s", what, kConfigTuiKey, path);
+			return false;
+		};
+		for (const ProfileOptions& profile : options.profiles)
+		{
+			if (std::any_of(profile.keys.begin(), profile.keys.end(), reserved))
+				return fail("A profile activation key");
+			if (profile.send_key && reserved(*profile.send_key))
+				return fail("A profile send_key");
+		}
+#	ifdef LAGSW_FEATURE_NET_MONITOR
+		const NetMonitorOptions& monitor = options.features.net_monitor;
+		if (monitor.enabled)
+			for (const int other : {monitor.key, monitor.pause_key, monitor.reset_key, monitor.flows_key, monitor.profiles_key, monitor.export_key})
+				if (reserved(other))
+					return fail("A net_monitor key");
+#	endif
+#	ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+		if (options.features.passive_latency.enabled && options.features.passive_latency.pause_key && reserved(*options.features.passive_latency.pause_key))
+			return fail("The passive_latency pause_key");
+#	endif
+		return true;
+	}
+#endif
+
 	bool validate_features([[maybe_unused]] const char* path, [[maybe_unused]] const PacketEngineOptions& options)
 	{
 		if (!validate_linux_bpf(path, options.features.linux_bpf))
@@ -380,6 +410,10 @@ namespace {
 		if (!validate_net_monitor(path, options))
 			return false;
 #endif
+#ifdef LAGSW_FEATURE_CONFIG_TUI
+		if (!validate_config_tui(path, options))
+			return false;
+#endif
 #ifdef LAGSW_FEATURE_FORWARDED_ADDRESS_DISCOVERY
 		if (!validate_forwarded_address_discovery(path, options.features.forwarded_address_discovery))
 			return false;
@@ -395,6 +429,7 @@ namespace {
 		return true;
 	}
 }  // namespace
+
 
 bool validate_profiles(const char* path, const PacketEngineOptions& options)
 {

@@ -919,7 +919,9 @@ bool load_profiles(const char* path, PacketEngineOptions& options)
 	options.profiles.clear();
 	options.servers.clear();
 	options.features = {};
-	return ProfilesParser(path, options).parse(file) && validate_profiles(path, options);
+	if (!ProfilesParser(path, options).parse(file))
+		return false;
+	return validate_profiles(path, options);
 }
 
 }  // namespace config
