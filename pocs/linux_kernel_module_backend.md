@@ -220,7 +220,7 @@ struct swdiv_slot_hdr {
 
 | `packet_backend.h` | `backends/kmod/` |
 |---|---|
-| `initialize()` | open `/dev/swdivert`, `SWDIV_IOC_VERSION`; if missing: actionable error (`modprobe swdivert`, DKMS hint). Optionally auto-load the module when run as root. |
+| `initialize()` | open `/dev/swdivert` and check `SWDIV_IOC_VERSION`; if the device is missing, load the module per §9.3; if that is not possible, an actionable error (`modprobe swdivert`, DKMS hint). A version mismatch is refused with both versions in the message. |
 | `check_privileges()` | root, or `CAP_NET_ADMIN` + device node permission (a `udev` rule/group is documented; the device refuses without `CAP_NET_ADMIN` regardless of mode bits). |
 | `open(OpenOptions)` | `OPEN` with layer from `forward`/`include_forward` (two handles like the WinDivert backend), `priority` → priority, `sniff` → `SNIFF`, `filter` → compile and `SET_FILTER` |
 | `validate_filter()` | compile + local verifier; no kernel call needed |
@@ -238,7 +238,7 @@ struct swdiv_slot_hdr {
 ### 9.1 Fail-open is a hard requirement
 
 - **On-close policy** per handle (`pass` default, `drop` for enforcement handles that must fail closed by explicit request). On `release()` the module resumes every held packet (`pass`) or drops it (`drop`) and unlinks the handle before the file is freed.
-- **Module unload** is refused while handles exist (`try_module_get` by each open), and unregisters hooks only after an RCU grace period.
+- **Module unload** is never done by `lagsw` unless asked (§9.3), and is refused by the kernel while handles exist (`try_module_get` by each open), and unregisters hooks only after an RCU grace period.
 - **Overload** applies the handle's overflow policy; the engine's default is `pass`, so an overwhelmed engine degrades to "no shaping", not "no network".
 - **Crash of the kernel module itself** is the residual risk this design cannot make go away; mitigated by §10 and §13 (fuzzing, KASAN/KCSAN CI, strict ownership rules).
 
@@ -247,6 +247,26 @@ struct swdiv_slot_hdr {
 - Device node `0600 root:root`, plus `CAP_NET_ADMIN` checked in `open()` (so a file-capability'd binary can use it; compare with the netlink backend's capability story).
 - `SET_FILTER`, `INJECT`, long hold timeouts are checked against the opener's capabilities at ioctl time, not just at open.
 - Handles are per-netns; a handle cannot affect another namespace.
+
+### 9.3 Who loads and unloads the module
+
+`lagsw` loads the module when it is missing and **never unloads it by default**.
+
+- **Load (in `initialize()`):** only when `/dev/swdivert` does not exist and the process is root (loading needs `CAP_SYS_MODULE`, which a file capability for `CAP_NET_ADMIN` does not give).
+  1. `modprobe swdivert` (installed module, Phase 7 packaging).
+  2. Otherwise `insmod <path>` for a `.ko` given with `--kmod-path` or found next to the executable, so a development build works without installing.
+  3. Otherwise fail with the instructions in §8.4. Without root, never attempt a load: print the `modprobe`/`insmod` command to run instead.
+  - Loading goes through the `modprobe`/`insmod` programs (`kmod` userland), not an in-process `finit_module()`, so module signing, dependencies and the system's module policy (`modprobe.d`, lockdown) apply unchanged.
+  - After loading, wait for the device node (udev can lag behind `insmod`) with a short bounded retry, then run the ABI check. An already-loaded module with a different ABI is an error; `lagsw` does not try to replace it.
+  - `lagsw` records whether *it* loaded the module (for the opt-in below and for the log line "loaded swdivert (abi N)").
+- **Unload: not by default.** Reasons:
+  - The module is host-wide. Another `lagsw` instance, a container or another tool may hold handles, and `rmmod` of a module that is in use is refused by the kernel anyway.
+  - Packets are already safe on exit and on crash: closing the device (normal exit, `SIGKILL`, kernel-side process teardown) runs the handle's `release()` which applies the on-close policy (§9.1). Leaving the module loaded does not leave any traffic diverted. An unload step could not run after a crash, so it would only add a second cleanup path that is not always executed.
+  - Loaded but idle costs nothing: hooks are registered only while a handle exists (§14.5).
+  - This differs from the NFQUEUE backend, which removes its own `inet lagsw` nft table on exit because that table belongs to the process alone.
+- **Opt-in unload:** `--kmod-unload-on-exit` makes a normal exit (not a crash) run `rmmod swdivert` **only if this process loaded it**, after all its handles are closed; `EBUSY` is logged at debug level and ignored. Default off. A normal exit includes the `SIGTERM`/`SIGHUP` path used by the NFQUEUE backend.
+- **Failure handling:** a failed load is a startup error (before any profile is activated), never a mid-run surprise. If the module disappears while running (manual `rmmod` is impossible while handles are open, so this means an unexpected kernel-side failure) the channels report `error` and the engine shuts down; there is nothing to fall back to at that point, and fail-open (§9.1) has already released held packets.
+- **Auto-selection (Phase 6):** the backend choice kmod → nfqueue only prefers the module when it is already loaded or loadable (root and a `.ko`/installed module found) and the ABI matches; otherwise it falls back to NFQUEUE with a log line saying why. A load is never attempted just to probe.
 
 ## 10. Build, packaging and distribution
 
@@ -294,7 +314,7 @@ WinDivert's own numbers are not a target, because they depend on Windows. The pa
 4. **Phase 4, Spike C: modify and inject.** `RESUME_MOD`, `INJECT`, checksum flags, priority chaining, loop avoidance. Re-run the existing engine test profiles through a `backends/kmod` stub.
 5. **Go/no-go gate.** Compare against the §11 targets. If divert-and-resume is not at least ~1.5× faster than the batched NFQUEUE backend, **stop** and keep NFQUEUE + eBPF (record the numbers here).
 6. **Phase 5: filter VM and sets.** Bytecode emitter from the existing lexer/parser, verifier, fuzz harness (syzkaller-style, plus a user-space harness that runs the VM on random programs/packets under ASan).
-7. **Phase 6: backend integration.** `backends/kmod/backend.cc`, xmake option, `--backend`/auto-selection order (kmod → nfqueue only when the module is loaded and ABI matches), README section.
+7. **Phase 6: backend integration.** `backends/kmod/backend.cc`, xmake option, module load policy and `--kmod-path`/`--kmod-unload-on-exit` (§9.3), `--backend`/auto-selection order (kmod → nfqueue only when the module is loaded and ABI matches), README section.
 8. **Phase 7: packaging.** DKMS config, module signing (MOK) and the Secure Boot story, `modules_install`.
 9. **Phase 8: hardening.** KASAN/KCSAN/lockdep runs, netns churn, module reload under traffic, CPU hotplug, multiple handles with priority chains, kernel matrix.
 10. **Optional:** `RESUME_AT` in-kernel hold, IPv6, multi-queue fanout (one ring per CPU/flow hash, relevant only if the engine's single-thread-per-channel model changes).
@@ -305,6 +325,7 @@ WinDivert's own numbers are not a target, because they depend on Windows. The pa
 - **Functional:** every existing engine verb through the real engine against the module (delay, batch, drop, hold, UDP, period, ack restoration, exclusivity, pcap, region enforcement), reusing `profiles/localhost.test.sw.yml` and the gateway scripts' structure (a `scripts/test_kmod_gateway.sh`).
 - **ABI:** version mismatch, truncated ioctl, hostile ring indices written by user space (the kernel must not trust producer/consumer indices from the user-writable page; keep authoritative copies in kernel memory).
 - **Filter VM:** verifier rejection tests, differential tests against the nft backend's compiled output on the same pcaps (`pcap_files/`), fuzzing.
+- **Module lifecycle (§9.3):** start as root with the module absent (loaded via `insmod --kmod-path`, then `modprobe`), start without root with the module absent (clear instruction, no load attempt), already loaded with matching and with mismatching ABI, device node appearing late, `--kmod-unload-on-exit` with and without a second process holding handles (`EBUSY` ignored), the module is left loaded by default, the unload flag does not unload a module this process did not load.
 - **Failure:** SIGKILL with N held packets, `rmmod` attempt with open handles, netns deletion with a handle open, ring overflow (both policies), hold timeout expiry, `RESUME` of stale id, double `RESUME`.
 - **Interaction:** with nftables rules at various priorities, conntrack + NAT, GSO/GRO on/off, `CHECKSUM_PARTIAL` skbs, loopback, VLAN and non-Ethernet links (`ARPHRD_NONE`), concurrent use with the shipped NFQUEUE backend on a different profile.
 - **Performance:** §11 on the same rig as the NFQUEUE and eBPF measurements so all three are comparable.
