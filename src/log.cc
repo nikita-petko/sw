@@ -46,6 +46,47 @@ bool					 suspended = false;
 std::vector<std::string> suspended_backlog;
 constexpr size_t		 max_suspended_backlog = 500;
 
+// The banner is pinned to the first row by a scroll region covering the rest of the console.
+std::string banner;
+int			banner_rows	   = 0;
+int			banner_columns = 0;
+constexpr int min_banner_rows = 8;
+
+std::string banner_text_at_right(int columns)
+{
+	const std::string shown = banner.size() > static_cast<size_t>(columns) ? banner.substr(0, static_cast<size_t>(columns)) : banner;
+	return "\033[1;" + std::to_string(columns - static_cast<int>(shown.size()) + 1) + "H\033[90m" + shown + "\033[0m";
+}
+
+// Restores the scroll region when the console was resized (or `force`) and redraws the banner without moving the cursor.
+std::string banner_sequence(bool force)
+{
+	if (banner.empty())
+		return {};
+	const int rows	  = platform::console_height();
+	const int columns = platform::console_width();
+	if (rows < min_banner_rows || columns <= 0)
+		return {};
+	std::string out = "\033" "7";
+	if (force || rows != banner_rows || columns != banner_columns)
+	{
+		banner_rows	   = rows;
+		banner_columns = columns;
+		out += "\033[2;" + std::to_string(rows) + "r\033[1;1H\033[2K";
+	}
+	out += banner_text_at_right(columns) + "\033" "8";
+	return out;
+}
+
+// Full-screen views own the whole screen, so the banner is drawn over their first row.
+std::string banner_overlay()
+{
+	const int columns = platform::console_width();
+	if (banner.empty() || platform::console_height() < min_banner_rows || columns <= 0)
+		return {};
+	return banner_text_at_right(columns);
+}
+
 void clear_status_line()
 {
 	if (status_line.empty())
@@ -379,6 +420,7 @@ static void write_impl(const char* group_name, level message_level, const char* 
 
 	clear_status_line();
 	std::fputs(line.c_str(), stdout);
+	std::fputs(banner_sequence(false).c_str(), stdout);
 	if (!status_line.empty())
 		print_status_block(status_line, status_right_line);
 	std::fflush(stdout);
@@ -434,7 +476,10 @@ void set_status(const std::string& status, const std::string& right_status)
 	if (suspended)
 		std::fputs(pinned_status_block(platform::console_height()).c_str(), stdout);
 	else
+	{
+		std::fputs(banner_sequence(false).c_str(), stdout);
 		print_status_block(status, right_status);
+	}
 	std::fflush(stdout);
 }
 
@@ -459,6 +504,7 @@ void set_suspended(bool suspend)
 	if (suspend)
 		return;
 	clear_status_line();
+	std::fputs(banner_sequence(true).c_str(), stdout);
 	for (const std::string& line : suspended_backlog)
 		std::fputs(line.c_str(), stdout);
 	suspended_backlog.clear();
@@ -471,6 +517,7 @@ void write_frame(const std::string& frame, int console_rows)
 {
 	std::lock_guard lock(log_mutex);
 	std::fwrite(frame.data(), 1, frame.size(), stdout);
+	std::fputs(banner_overlay().c_str(), stdout);
 	std::fputs(pinned_status_block(console_rows).c_str(), stdout);
 	std::fflush(stdout);
 }
@@ -489,6 +536,29 @@ void clear_status()
 	status_line.clear();
 	status_right_line.clear();
 	std::printf("\r\033[2K");
+	std::fflush(stdout);
+}
+
+void set_banner(const std::string& text)
+{
+	std::lock_guard lock(log_mutex);
+	if (platform::console_height() < min_banner_rows || platform::console_width() <= 0)
+		return;
+	banner = text;
+	std::fputs("\033[2J\033[H", stdout);
+	std::fputs(banner_sequence(true).c_str(), stdout);
+	std::fputs("\033[2;1H", stdout);
+	std::fflush(stdout);
+}
+
+void clear_banner()
+{
+	std::lock_guard lock(log_mutex);
+	if (banner.empty())
+		return;
+	banner.clear();
+	// Resetting the scroll region homes the cursor, so it is put back where it was.
+	std::fputs("\033" "7\033[r\033" "8", stdout);
 	std::fflush(stdout);
 }
 

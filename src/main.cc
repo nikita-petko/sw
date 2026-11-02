@@ -9,6 +9,7 @@
 #include "platform.h"
 #include "profile_controller.h"
 #include "status_line.h"
+#include "version.h"
 
 LOG_DEFAULT_GROUP(logging::group::startup)
 
@@ -97,6 +98,12 @@ KeyAction handle_command_key(PacketEngine& engine, int key)
 int main(int argc, char* argv[])
 {
 	platform::enable_terminal_colors();
+	logging::set_banner(version::banner());
+	// Every return path has to give the console its normal scrolling back.
+	struct BannerGuard
+	{
+		~BannerGuard() { logging::clear_banner(); }
+	} banner_guard;
 	if (!platform::acquire_single_instance())
 	{
 		LOG_ERROR("Another instance of lagsw is already running. Only one instance is allowed at a time.");

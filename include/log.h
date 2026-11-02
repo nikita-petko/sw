@@ -58,6 +58,11 @@ void write_frame(const std::string& frame, int console_rows);
 void set_extra_status(const std::vector<std::string>& lines);
 /// Clears the persistent status line.
 void clear_status();
+/// Pins `text` to the top right corner of the console: the log scrolls below it and full-screen views draw it over their
+/// first row. Clears the screen. Does nothing when the console size is unknown (output is not a terminal).
+void set_banner(const std::string& text);
+/// Removes the banner and restores the console's normal scrolling. Safe to call when no banner is set.
+void clear_banner();
 
 /// Log groups subdivide chatty output so a single source can be muted without lowering the log level.
 /// Names are dotted; a child (such as "discovery.packet") can be toggled on its own, while toggling its

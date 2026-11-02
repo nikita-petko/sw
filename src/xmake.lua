@@ -3,6 +3,19 @@ target("lagsw")
     set_kind("binary")
     add_files("*.cc", "packet_mode/*.cc", "passive_latency/*.cc", "net_monitor/*.cc", "options/*.cc", "packet_engine/*.cc")
 
+    -- The version banner; only this file is rebuilt when the commit changes
+    on_load(function (target)
+        local hash = "unknown"
+        local output = try { function () return os.iorunv("git", {"rev-parse", "--short", "HEAD"}, {curdir = os.scriptdir()}) end }
+        if output and #output:trim() > 0 then
+            hash = output:trim()
+        end
+        target:add("files", path.join(os.scriptdir(), "version/version.cc"), {defines = {
+            "LAGSW_VERSION=\"" .. target:version() .. "\"",
+            "LAGSW_GIT_HASH=\"" .. hash .. "\""
+        }})
+    end)
+
     add_includedirs("../include")
 
     -- Compile-time feature toggles, defined in the root xmake.lua
