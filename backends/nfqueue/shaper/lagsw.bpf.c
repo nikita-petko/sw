@@ -4,12 +4,14 @@
 // Built with `clang -target bpf -mcpu=v3 -O2 -g` at package time and embedded in the binary; see backends/nfqueue/xmake.lua.
 #include <stdbool.h>
 
-#include <bpf/bpf_endian.h>
-#include <bpf/bpf_helpers.h>
+// linux/bpf.h must precede the libbpf headers: they use __u32/__u64 without including it.
 #include <linux/bpf.h>
 #include <linux/if_ether.h>
 #include <linux/in.h>
 #include <linux/pkt_cls.h>
+
+#include <bpf/bpf_endian.h>
+#include <bpf/bpf_helpers.h>
 
 #include "bpf_shared.h"
 
