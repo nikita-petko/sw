@@ -357,7 +357,7 @@ std::unique_ptr<PacketChannel> open(const OpenOptions& options, std::string& err
 	if (!nfq::ensure_table(error))
 	{
 		LOG_ERROR("nfqueue: could not prepare the nftables table: %s", error.c_str());
-		error = "failed to prepare the nftables table (is nft installed and CAP_NET_ADMIN granted?): " + error;
+		error = "failed to prepare the nftables table (is CAP_NET_ADMIN granted and nf_tables available?): " + error;
 		return nullptr;
 	}
 	const uint32_t channel_id	= next_channel_id.fetch_add(1);

@@ -1,124 +1,220 @@
 #include "nft_table.h"
 
-#include <fcntl.h>
-#include <spawn.h>
-#include <sys/mman.h>
-#include <sys/wait.h>
-#include <unistd.h>
+#include <libmnl/libmnl.h>
+#include <linux/netfilter/nfnetlink.h>
+#include <linux/netlink.h>
+#include <poll.h>
+#include <sys/socket.h>
 
 #include <cerrno>
-#include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <mutex>
 
 #include "log.h"
 
 LOG_DEFAULT_GROUP(logging::group::nft)
 
-extern char** environ;
+#ifndef NETLINK_EXT_ACK
+#define NETLINK_EXT_ACK 11
+#endif
+#ifndef NETLINK_CAP_ACK
+#define NETLINK_CAP_ACK 10
+#endif
 
 namespace nfq {
 namespace {
-constexpr const char* kTable = "inet lagsw";
+constexpr int kAckTimeoutMs		= 5000;
+constexpr int kFailureDrainMs	= 50;
+constexpr int kSendBufferBytes	= 2 * 1024 * 1024;
+constexpr size_t kReceiveBytes	= 64 * 1024;
 
+/// The socket that creates an owner table must stay open as long as the table should exist, and is the only one allowed
+/// to change it. Every transaction therefore goes through this one socket, serialised by `table_mutex`.
 std::mutex table_mutex;
-bool	   table_created = false;
+mnl_socket* netlink		 = nullptr;
+uint32_t	next_seq	 = 0;
+bool		table_created = false;
+bool		table_owned	  = false;
 
-bool write_all(int fd, const std::string& data)
+struct SendResult
 {
-	size_t written = 0;
-	while (written < data.size())
+	bool		ok		  = false;
+	int			code	  = 0;
+	std::string message;
+};
+
+std::string extended_ack_text(const nlmsghdr* header, const nlmsgerr* error)
+{
+	if ((header->nlmsg_flags & NLM_F_ACK_TLVS) == 0)
+		return {};
+	// The kernel echoes the failing request unless NLM_F_CAPPED says it only sent the header; attributes follow it.
+	size_t offset = sizeof(nlmsgerr);
+	if ((header->nlmsg_flags & NLM_F_CAPPED) == 0)
+		offset += mnl_nlmsg_get_payload_len(&error->msg);
+	const size_t payload = mnl_nlmsg_get_payload_len(header);
+	if (offset >= payload)
+		return {};
+	const char* cursor = reinterpret_cast<const char*>(error) + offset;
+	size_t		left   = payload - offset;
+	while (left >= sizeof(nlattr))
 	{
-		const ssize_t count = ::write(fd, data.data() + written, data.size() - written);
-		if (count < 0)
-		{
-			if (errno == EINTR)
-				continue;
-			return false;
-		}
-		written += static_cast<size_t>(count);
+		const nlattr* attribute = reinterpret_cast<const nlattr*>(cursor);
+		if (attribute->nla_len < sizeof(nlattr) || attribute->nla_len > left)
+			break;
+		if ((attribute->nla_type & NLA_TYPE_MASK) == NLMSGERR_ATTR_MSG)
+			return std::string(cursor + NLA_HDRLEN, ::strnlen(cursor + NLA_HDRLEN, attribute->nla_len - NLA_HDRLEN));
+		const size_t step = NLA_ALIGN(attribute->nla_len);
+		if (step >= left)
+			break;
+		cursor += step;
+		left -= step;
 	}
+	return {};
+}
+
+bool open_socket(std::string& error)
+{
+	if (netlink != nullptr)
+		return true;
+	netlink = mnl_socket_open2(NETLINK_NETFILTER, SOCK_CLOEXEC);
+	if (netlink == nullptr)
+	{
+		error = std::string("cannot open a netfilter netlink socket: ") + std::strerror(errno);
+		return false;
+	}
+	if (mnl_socket_bind(netlink, 0, MNL_SOCKET_AUTOPID) < 0)
+	{
+		error = std::string("cannot bind the netfilter netlink socket: ") + std::strerror(errno);
+		mnl_socket_close(netlink);
+		netlink = nullptr;
+		return false;
+	}
+	const int enable = 1;
+	if (mnl_socket_setsockopt(netlink, NETLINK_EXT_ACK, const_cast<int*>(&enable), sizeof(enable)) < 0)
+		LOG_DEBUG("NETLINK_EXT_ACK is not supported; kernel error details will be limited");
+	mnl_socket_setsockopt(netlink, NETLINK_CAP_ACK, const_cast<int*>(&enable), sizeof(enable));
+	// A whole ruleset is submitted as one datagram, which must fit the socket's send buffer.
+	const int fd	 = mnl_socket_get_fd(netlink);
+	int		  buffer = kSendBufferBytes;
+	if (::setsockopt(fd, SOL_SOCKET, SO_SNDBUFFORCE, &buffer, sizeof(buffer)) < 0)
+		::setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &buffer, sizeof(buffer));
+	next_seq = static_cast<uint32_t>(std::time(nullptr));
+	LOG_DEBUG("opened the netfilter netlink socket (port id %u)", mnl_socket_get_portid(netlink));
 	return true;
 }
 
-std::string read_all(int fd)
+void close_socket()
 {
-	std::string output;
-	char		buffer[512];
-	::lseek(fd, 0, SEEK_SET);
-	ssize_t count;
-	while ((count = ::read(fd, buffer, sizeof(buffer))) > 0)
-		output.append(buffer, static_cast<size_t>(count));
-	return output;
+	if (netlink == nullptr)
+		return;
+	mnl_socket_close(netlink);
+	netlink = nullptr;
 }
 
-std::string trim(std::string text)
+/// Reads replies until the acknowledgement of `ack_seq` arrives or a failure has been reported. Messages whose sequence
+/// number is outside [first_seq, ack_seq] are ignored.
+SendResult wait_for_reply(uint32_t first_seq, uint32_t ack_seq)
 {
-	while (!text.empty() && (text.back() == '\n' || text.back() == '\r' || text.back() == ' '))
-		text.pop_back();
-	return text;
-}
-
-// The script and nft's stderr travel through memfds, which avoids pipe-buffer deadlocks and SIGPIPE.
-bool run_nft_impl(const std::string& script, std::string& error)
-{
-	LOG_DEBUG_GROUP(logging::group::nft_script, "nft: running script:\n%s", trim(script).c_str());
-	const int input	 = ::memfd_create("lagsw-nft-in", MFD_CLOEXEC);
-	const int output = ::memfd_create("lagsw-nft-err", MFD_CLOEXEC);
-	if (input < 0 || output < 0)
+	SendResult		  result;
+	std::vector<char> buffer(kReceiveBytes);
+	pollfd			  descriptor{mnl_socket_get_fd(netlink), POLLIN, 0};
+	for (;;)
 	{
-		error = std::string("memfd_create failed: ") + std::strerror(errno);
-		if (input >= 0)
-			::close(input);
-		if (output >= 0)
-			::close(output);
-		return false;
+		const int ready = ::poll(&descriptor, 1, result.code != 0 ? kFailureDrainMs : kAckTimeoutMs);
+		if (ready < 0 && errno == EINTR)
+			continue;
+		if (ready == 0)
+		{
+			if (result.code == 0)
+			{
+				result.code		= ETIMEDOUT;
+				result.message = "timed out waiting for the kernel to answer";
+			}
+			return result;
+		}
+		if (ready < 0)
+		{
+			result.code		= errno;
+			result.message = std::string("poll failed: ") + std::strerror(errno);
+			return result;
+		}
+		const ssize_t received = mnl_socket_recvfrom(netlink, buffer.data(), buffer.size());
+		if (received < 0)
+		{
+			if (errno == EINTR || errno == ENOBUFS)
+				continue;
+			result.code	   = errno;
+			result.message = std::string("netlink receive failed: ") + std::strerror(errno);
+			return result;
+		}
+		int length = static_cast<int>(received);
+		for (const nlmsghdr* header = reinterpret_cast<const nlmsghdr*>(buffer.data()); mnl_nlmsg_ok(header, length); header = mnl_nlmsg_next(header, &length))
+		{
+			if (header->nlmsg_seq - first_seq > ack_seq - first_seq || header->nlmsg_type != NLMSG_ERROR)
+				continue;
+			if (mnl_nlmsg_get_payload_len(header) < sizeof(nlmsgerr))
+				continue;
+			const nlmsgerr* error = static_cast<const nlmsgerr*>(mnl_nlmsg_get_payload(header));
+			if (error->error == 0)
+			{
+				if (header->nlmsg_seq == ack_seq && result.code == 0)
+				{
+					result.ok = true;
+					return result;
+				}
+				continue;
+			}
+			if (result.code == 0)
+			{
+				result.code	   = -error->error;
+				result.message = std::strerror(result.code);
+				const std::string detail = extended_ack_text(header, error);
+				if (!detail.empty())
+					result.message += ": " + detail;
+			}
+			if (header->nlmsg_seq == ack_seq)
+				return result;
+		}
 	}
-	bool ok = write_all(input, script) && ::lseek(input, 0, SEEK_SET) == 0;
-	if (!ok)
-		error = "failed to prepare the nft script";
+}
+
+SendResult send_request(const std::vector<uint8_t>& bytes, uint32_t first_seq, uint32_t ack_seq)
+{
+	SendResult result;
+	if (netlink == nullptr)
+	{
+		result.code		= ENOTCONN;
+		result.message = "the netlink socket is closed";
+		return result;
+	}
+	if (mnl_socket_sendto(netlink, bytes.data(), bytes.size()) < 0)
+	{
+		result.code		= errno;
+		result.message = std::string("netlink send failed: ") + std::strerror(errno);
+		return result;
+	}
+	return wait_for_reply(first_seq, ack_seq);
+}
+
+/// Sends a finished batch and waits for the kernel's verdict on the whole transaction.
+SendResult run_batch(NftBatch& batch)
+{
+	SendResult result;
+	if (!batch.finish())
+	{
+		result.code	   = EMSGSIZE;
+		result.message = batch.error();
+		return result;
+	}
+	LOG_DEBUG_GROUP(logging::group::nft_script, "nft: sending a batch of %zu message(s), %zu bytes", batch.message_count(), batch.bytes().size());
+	result = send_request(batch.bytes(), batch.first_seq(), batch.last_seq());
+	next_seq = batch.last_seq() + 2;
+	if (result.ok)
+		LOG_DEBUG_GROUP(logging::group::nft_script, "nft: batch committed");
 	else
-	{
-		posix_spawn_file_actions_t actions;
-		posix_spawn_file_actions_init(&actions);
-		posix_spawn_file_actions_adddup2(&actions, input, STDIN_FILENO);
-		posix_spawn_file_actions_adddup2(&actions, output, STDERR_FILENO);
-		posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
-		char* const argv[] = {const_cast<char*>("nft"), const_cast<char*>("-f"), const_cast<char*>("-"), nullptr};
-		pid_t		pid	   = 0;
-		const int	rc	   = posix_spawnp(&pid, "nft", &actions, nullptr, argv, environ);
-		posix_spawn_file_actions_destroy(&actions);
-		if (rc != 0)
-		{
-			error = std::string("failed to run nft: ") + std::strerror(rc);
-			ok	  = false;
-			LOG_DEBUG_GROUP(logging::group::nft_script, "nft: spawn failed: %s", error.c_str());
-		}
-		else
-		{
-			int status = 0;
-			while (::waitpid(pid, &status, 0) < 0 && errno == EINTR)
-			{
-			}
-			if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
-			{
-				error = trim(read_all(output));
-				if (error.empty())
-					error = "nft exited abnormally";
-				ok = false;
-				LOG_DEBUG_GROUP(logging::group::nft_script,
-								"nft: script failed (%s %d): %s",
-								WIFEXITED(status) ? "exit code" : "signal/status",
-								WIFEXITED(status) ? WEXITSTATUS(status) : status,
-								error.c_str());
-			}
-			else
-				LOG_DEBUG_GROUP(logging::group::nft_script, "nft: script succeeded");
-		}
-	}
-	::close(input);
-	::close(output);
-	return ok;
+		LOG_DEBUG_GROUP(logging::group::nft_script, "nft: batch failed (%d): %s", result.code, result.message.c_str());
+	return result;
 }
 
 struct TableGuard
@@ -127,53 +223,87 @@ struct TableGuard
 };
 }  // namespace
 
-bool run_nft(const std::string& script, std::string& error)
-{
-	return run_nft_impl(script, error);
-}
-
 bool ensure_table(std::string& error)
 {
-	static TableGuard		   guard;
+	static TableGuard			guard;
 	std::lock_guard<std::mutex> lock(table_mutex);
 	if (table_created)
 		return true;
-	LOG_DEBUG("preparing the nftables table %s (replacing any stale copy)", kTable);
-	// add + delete + add replaces a leftover table atomically and succeeds when none exists.
-	const std::string script = std::string("add table ") + kTable + "\ndelete table " + kTable + "\nadd table " + kTable + "\n";
-	if (!run_nft_impl(script, error))
+	LOG_DEBUG("preparing the nftables table inet %s (replacing any stale copy)", kTableName);
+	if (!open_socket(error))
 	{
-		LOG_ERROR("failed to create the nftables table %s: %s", kTable, error.c_str());
+		LOG_ERROR("failed to open the netlink socket for nftables: %s", error.c_str());
 		return false;
 	}
-	table_created = true;
-	LOG_DEBUG("nftables table %s created", kTable);
+	SendResult result;
+	for (const bool owner : {true, false})
+	{
+		// add + delete + add replaces a leftover table atomically and succeeds when none exists. The first add must not
+		// carry flags: an existing table cannot change its owner flag.
+		NftBatch batch(next_seq);
+		batch.add_table(false);
+		batch.delete_table();
+		batch.add_table(owner);
+		result = run_batch(batch);
+		if (result.ok)
+		{
+			table_created = true;
+			table_owned	  = owner;
+			break;
+		}
+		if (owner && result.code == EOPNOTSUPP)
+		{
+			LOG_WARN("this kernel does not support owner tables (Linux 5.12+); the nftables table will outlive the process after SIGKILL");
+			continue;
+		}
+		break;
+	}
+	if (!table_created)
+	{
+		error = result.message;
+		// An owner table can only be changed by the socket that created it, so a second running instance is refused.
+		if (result.code == EPERM || result.code == EOPNOTSUPP)
+			error += " (another lagsw instance may already own the inet lagsw table, or CAP_NET_ADMIN / nf_tables is unavailable)";
+		LOG_ERROR("failed to create the nftables table inet %s: %s", kTableName, error.c_str());
+		close_socket();
+		return false;
+	}
+	LOG_DEBUG("nftables table inet %s created (owner flag = %d)", kTableName, table_owned ? 1 : 0);
 	return true;
 }
 
 bool table_present()
 {
-	{
-		std::lock_guard<std::mutex> lock(table_mutex);
-		if (!table_created)
-			return true;
-	}
-	std::string error;
-	return run_nft_impl(std::string("list table ") + kTable + "\n", error);
+	std::lock_guard<std::mutex> lock(table_mutex);
+	if (!table_created)
+		return true;
+	const uint32_t			   seq	   = next_seq++;
+	const std::vector<uint8_t> request = build_get_table_request(seq);
+	if (request.empty())
+		return false;
+	return send_request(request, seq, seq).ok;
 }
 
 void remove_table()
 {
 	std::lock_guard<std::mutex> lock(table_mutex);
 	if (!table_created)
+	{
+		close_socket();
 		return;
-	LOG_DEBUG("removing the nftables table %s", kTable);
-	std::string error;
-	if (!run_nft_impl(std::string("delete table ") + kTable + "\n", error))
-		LOG_WARN("failed to remove the nftables table %s: %s", kTable, error.c_str());
+	}
+	LOG_DEBUG("removing the nftables table inet %s", kTableName);
+	NftBatch batch(next_seq);
+	batch.delete_table();
+	const SendResult result = run_batch(batch);
+	if (!result.ok)
+		LOG_WARN("failed to remove the nftables table inet %s: %s", kTableName, result.message.c_str());
 	else
-		LOG_DEBUG("nftables table %s removed", kTable);
+		LOG_DEBUG("nftables table inet %s removed", kTableName);
 	table_created = false;
+	table_owned	  = false;
+	// Closing the socket also removes an owner table if the explicit delete failed.
+	close_socket();
 }
 
 bool add_channel_rules(uint32_t channel_id,
@@ -183,52 +313,53 @@ bool add_channel_rules(uint32_t channel_id,
 					   ChannelChains& chains,
 					   std::string& error)
 {
-	std::string script;
-	for (const Hook hook : {Hook::input, Hook::output, Hook::forward})
+	std::lock_guard<std::mutex> lock(table_mutex);
+	if (!table_created)
 	{
-		bool used = false;
-		for (const CompiledRule& rule : rules)
-			used = used || rule.hook == hook;
-		if (!used)
-			continue;
-		const std::string chain = "ch" + std::to_string(channel_id) + "_" + hook_name(hook);
-		script += std::string("add chain ") + kTable + " " + chain + " { type filter hook " + hook_name(hook) + " priority " +
-				  std::to_string(priority) + "; policy accept; }\n";
-		for (const CompiledRule& rule : rules)
-			if (rule.hook == hook)
-				script += std::string("add rule ") + kTable + " " + chain + " " + rule.match + " queue flags bypass to " +
-						  std::to_string(queue_number) + "\n";
-		chains.names.push_back(chain);
+		error = "the nftables table has not been created";
+		return false;
 	}
-	if (script.empty())
+	ChannelChains created;
+	NftBatch	  batch(next_seq);
+	batch.add_channel(channel_id, queue_number, priority, rules, created);
+	if (created.names.empty() && batch.ok())
 		return true;
-	if (run_nft_impl(script, error))
+	for ([[maybe_unused]] const CompiledRule& rule : rules)
+		LOG_DEBUG_GROUP(logging::group::nft_script, "nft: ch%u %s: %s queue flags bypass to %u", channel_id, hook_name(rule.hook), rule.match.c_str(), static_cast<unsigned>(queue_number));
+	const SendResult result = run_batch(batch);
+	if (result.ok)
 	{
-		LOG_DEBUG("channel %u: installed %zu chain(s) and %zu rule(s) feeding queue %u at priority %d",
+		chains = std::move(created);
+		LOG_DEBUG("channel %u: installed %zu chain(s), %zu set(s) and %zu rule(s) feeding queue %u at priority %d",
 				  channel_id,
 				  chains.names.size(),
+				  chains.sets.size(),
 				  rules.size(),
 				  static_cast<unsigned>(queue_number),
 				  priority);
 		return true;
 	}
+	error = result.message;
 	LOG_ERROR("channel %u: failed to install nftables rules for queue %u: %s", channel_id, static_cast<unsigned>(queue_number), error.c_str());
-	chains.names.clear();
+	chains = {};
 	return false;
 }
 
 void remove_channel_rules(ChannelChains& chains)
 {
-	if (chains.names.empty())
+	if (chains.names.empty() && chains.sets.empty())
 		return;
-	std::string script;
-	for (const std::string& chain : chains.names)
-		script += std::string("flush chain ") + kTable + " " + chain + "\ndelete chain " + kTable + " " + chain + "\n";
-	std::string error;
-	if (!run_nft_impl(script, error))
-		LOG_WARN("failed to remove %zu nftables chain(s): %s", chains.names.size(), error.c_str());
-	else
-		LOG_DEBUG("removed %zu nftables chain(s)", chains.names.size());
-	chains.names.clear();
+	std::lock_guard<std::mutex> lock(table_mutex);
+	if (table_created)
+	{
+		NftBatch batch(next_seq);
+		batch.delete_channel(chains);
+		const SendResult result = run_batch(batch);
+		if (!result.ok)
+			LOG_WARN("failed to remove %zu nftables chain(s) and %zu set(s): %s", chains.names.size(), chains.sets.size(), result.message.c_str());
+		else
+			LOG_DEBUG("removed %zu nftables chain(s) and %zu set(s)", chains.names.size(), chains.sets.size());
+	}
+	chains = {};
 }
 }  // namespace nfq

@@ -1,6 +1,7 @@
 #include "filter_compiler.h"
 
 #include <cstdio>
+#include <initializer_list>
 #include <utility>
 
 #include "filter_ast.h"
@@ -37,7 +38,7 @@ struct Clause
 	int									   dir		 = dir_any;
 	int									   proto	 = proto_any;
 	int									   proto_neg = 0;
-	std::vector<std::string>			   matches;
+	std::vector<Match>					   matches;
 	std::vector<std::pair<uint32_t, bool>> interfaces;
 };
 
@@ -71,6 +72,31 @@ std::string address_set(const std::vector<uint32_t>& addrs)
 	return text + " }";
 }
 
+struct FlagBit
+{
+	const char* name;
+	uint8_t		bit;
+};
+
+constexpr FlagBit kFlagBits[] = {{"fin", 0x01}, {"syn", 0x02}, {"rst", 0x04}, {"psh", 0x08}, {"ack", 0x10}, {"urg", 0x20}};
+
+uint8_t flag_bit(const std::string& name)
+{
+	for (const FlagBit& flag : kFlagBits)
+		if (name == flag.name)
+			return flag.bit;
+	fail("unsupported TCP flag '" + name + "'", 0);
+}
+
+Match protocol_match(Transport transport, bool negated)
+{
+	Match match;
+	match.kind	   = MatchKind::ip_protocol;
+	match.transport = transport;
+	match.negated  = negated;
+	return match;
+}
+
 bool apply_literal(Clause& clause, const Leaf& leaf, bool negated)
 {
 	switch (leaf.kind)
@@ -97,24 +123,47 @@ bool apply_literal(Clause& clause, const Leaf& leaf, bool negated)
 		case LeafKind::flag:
 			if (!require_proto(clause, proto_tcp))
 				return false;
-			clause.matches.push_back(std::string("tcp flags & ") + leaf.flag_name + (negated ? " == 0" : std::string(" == ") + leaf.flag_name));
+		{
+			Match match;
+			match.kind	   = MatchKind::tcp_flag;
+			match.tcp_flag = flag_bit(leaf.flag_name);
+			match.negated  = negated;
+			clause.matches.push_back(std::move(match));
 			return true;
+		}
 		case LeafKind::addr:
 		{
-			const std::string set = address_set(leaf.addrs);
-			const char*		  op  = negated ? " != " : " ";
+			Match match;
+			match.kind	  = MatchKind::ip_addr;
+			match.negated = negated;
+			match.addrs	  = leaf.addrs;
 			if (leaf.side != Side::dst)
-				clause.matches.push_back(std::string("ip saddr") + op + set);
+			{
+				match.endpoint = Endpoint::source;
+				clause.matches.push_back(match);
+			}
 			if (leaf.side != Side::src)
-				clause.matches.push_back(std::string("ip daddr") + op + set);
+			{
+				match.endpoint = Endpoint::destination;
+				clause.matches.push_back(match);
+			}
 			return true;
 		}
 		case LeafKind::port:
 			if (!require_proto(clause, leaf.tcp_port ? proto_tcp : proto_udp))
 				return false;
-			clause.matches.push_back(std::string(leaf.tcp_port ? "tcp " : "udp ") + (leaf.side == Side::src ? "sport" : "dport") +
-									 (negated ? " != " : " ") + std::to_string(leaf.number));
+		{
+			if (leaf.number > 0xFFFF)
+				fail("port out of range", 0);
+			Match match;
+			match.kind		= MatchKind::port;
+			match.negated	= negated;
+			match.transport = leaf.tcp_port ? Transport::tcp : Transport::udp;
+			match.endpoint	= leaf.side == Side::src ? Endpoint::source : Endpoint::destination;
+			match.port		= static_cast<uint16_t>(leaf.number);
+			clause.matches.push_back(std::move(match));
 			return true;
+		}
 		case LeafKind::if_index:
 			clause.interfaces.emplace_back(leaf.number, negated);
 			return true;
@@ -207,25 +256,40 @@ Clauses to_dnf(const Node& node, bool negated)
 	return {};
 }
 
-std::string interface_match(Hook hook, bool use_output_interface, uint32_t index, bool negated)
+Match interface_match(bool use_output_interface, uint32_t index, bool negated)
 {
-	(void)hook;
-	return std::string("meta ") + (use_output_interface ? "oif" : "iif") + (negated ? " != " : " ") + std::to_string(index);
+	Match match;
+	match.kind	  = MatchKind::interface;
+	match.output  = use_output_interface;
+	match.index	  = index;
+	match.negated = negated;
+	return match;
+}
+
+std::string render_rule(const std::vector<Match>& matches)
+{
+	std::string text;
+	for (const Match& match : matches)
+	{
+		if (!text.empty())
+			text += ' ';
+		text += render_match(match);
+	}
+	return text;
 }
 
 void emit_rules(const Clause& clause, bool forward, bool include_forward, std::vector<CompiledRule>& rules)
 {
-	std::string base = "meta nfproto ipv4";
+	std::vector<Match> base(1);
 	if (clause.proto == proto_tcp)
-		base += " ip protocol tcp";
+		base.push_back(protocol_match(Transport::tcp, false));
 	else if (clause.proto == proto_udp)
-		base += " ip protocol udp";
+		base.push_back(protocol_match(Transport::udp, false));
 	if ((clause.proto_neg & proto_tcp) != 0)
-		base += " ip protocol != tcp";
+		base.push_back(protocol_match(Transport::tcp, true));
 	if ((clause.proto_neg & proto_udp) != 0)
-		base += " ip protocol != udp";
-	for (const std::string& match : clause.matches)
-		base += " " + match;
+		base.push_back(protocol_match(Transport::udp, true));
+	base.insert(base.end(), clause.matches.begin(), clause.matches.end());
 
 	std::vector<Hook> hooks;
 	if (forward)
@@ -246,36 +310,71 @@ void emit_rules(const Clause& clause, bool forward, bool include_forward, std::v
 
 	for (Hook hook : hooks)
 	{
-		std::vector<std::string> variants{base};
+		std::vector<std::vector<Match>> variants{base};
 		for (const auto& [index, negated] : clause.interfaces)
 		{
-			std::vector<std::string> next;
-			for (const std::string& variant : variants)
+			std::vector<std::vector<Match>> next;
+			const auto						extend = [&next](const std::vector<Match>& variant, std::initializer_list<Match> extra) {
+				next.push_back(variant);
+				next.back().insert(next.back().end(), extra.begin(), extra.end());
+			};
+			for (const std::vector<Match>& variant : variants)
 			{
 				if (hook == Hook::forward)
 				{
 					if (negated)
-						next.push_back(variant + " " + interface_match(hook, false, index, true) + " " + interface_match(hook, true, index, true));
+						extend(variant, {interface_match(false, index, true), interface_match(true, index, true)});
 					else
 					{
-						next.push_back(variant + " " + interface_match(hook, false, index, false));
-						next.push_back(variant + " " + interface_match(hook, true, index, false));
+						extend(variant, {interface_match(false, index, false)});
+						extend(variant, {interface_match(true, index, false)});
 					}
 				}
 				else
-					next.push_back(variant + " " + interface_match(hook, hook == Hook::output, index, negated));
+					extend(variant, {interface_match(hook == Hook::output, index, negated)});
 			}
 			variants = std::move(next);
 		}
-		for (std::string& variant : variants)
+		for (std::vector<Match>& variant : variants)
 		{
-			rules.push_back({hook, std::move(variant)});
+			std::string text = render_rule(variant);
+			rules.push_back({hook, std::move(text), std::move(variant)});
 			if (rules.size() > kMaxRules)
 				fail("filter is too complex (expands to more than " + std::to_string(kMaxRules) + " rules)", 0);
 		}
 	}
 }
 }  // namespace
+
+const char* tcp_flag_name(uint8_t flag)
+{
+	for (const FlagBit& entry : kFlagBits)
+		if (entry.bit == flag)
+			return entry.name;
+	return "";
+}
+
+std::string render_match(const Match& match)
+{
+	const char* op = match.negated ? " != " : " ";
+	switch (match.kind)
+	{
+		case MatchKind::nfproto_ipv4:
+			return "meta nfproto ipv4";
+		case MatchKind::ip_protocol:
+			return std::string("ip protocol") + op + (match.transport == Transport::tcp ? "tcp" : "udp");
+		case MatchKind::tcp_flag:
+			return std::string("tcp flags & ") + tcp_flag_name(match.tcp_flag) + (match.negated ? " == 0" : std::string(" == ") + tcp_flag_name(match.tcp_flag));
+		case MatchKind::ip_addr:
+			return std::string(match.endpoint == Endpoint::source ? "ip saddr" : "ip daddr") + op + address_set(match.addrs);
+		case MatchKind::port:
+			return std::string(match.transport == Transport::tcp ? "tcp " : "udp ") + (match.endpoint == Endpoint::source ? "sport" : "dport") + op +
+				   std::to_string(match.port);
+		case MatchKind::interface:
+			return std::string("meta ") + (match.output ? "oif" : "iif") + op + std::to_string(match.index);
+	}
+	return "";
+}
 
 const char* hook_name(Hook hook)
 {

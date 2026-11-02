@@ -259,7 +259,7 @@ const std::vector<group_info>& groups()
 		{group::profile, "Profile activation, setup, and teardown"},
 		{group::input, "Keyboard input"},
 		{group::nft, "nftables table and chain lifecycle (Linux)"},
-		{group::nft_script, "Every nft script run and its result (Linux)"},
+		{group::nft_script, "Every nf_tables batch and rule sent to the kernel, and its result (Linux)"},
 		{group::nfq, "NFQUEUE queue lifecycle, verdicts, and errors (Linux)"},
 		{group::nfq_packet, "Every packet queued, accepted, or dropped by NFQUEUE (Linux)", false},
 		{group::nfq_filter, "Capture filter compilation to nftables rules (Linux)"},

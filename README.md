@@ -110,6 +110,7 @@ xmake build packet_test && xmake run packet_test visible   # only cases whose na
 | `net_monitor_test` | net monitor on the same in-memory backend: sniff channel setup, passive RTT and retransmission measurement, pause/reset, ports, packet sizes, handshakes, TCP health, flows, chart and frame rendering |
 | `format_test` | text formatting of profile options |
 | `nfqueue_filter_test` | capture-filter to nftables compiler (not built on Windows) |
+| `nft_batch_test` | nf_tables netlink batches built by the Linux backend, decoded with libnftnl and compared with the expected tables, chains, sets and expressions (not built on Windows) |
 
 Suites are plain executables without external dependencies; the shared helpers are in
 [`tests/support/`](tests/support). The tests honour the compile-time feature flags above, so run them
@@ -126,12 +127,13 @@ xmake test -v
 
 ### Requirements
 
-- Linux with nftables (`nft` binary) and NFQUEUE support (`nft_queue`, `nfnetlink_queue`)
+- Linux with nf_tables and NFQUEUE support (`nf_tables`, `nft_queue`, `nfnetlink_queue`). The `nft` binary is not
+  needed: rules are programmed in-process over netlink. Linux 5.12+ is recommended (see [How it behaves](#how-it-behaves))
 - A C++20 compiler, [XMake](https://xmake.io/), and the development packages for
-  `libnetfilter_queue`, `libmnl`, `libnfnetlink` and `libcurl`
-  (Debian/Ubuntu: `libnetfilter-queue-dev libmnl-dev libnfnetlink-dev libcurl4-openssl-dev`;
-  Arch: `libnetfilter_queue libmnl libnfnetlink curl`)
-- At runtime: `CAP_NET_ADMIN` (root) and read access to `/dev/input/event*`
+  `libnetfilter_queue`, `libmnl`, `libnftnl`, `libnfnetlink` and `libcurl`
+  (Debian/Ubuntu: `libnetfilter-queue-dev libmnl-dev libnftnl-dev libnfnetlink-dev libcurl4-openssl-dev`;
+  Arch: `libnetfilter_queue libmnl libnftnl libnfnetlink curl`)
+- At runtime: `CAP_NET_ADMIN` (root, or a file capability, see below) and read access to `/dev/input/event*`
   (root or the `input` group), because hotkeys are read from evdev rather than the terminal
 
 ### Build
@@ -151,11 +153,19 @@ Run as root:
 sudo ./lagsw --config profiles/div1.sw.yml
 ```
 
-`setcap cap_net_admin` on the binary is not enough: rules are installed by spawning the `nft`
-binary, which does not inherit file capabilities. lagsw checks this right after parsing the
-options and exits with an explanatory error if `CAP_NET_ADMIN` is missing (`--help` and option
-errors still work unprivileged). It never re-executes itself under `sudo`. A warning is logged
-when `/dev/input/event*` is not readable, since hotkeys would not work.
+or grant the binary the one capability it needs and run it as a normal user:
+
+```sh
+sudo setcap cap_net_admin+ep ./lagsw
+./lagsw --config profiles/div1.sw.yml
+```
+
+Rules are programmed over netlink by lagsw itself (no helper process is spawned), so a file
+capability is enough. Hotkeys still need read access to `/dev/input/event*` (the `input` group).
+lagsw checks for `CAP_NET_ADMIN` right after parsing the options and exits with an explanatory
+error if it is missing (`--help` and option errors still work unprivileged). It never re-executes
+itself under `sudo`. A warning is logged when `/dev/input/event*` is not readable, since hotkeys
+would not work. Re-run `setcap` after every rebuild, because replacing the file removes it.
 
 `scripts/bootstrap.sh` re-executes itself with `sudo` and runs `lagsw` with preset arguments.
 
@@ -163,9 +173,17 @@ when `/dev/input/event*` is not readable, since hotkeys would not work.
 
 - All capture rules live in the `inet lagsw` nftables table and use `queue ... bypass`, so
   traffic keeps flowing if lagsw crashes or is killed. A stale table is replaced on the next start.
+- On Linux 5.12+ the table is created with the `owner` flag: it belongs to lagsw's netlink socket and the
+  kernel deletes it whenever the process ends, including after SIGKILL or a crash, so nothing is left behind.
+  Older kernels get an ordinary table (a warning is logged); it is removed on a normal exit, and after a
+  SIGKILL `sudo nft delete table inet lagsw` removes the leftover (pass-through) rules.
+- Only one lagsw can own the table at a time: a second instance fails to start with an error instead of
+  replacing the running one's rules.
 - The table is removed on `q`/backspace, SIGTERM and SIGHUP. Ctrl+C is ignored, as on Windows.
-  After a SIGKILL run `sudo nft delete table inet lagsw` if you want the leftover (pass-through) rules gone.
-- Only the `inet lagsw` table is ever touched. Queue numbers are `10 + channel id`.
+- Only the `inet lagsw` table is ever touched. Queue numbers are `10 + channel id`. Server address lists
+  with several members are installed as named sets (`ch<id>_a<n>`) instead of one rule per address.
+- `nft list table inet lagsw` shows the installed rules while lagsw runs. At `-l debug` the `nft.script` log group shows every
+  batch and rule that is sent to the kernel.
 - `forward: true` profiles capture routed traffic (gateway use). Loopback traffic crosses the
   output and input hooks, so use `outbound: true` to capture it once.
 - Filter terms outside the supported subset are rejected at startup with the position of the error.
@@ -305,10 +323,13 @@ It needs three prior windows averaging at least 10 packets, so quiet links do
 not trigger it, and windows in which a profile paused discovery reset its history.
 
 Linux builds use the nftables + NFQUEUE backend (`backends/nfqueue/`, see
-[`pocs/linux_nfqueue_backend.md`](pocs/linux_nfqueue_backend.md)). It needs the
-`nft` binary, `libnetfilter_queue`/`libmnl` at build time and `CAP_NET_ADMIN` at
-runtime (it cannot modify packets from a rootless user namespace). Capture rules
-live in a dedicated `inet lagsw` table that is removed on exit; they use `bypass`,
+[`pocs/linux_nfqueue_backend.md`](pocs/linux_nfqueue_backend.md) and
+[`pocs/linux_ebpf_netlink_backend.md`](pocs/linux_ebpf_netlink_backend.md)). It needs
+`libnetfilter_queue`/`libmnl`/`libnftnl` at build time and `CAP_NET_ADMIN` at
+runtime (it cannot modify packets from a rootless user namespace); rules are
+programmed over netlink, so no `nft` binary is required. Capture rules
+live in a dedicated `inet lagsw` table that is removed on exit (by the kernel on
+Linux 5.12+, even after SIGKILL); they use `bypass`,
 so traffic keeps flowing if the process dies. Profile filters are translated from
 the WinDivert subset (`tcp.*` flags, `ip.*Addr`, `tcp|udp.*Port`, `ifIdx`,
 `inbound`/`outbound`, `and`/`or`/`not`). Other platforms use the stub backend.

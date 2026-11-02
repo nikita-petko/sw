@@ -229,9 +229,29 @@ void test_syntax_errors_report_message_and_position()
 	}
 }
 
+void test_typed_matches_mirror_the_text()
+{
+	std::vector<nfq::CompiledRule> rules;
+	std::string					   error;
+	uint32_t					   position = 0;
+	CHECK(nfq::compile_filter("(tcp.Syn and not tcp.Ack and tcp.DstPort == 443 or udp.SrcPort != 53) and ip.Addr == 1.1.1.1 and ifIdx != 3", false, rules, error, position, true));
+	CHECK(!rules.empty());
+	for (const nfq::CompiledRule& rule : rules)
+	{
+		CHECK(!rule.matches.empty());
+		CHECK(rule.matches.front().kind == nfq::MatchKind::nfproto_ipv4);
+		std::string text;
+		for (const nfq::Match& match : rule.matches)
+			text += (text.empty() ? "" : " ") + nfq::render_match(match);
+		CHECK(text == rule.match);
+	}
+	CHECK(std::string(nfq::tcp_flag_name(0x02)) == "syn");
+	CHECK(std::string(nfq::tcp_flag_name(0x03)).empty());
+}
+
 void test_failure_discards_previous_rules()
 {
-	std::vector<nfq::CompiledRule> rules = {{nfq::Hook::input, "stale"}};
+	std::vector<nfq::CompiledRule> rules = {{nfq::Hook::input, "stale", {}}};
 	std::string					   error;
 	uint32_t					   position = 0;
 	CHECK(!nfq::compile_filter("nonsense", false, rules, error, position));
@@ -344,6 +364,7 @@ int main(int argc, char** argv)
 		{"forward_path", test_forward_path},
 		{"include_forward_adds_the_forward_hook", test_include_forward_adds_the_forward_hook},
 		{"syntax_errors_report_message_and_position", test_syntax_errors_report_message_and_position},
+		{"typed_matches_mirror_the_text", test_typed_matches_mirror_the_text},
 		{"failure_discards_previous_rules", test_failure_discards_previous_rules},
 		{"input_text_never_reaches_the_output", test_input_text_never_reaches_the_output},
 		{"oversized_expansions_are_rejected", test_oversized_expansions_are_rejected},

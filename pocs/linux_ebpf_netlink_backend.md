@@ -2,7 +2,7 @@
 
 ## 0. Implementation status
 
-- No production code has been built. Phase 1 shell spikes have been run on the current kernel; results and remaining cross-kernel checks are recorded in §13. No behavior is certified across the proposed support range yet.
+- **Phase 1 (spikes)** has been run on one kernel (Linux 7.2.11); **Phase 2 (Change A)** is implemented and tested in the shipped NFQUEUE backend. Results, deviations from this design and remaining cross-kernel checks are recorded in §13. Changes B and C are still proposals, and no behavior is certified across the proposed support range yet.
 - This **evolves** [`linux_nfqueue_backend.md`](linux_nfqueue_backend.md) and builds on [`linux_tc_netem_backend.md`](linux_tc_netem_backend.md), replacing netem's fixed parameters with per-packet logic. It keeps the shipped NFQUEUE backend as the stateful fallback and changes how it is installed and when it is used.
 - The three changes (§1) are independent. Change A is useful on its own and is the recommended first phase (§13).
 
@@ -63,7 +63,7 @@ Unlike the netem PoC, the delay is computed **per packet in BPF**, so `preserve_
 `nft_table.cc` keeps its public surface (`ensure_table`, `add_channel_rules`, `remove_channel_rules`, `table_present`, `remove_table`) but is implemented on a long-lived `NETLINK_NETFILTER` socket owned by the process:
 
 - Build messages with libmnl and libnftnl and send them as one batch (`NFNL_MSG_BATCH_BEGIN` ... `END`), which the kernel commits atomically, as `nft -f -` does today. Errors come back as netlink extended acks with the failing object, replacing "parse nft's stderr".
-- Create the table with `NFTA_TABLE_FLAGS = NFT_TABLE_F_OWNER`. The kernel removes it when the socket closes, including on `SIGKILL` and a crash. This replaces the `TableGuard` destructor and the README's manual cleanup step. **(verify: owner flag, introduced around Linux 5.12; the `persist` companion flag is much newer and must not be used.)**
+- Create the table with `NFTA_TABLE_FLAGS = NFT_TABLE_F_OWNER`. The kernel removes it when the socket closes, including on `SIGKILL` and a crash. This replaces the `TableGuard` destructor and the README's manual cleanup step. The owner flag was confirmed to work on Linux 7.2.11 (§13); it was introduced around Linux 5.12 and older kernels remain unchecked. The `persist` companion flag is much newer and must not be used. Kernels that reject the flag (`EOPNOTSUPP`) get an ordinary table plus a logged warning.
 - The socket must stay open for the life of the process, which is only possible with an in-process client. A spawned `nft` would make the table vanish as soon as it exited, so A and the owner flag are inseparable.
 - No `nft` binary at runtime, so `privileges.cc` no longer needs the ambient-capability check, and `setcap cap_net_admin` works.
 
@@ -81,7 +81,7 @@ table inet lagsw { flags owner;
 
 - A server-list change (profile switch, discovery result) is a set-element add/delete in one batch; no chain is rebuilt.
 - Because expressions are constructed as structs, no user-supplied string is ever concatenated into a command. This is the same requirement as §11 of the NFQUEUE PoC, enforced by construction.
-- `nfqueue_filter_test` keeps testing the compiler; it gains a second assertion layer that decodes the generated batch and compares it with the expected expressions. The existing text renderer stays as a debug dump (`--log-group nft.script`).
+- `nfqueue_filter_test` keeps testing the compiler; a second suite, `nft_batch_test`, decodes the generated batch with libnftnl and compares it with the expected expressions. The existing text renderer stays as a debug dump (`--log-group nft.script`).
 
 ### 6.3 Interaction with C
 
@@ -257,6 +257,30 @@ Reuse the privileged-container / network-namespace pattern of `scripts/test_nfqu
 
 ## 13. Phases
 
+### Phase 2 results (Change A, 2026-11-02)
+
+Implemented in `backends/nfqueue/`:
+
+- `nft_batch.{h,cc}` builds typed nf_tables messages (table, set, set elements, chain, rule, deletes) with libnftnl and serialises them into one `BATCH_BEGIN ... END` batch. `filter_compiler` now returns each rule as a list of typed `Match` conditions; the old text form is kept in `CompiledRule::match` for logs and tests, and no filter text reaches a command.
+- `nft_table.cc` keeps the same public functions over one long-lived `NETLINK_NETFILTER` socket (extended acks, mutex-serialised). The table is replaced with `add; delete; add(owner)` in one batch; `EOPNOTSUPP` on the owner flag falls back to an ordinary table with a warning. The `nft` binary and `memfd`/`posix_spawn` are gone; `table_present()` is a `GETTABLE` request.
+- Address lists with two or more members become named sets (`ch<id>_a<n>`, sorted and de-duplicated, shared by the channel's rules, elements sent in chunks of 256); single addresses stay plain comparisons. Channel removal deletes rules, chains and sets in one batch.
+- `privileges.cc` only checks an effective `CAP_NET_ADMIN`; the ambient-capability check is removed and the error names `setcap cap_net_admin+ep`.
+- Build: `libnftnl` added to the backend's link line; new test target `nft_batch_test`.
+
+Verified (Linux 7.2.11, privileged containers):
+
+- `nfqueue_filter_test` (20 cases) and `nft_batch_test` (10 cases) pass.
+- `scripts/test_nfqueue_localhost.sh`: 97 of 99 checks pass, the same two failures (`pcap files written`, `discovery debug: packets counted`) as the unmodified code.
+- `scripts/test_nfqueue_gateway.sh`: all previous checks keep their previous result (the one failing check, discovery counting on the gateway, fails identically on the unmodified code). New checks pass: SIGKILL removes the owner table, a stale non-owner table is replaced by an owner table, and a user with uid 65534 holding only a `cap_net_admin+ep` file capability, with `nft` removed from `PATH`, installs the forward chain, delays traffic and leaves nothing behind after SIGKILL. A copy without the capability is refused with an explanation.
+
+Deviations from §6.2 and open items:
+
+- Sets are per channel and hold plain `ipv4_addr` keys, not the `ipv4_addr . inet_service` concatenation or `flags interval` shown in the sketch, and `queue ... fanout` is not used (C, §8.4).
+- Nothing yet updates set elements in place on a profile switch; the batch builder only creates sets with their initial elements (`NEWSET` + `NEWSETELEM`) and has no element add/delete operation yet, and the engine still installs and removes whole channels.
+- The 1 MiB batch limit rejects very large rulesets with a clear error; the compiler's own 1024-rule limit normally triggers first.
+- Not yet run on kernels older than the test machine's, including 5.12 itself (owner flag, extended acks, deleting rules and their set in one transaction).
+- libnftnl 1.3.2's own element-list parser rejected a two-element message that the kernel accepts, so `nft_batch_test` walks the netlink attributes itself.
+
 ### Phase 1 spike results (2026-11-02)
 
 The probes ran in privileged Docker containers with isolated network namespaces, on Linux `7.2.11-arch1-1` x86_64 (`nftables 1.1.7`, `iproute2 7.2.0`). They did not alter the host network configuration. These results apply only to this kernel:
@@ -269,8 +293,8 @@ The probes ran in privileged Docker containers with isolated network namespaces,
 
 The current-kernel spikes support proceeding with the design, with the strict horizon requirement above. They do not establish the proposed minimum kernel versions or settle behavior on older kernels.
 
-1. **Spikes (shell + `bpftool`/`tc`, no C++):** current-kernel probes are recorded above. Before fixing the support matrix, repeat the owner-table, horizon/order, ingress/forwarding, and tcx/`cls_bpf` lifecycle tests on the minimum supported kernels; older-kernel behavior remains open.
-2. **Change A:** libmnl/libnftnl client behind the existing `nft_table.h` interface, set-based renderer, owner flag, privilege-check simplification, `setcap` docs. Delivers value even if B is abandoned.
+1. **Spikes (shell + `bpftool`/`tc`, no C++; done on one kernel):** current-kernel probes are recorded above. Before fixing the support matrix, repeat the owner-table, horizon/order, ingress/forwarding, and tcx/`cls_bpf` lifecycle tests on the minimum supported kernels; older-kernel behavior remains open.
+2. **Change A (done, see "Phase 2 results" above):** libmnl/libnftnl client behind the existing `nft_table.h` interface, set-based renderer, owner flag, privilege-check simplification, `setcap` docs. Delivers value even if B is abandoned.
 3. **Change C:** on-demand queue rules, pre-filter, batched verdicts, verdict mark.
 4. **Change B (egress, gateway first):** BPF program, maps, tcx attach, `fq`, mode routing and fallback, `stats` in the status line.
 5. **Change B (local inbound, sniff ring buffer, pcap).**

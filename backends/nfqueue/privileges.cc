@@ -2,7 +2,6 @@
 
 #include <dirent.h>
 #include <linux/capability.h>
-#include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
@@ -11,11 +10,6 @@
 #include "log.h"
 
 LOG_DEFAULT_GROUP(logging::group::nfq)
-
-#ifndef PR_CAP_AMBIENT
-#define PR_CAP_AMBIENT			1
-#define PR_CAP_AMBIENT_IS_SET	1
-#endif
 
 namespace nfq {
 namespace {
@@ -26,11 +20,6 @@ bool has_effective_capability(int capability)
 	if (::syscall(SYS_capget, &header, data) != 0)
 		return false;
 	return (data[capability / 32].effective >> (capability % 32)) & 1;
-}
-
-bool has_ambient_capability(int capability)
-{
-	return ::prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_IS_SET, capability, 0, 0) == 1;
 }
 
 /// Hotkeys come from evdev; reading /dev/input needs root or the `input` group.
@@ -64,14 +53,8 @@ bool check_privileges(std::string& error)
 	if (!has_effective_capability(CAP_NET_ADMIN))
 	{
 		LOG_DEBUG("privilege check: CAP_NET_ADMIN is not effective (euid = %u)", static_cast<unsigned>(::geteuid()));
-		error = "lagsw needs CAP_NET_ADMIN to capture packets. Run it as root (for example `sudo ./lagsw ...` or scripts/bootstrap.sh).";
-		return false;
-	}
-	// Rules are installed by spawning `nft`, which does not inherit file capabilities.
-	if (::geteuid() != 0 && !has_ambient_capability(CAP_NET_ADMIN))
-	{
-		LOG_DEBUG("privilege check: CAP_NET_ADMIN is not ambient for euid %u", static_cast<unsigned>(::geteuid()));
-		error = "lagsw has CAP_NET_ADMIN but the `nft` helper it spawns would not inherit it. Run as root or grant the capability as an ambient capability.";
+		error = "lagsw needs CAP_NET_ADMIN to capture packets. Run it as root (for example `sudo ./lagsw ...` or scripts/bootstrap.sh) "
+				"or grant the binary the capability (`sudo setcap cap_net_admin+ep ./lagsw`).";
 		return false;
 	}
 	LOG_DEBUG("privilege check passed (euid = %u)", static_cast<unsigned>(::geteuid()));
