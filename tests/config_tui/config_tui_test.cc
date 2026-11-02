@@ -261,10 +261,21 @@ void test_form_editing_keeps_comments_and_makes_a_backup()
 	App app(services_in(directory), path);
 	CHECK(app.tab() == App::Tab::form && !app.dirty());
 
-	// the first setting is default_view; Space cycles its fixed values
-	app.handle_key(' ');
+	// default_view has fixed values, so Enter opens a drop-down rather than a text dialog
+	app.handle_key(key::enter);
+	CHECK(app.prompting());
+	const std::string drop = app.render(100, 20);
+	CHECK(drop.find("Select value") != std::string::npos && drop.find("net_monitor") != std::string::npos && drop.find("Edit value") == std::string::npos);
+	app.handle_key(key::down);
+	app.handle_key(key::escape);
+	CHECK(!app.dirty() && app.lines()[1] == "default_view: log");
+	app.handle_key(key::enter);
+	app.handle_key(key::down);
+	app.handle_key(key::enter);
 	CHECK(app.dirty() && app.lines()[1] == "default_view: net_monitor");
-	app.handle_key(' ');
+	app.handle_key(key::enter);
+	app.handle_key(key::up);
+	app.handle_key(key::enter);
 	CHECK(app.lines()[1] == "default_view: log");
 
 	// the top menu lists sections as submenus; profiles > [0] > delay_ms opens the value dialog
@@ -351,7 +362,9 @@ void test_discarding_changes_is_confirmed()
 	const std::string path = directory.file("p.yml");
 	write(path, new_profile_template());
 	App app(services_in(directory), path);
-	app.handle_key(' ');
+	app.handle_key(key::enter);
+	app.handle_key(key::down);
+	app.handle_key(key::enter);
 	app.handle_key(key::escape);
 	CHECK(app.prompting() && app.screen() == App::Screen::editor);
 	app.handle_key('n');

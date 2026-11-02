@@ -154,7 +154,7 @@ void App::remember(const std::string& path)
 
 void App::begin_prompt(Prompt::Kind kind, const std::string& label, const std::string& text)
 {
-	prompt_ = {kind, label, text};
+	prompt_ = {kind, label, text, {}, 0};
 }
 
 std::string App::text() const
@@ -658,28 +658,47 @@ void App::key_form(int code)
 		}
 		const std::vector<std::string> options = value_choices(entry);
 		const bool					   toggle  = options.size() == 2 && options[0] == "true";
-		if (!toggle && code == key::enter)
+		if (toggle)
 		{
-			edit_path_ = entry.path;
+			if (code == key::enter)
+				toggle_checkbox(entry);
+			return;
+		}
+		edit_path_ = entry.path;
+		if (options.empty())
+		{
 			begin_prompt(Prompt::Kind::edit_value, entry.path, entry.value);
 			return;
 		}
-		if (!toggle || code == key::right)
-			return;
+		// fixed values are picked from a drop-down; a value outside the list is kept as an extra choice
+		std::string current = entry.value;
+		if (current.size() >= 2 && (current.front() == '"' || current.front() == '\'') && current.back() == current.front())
+			current = current.substr(1, current.size() - 2);
+		begin_prompt(Prompt::Kind::select_value, entry.path);
+		prompt_.options = options;
+		auto found		= std::find(prompt_.options.begin(), prompt_.options.end(), current);
+		if (found == prompt_.options.end())
+		{
+			prompt_.options.insert(prompt_.options.begin(), current);
+			found = prompt_.options.begin();
+		}
+		prompt_.choice = static_cast<size_t>(found - prompt_.options.begin());
+		return;
 	}
-	// Enter or Space toggles a checkbox; Space steps through the fixed values of other settings
-	if (!entry.leaf || (code != ' ' && code != key::enter))
-		return;
-	const std::vector<std::string> choices = value_choices(entry);
-	if (choices.empty())
-		return;
+	if (code == ' ' && entry.leaf)
+	{
+		const std::vector<std::string> options = value_choices(entry);
+		if (options.size() == 2 && options[0] == "true")
+			toggle_checkbox(entry);
+	}
+}
+
+void App::toggle_checkbox(const OutlineEntry& entry)
+{
 	std::string current = entry.value;
 	if (current.size() >= 2 && (current.front() == '"' || current.front() == '\'') && current.back() == current.front())
 		current = current.substr(1, current.size() - 2);
-	const auto   found = std::find(choices.begin(), choices.end(), current);
-	const size_t index = found == choices.end() ? 0 : static_cast<size_t>(found - choices.begin());
-	const size_t next  = found == choices.end() ? 0 : (index + 1) % choices.size();
-	lines_[entry.line] = replace_value(lines_[entry.line], entry, choices[next]);
+	lines_[entry.line] = replace_value(lines_[entry.line], entry, current == "true" ? "false" : "true");
 	touch();
 }
 
@@ -804,6 +823,33 @@ void App::key_prompt(int code)
 			else if (code == 'n' || code == 'N' || code == key::escape)
 				prompt_.kind = Prompt::Kind::none;
 			return;
+		case Prompt::Kind::select_value:
+		{
+			const size_t count = prompt_.options.size();
+			if (code == key::up)
+				prompt_.choice = prompt_.choice > 0 ? prompt_.choice - 1 : 0;
+			else if (code == key::down)
+				prompt_.choice = (std::min)(prompt_.choice + 1, count - 1);
+			else if (code == key::home)
+				prompt_.choice = 0;
+			else if (code == key::end)
+				prompt_.choice = count - 1;
+			else if (code == key::escape)
+				prompt_.kind = Prompt::Kind::none;
+			else if (code == key::enter)
+			{
+				const std::string value = prompt_.options[prompt_.choice];
+				prompt_.kind			= Prompt::Kind::none;
+				const std::vector<OutlineEntry> outline = build_outline(lines_);
+				const auto found = std::find_if(outline.begin(), outline.end(), [&](const OutlineEntry& e) { return e.leaf && e.path == edit_path_; });
+				if (found != outline.end() && lines_[found->line].substr(found->value_begin, found->value_end - found->value_begin) != value)
+				{
+					lines_[found->line] = replace_value(lines_[found->line], *found, value);
+					touch();
+				}
+			}
+			return;
+		}
 		case Prompt::Kind::confirm_remove:
 			prompt_.kind = Prompt::Kind::none;
 			if (code == 'y' || code == 'Y')
@@ -1016,7 +1062,7 @@ std::string App::render(int width, int height)
 			place(top + 1 + inner, border("\u2514", "\u2518", position));
 			rows[1] = styled(kDim, " Settings of the file; comments and untouched lines are kept as they are");
 			rows[total - 1] = styled(kDim, list ? " Up/Down select  Enter edit  a add  Del remove  Left/Esc back  Ctrl+S save  Tab raw"
-												: " Up/Down select  Enter open/edit  Space toggle  Left/Esc back  Ctrl+S save  Tab raw");
+												: " Up/Down select  Enter open/edit/pick  Space toggle  Left/Esc back  Ctrl+S save  Tab raw");
 		}
 		else
 		{
@@ -1055,7 +1101,7 @@ std::string App::render(int width, int height)
 	if (prompt_.kind != Prompt::Kind::none)
 	{
 		const bool text_prompt = prompt_.kind == Prompt::Kind::open_path || prompt_.kind == Prompt::Kind::new_path;
-		const bool dialog = prompt_.kind == Prompt::Kind::edit_value || prompt_.kind == Prompt::Kind::add_value;
+		const bool dialog = prompt_.kind == Prompt::Kind::edit_value || prompt_.kind == Prompt::Kind::add_value || prompt_.kind == Prompt::Kind::select_value;
 		if (!dialog)
 		rows[total - 2] = text_prompt ? std::string(kBold) + fit(" " + prompt_.label + ": " + prompt_.text, columns - 1) + kReverse + " " + kReset
 									  : styled(kBold, " " + prompt_.label);
@@ -1069,26 +1115,47 @@ std::string App::render(int width, int height)
 	for (size_t row = 0; row < rows.size(); ++row)
 		frame += "\033[" + std::to_string(row + 1) + ";1H" + rows[row] + kReset;
 	frame += overlay;
-	if ((prompt_.kind == Prompt::Kind::edit_value || prompt_.kind == Prompt::Kind::add_value) && columns >= 12 && total >= 9)
+	const bool dialog = prompt_.kind == Prompt::Kind::edit_value || prompt_.kind == Prompt::Kind::add_value || prompt_.kind == Prompt::Kind::select_value;
+	if (dialog && columns >= 12 && total >= 9)
 	{
-		// a centred dialog; the tail of a long value stays visible next to the cursor
+		const bool	 select = prompt_.kind == Prompt::Kind::select_value;
 		const size_t width	= (std::min)(columns - 4, size_t{64});
 		const size_t inner	= width - 4;
-		const size_t left	= (columns - width) / 2 + 1;
-		const size_t top	= (total - 7) / 2 + 1;
-		const std::string value = prompt_.text.size() >= inner ? prompt_.text.substr(prompt_.text.size() - (inner - 1)) : prompt_.text;
+		const std::string title = select ? "Select value" : prompt_.kind == Prompt::Kind::add_value ? "Add item" : "Edit value";
 		const auto line = [&](const std::string& content, const char* style) {
-			return std::string(style) + "| " + fit(content, inner) + " |" + kReset;
+			return std::string(kBold) + "\u2502 " + kReset + style + fit(content, inner) + kReset + kBold + " \u2502" + kReset;
 		};
-		const std::vector<std::string> box = {
-			std::string(kBold) + "+" + std::string(width - 2, '-') + "+" + kReset,
-			line(prompt_.kind == Prompt::Kind::add_value ? "Add item" : "Edit value", kBold),
-			line(prompt_.label, kDim),
-			std::string(kReverse) + "| " + fit(value, inner - 1) + " " + " |" + kReset,
-			line("", ""),
-			line("Enter confirm  Esc cancel", kDim),
-			std::string(kBold) + "+" + std::string(width - 2, '-') + "+" + kReset,
+		const auto edge = [&](const char* open, const char* close, const std::string& heading) {
+			const std::string shown = heading.empty() ? std::string() : " " + heading + " ";
+			std::string		  out	= std::string(kBold) + open + "\u2500" + shown;
+			for (size_t i = shown.size() + 1; i < width - 2; ++i)
+				out += "\u2500";
+			return out + close + kReset;
 		};
+		std::vector<std::string> box;
+		box.push_back(edge("\u250c", "\u2510", title));
+		box.push_back(line(prompt_.label, kDim));
+		if (select)
+		{
+			const size_t visible = (std::min)(prompt_.options.size(), (std::max)(total, size_t{9}) - 8);
+			size_t		 first	 = prompt_.choice >= visible ? prompt_.choice + 1 - visible : 0;
+			for (size_t i = 0; i < visible; ++i)
+			{
+				const size_t index = first + i;
+				box.push_back(line(std::string(index == prompt_.choice ? "> " : "  ") + prompt_.options[index], index == prompt_.choice ? kReverse : ""));
+			}
+			box.push_back(line("Up/Down choose  Enter select  Esc cancel", kDim));
+		}
+		else
+		{
+			// the tail of a long value stays visible next to the cursor
+			const std::string value = prompt_.text.size() >= inner ? prompt_.text.substr(prompt_.text.size() - (inner - 1)) : prompt_.text;
+			box.push_back(line(value + " ", kReverse));
+			box.push_back(line("Enter confirm  Esc cancel", kDim));
+		}
+		box.push_back(edge("\u2514", "\u2518", ""));
+		const size_t left = (columns - width) / 2 + 1;
+		const size_t top  = (total > box.size() ? (total - box.size()) / 2 : 0) + 1;
 		for (size_t i = 0; i < box.size(); ++i)
 			frame += "\033[" + std::to_string(top + i) + ";" + std::to_string(left) + "H" + box[i];
 	}

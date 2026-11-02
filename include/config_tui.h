@@ -167,6 +167,7 @@ private:
 			new_path,
 			edit_value,
 			add_value,
+			select_value,
 			confirm_remove,
 			confirm_discard,
 			confirm_save_invalid,
@@ -175,12 +176,16 @@ private:
 		Kind		kind = Kind::none;
 		std::string label;
 		std::string text;
+		/// Drop-down choices and the highlighted one (select_value).
+		std::vector<std::string> options;
+		size_t					 choice = 0;
 	};
 
 	void   key_loader(int key);
 	void   key_editor(int key);
 	void   key_form(int key);
 	void   menu_up();
+	void   toggle_checkbox(const OutlineEntry& entry);
 	bool   is_list_menu(const std::vector<OutlineEntry>& outline, const std::vector<size_t>& items) const;
 	void   start_add(const std::vector<OutlineEntry>& outline, const std::vector<size_t>& items);
 	void   add_item(const std::string& scalar);
