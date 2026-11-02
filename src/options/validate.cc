@@ -333,8 +333,31 @@ bool validate_default_view([[maybe_unused]] const char* path, [[maybe_unused]] c
 	return true;
 }
 
+bool validate_linux_bpf(const char* path, const LinuxBpfOptions& linux_bpf)
+{
+	for (const std::string& name : linux_bpf.interfaces)
+	{
+		// Interface names are at most 15 bytes and never contain '/', whitespace or control characters.
+		const bool valid = !name.empty() && name.size() <= 15 && name != "." && name != ".." &&
+						   std::all_of(name.begin(), name.end(), [](unsigned char c) { return c > ' ' && c < 0x7F && c != '/'; });
+		if (!valid)
+		{
+			LOG_ERROR("Feature linux_bpf interface '%s' is not a valid network interface name in %s", name.c_str(), path);
+			return false;
+		}
+	}
+	if (linux_bpf.tier == LinuxTier::bpf && linux_bpf.interfaces.empty())
+	{
+		LOG_ERROR("Feature linux_bpf tier bpf requires at least one interface in %s", path);
+		return false;
+	}
+	return true;
+}
+
 bool validate_features([[maybe_unused]] const char* path, [[maybe_unused]] const PacketEngineOptions& options)
 {
+	if (!validate_linux_bpf(path, options.features.linux_bpf))
+		return false;
 #ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 	if (!validate_server_discovery(path, options.features.server_discovery))
 		return false;

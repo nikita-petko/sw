@@ -39,6 +39,16 @@ std::unique_ptr<PacketChannel> open(const OpenOptions& options, std::string& err
 	return nullptr;
 }
 
+void configure_shaping(const ShapingConfig&)
+{
+}
+
+std::unique_ptr<ShapeStage> open_shape_stage(const ShapeSpec&, std::string& reason)
+{
+	reason = "kernel shaping is not available on this platform";
+	return nullptr;
+}
+
 bool validate_filter(const std::string& filter, bool forward, std::string& error, uint32_t& position)
 {
 	// No filter language to validate against; accept everything so configs can still be tested.

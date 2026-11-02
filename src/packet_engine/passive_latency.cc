@@ -69,6 +69,44 @@ void PacketEngine::start_passive_latency()
 	state_->passive_latency_model = std::make_unique<DelayModel>(model_options, std::random_device{}());
 
 	state_->passive_latency_stopping = false;
+	if (options_.features.linux_bpf.tier != LinuxTier::nfqueue)
+	{
+		backend::ShapeSpec spec;
+		spec.filter			 = passive.filter.value_or(options_.global_filter);
+		spec.include_forward = true;
+		spec.behaviour		 = backend::ShapeBehaviour::baseline;
+		spec.model			 = passive.mode == PassiveLatencyMode::fixed ? backend::ShapeModel::fixed
+							   : passive.mode == PassiveLatencyMode::uniform ? backend::ShapeModel::uniform
+																			 : backend::ShapeModel::normal;
+		spec.delay_ms		 = static_cast<uint32_t>((std::max)(passive.effective_delay_ms(true), 0));
+		spec.jitter_ms		 = static_cast<uint32_t>((std::max)(passive.effective_jitter_ms(true), 0));
+		spec.max_delay_ms	 = static_cast<uint32_t>((std::max)(passive.effective_max_delay_ms(true), 0));
+		spec.preserve_order	 = passive.preserve_order;
+		spec.ignore_inbound	 = true;
+		spec.label			 = "passive latency";
+		std::string reason;
+		// Packets arriving at this host are not seen by an egress program, so an inbound delay keeps the whole feature in user space.
+		std::unique_ptr<backend::ShapeStage> shape;
+		if (passive.effective_delay_ms(false) != 0)
+			reason = "the baseline also delays inbound packets";
+		else
+			shape = backend::open_shape_stage(spec, reason);
+		if (shape && !shape->activate(reason))
+			shape.reset();
+		if (shape)
+		{
+			state_->passive_latency_shape = std::move(shape);
+			LOG_INFO("Passive latency active in the kernel (eBPF + fq): %s", describe_passive_latency().c_str());
+			LOG_INFO("Passive latency filter: %s", spec.filter.c_str());
+			return;
+		}
+		if (options_.features.linux_bpf.tier == LinuxTier::bpf)
+		{
+			LOG_ERROR("Passive latency requires kernel shaping (linux_bpf tier bpf) but it is unavailable: %s", reason.c_str());
+			return;
+		}
+		LOG_DEBUG("Passive latency uses NFQUEUE, not kernel shaping: %s", reason.c_str());
+	}
 	backend::OpenOptions open_options;
 	open_options.filter   = passive.filter.value_or(options_.global_filter);
 	open_options.priority = 100;
@@ -88,6 +126,13 @@ void PacketEngine::start_passive_latency()
 
 void PacketEngine::stop_passive_latency()
 {
+	if (state_->passive_latency_shape)
+	{
+		state_->passive_latency_shape->deactivate();
+		state_->passive_latency_shape.reset();
+		state_->passive_latency_model.reset();
+		return;
+	}
 	if (!state_->passive_latency_handle)
 		return;
 	state_->passive_latency_stopping = true;
@@ -212,11 +257,22 @@ bool PacketEngine::is_probe_traffic([[maybe_unused]] const uint8_t* packet, [[ma
 
 void PacketEngine::toggle_passive_latency_pause()
 {
-	if (!state_->passive_latency_handle)
+	if (!state_->passive_latency_handle && !state_->passive_latency_shape)
 		return;
 	{
 		std::lock_guard<std::mutex> lock(state_->passive_latency_mutex);
 		state_->passive_latency_paused = !state_->passive_latency_paused;
+		if (state_->passive_latency_shape)
+		{
+			// Packets already stamped by the kernel still leave on their original schedule; only new packets are affected.
+			std::string error;
+			if (state_->passive_latency_paused)
+				state_->passive_latency_shape->deactivate();
+			else if (!state_->passive_latency_shape->activate(error))
+				LOG_ERROR("Passive latency: cannot resume: %s", error.c_str());
+			LOG_INFO("Passive latency %s", state_->passive_latency_paused ? "paused" : "resumed");
+			return;
+		}
 		if (!state_->passive_latency_paused)
 		{
 			state_->passive_latency_model->reset();

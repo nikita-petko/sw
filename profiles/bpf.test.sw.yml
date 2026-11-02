@@ -1,0 +1,44 @@
+# Profile for the eBPF egress tier (see scripts/test_bpf_gateway.sh): the test gateway forwards between veth devices `vc` (client side)
+# and `vs` (server side). Held keys activate profiles. The first three run in the kernel; "Hold" decides per packet in user space and
+# therefore uses NFQUEUE.
+global_filter: "tcp.DstPort == 8080 or tcp.SrcPort == 8080"
+
+features:
+  linux_bpf:
+    tier: auto
+    interfaces: [vc, vs]
+  netfilter_monitor:
+    enabled: true
+    interval: 200
+
+profiles:
+  - name: "Delay"
+    key: d
+    mode: hold
+    delay_mode: from_timestamp
+    delay_ms: 300
+    capture_options:
+      forward: true
+
+  - name: "Drop"
+    key: x
+    mode: hold
+    delay_mode: drop
+    capture_options:
+      forward: true
+
+  - name: "Batch"
+    key: b
+    mode: hold
+    delay_mode: send_all_after_delay
+    delay_ms: 600
+    filter: "udp.DstPort == 9001 or udp.SrcPort == 9001"
+    capture_options:
+      forward: true
+
+  - name: "Hold"
+    key: h
+    mode: toggle
+    delay_mode: hold_until_deactivation
+    capture_options:
+      forward: true

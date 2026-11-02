@@ -133,6 +133,12 @@ std::optional<DefaultView> parse_default_view(const std::string& value)
 	return lookup(value, table);
 }
 
+std::optional<LinuxTier> parse_linux_tier(const std::string& value)
+{
+	static const std::pair<const char*, LinuxTier> table[] = {{"auto", LinuxTier::automatic}, {"nfqueue", LinuxTier::nfqueue}, {"bpf", LinuxTier::bpf}};
+	return lookup(value, table);
+}
+
 #ifdef LAGSW_FEATURE_DESYNC_COUNTDOWN
 std::optional<DesyncCountdownDisplay> parse_countdown_display(const std::string& value)
 {

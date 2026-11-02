@@ -125,6 +125,84 @@ bool		validate_filter(const std::string& filter, bool forward, std::string& erro
 /// Recomputes IP/TCP/UDP checksums of a modified packet in place.
 void		calc_checksums(uint8_t* packet, uint32_t length);
 
+/// What a kernel-shaping stage does with the packets that match its filter.
+enum class ShapeBehaviour
+{
+	fixed_delay, ///< Hold each packet for `delay_ms`.
+	drop,		 ///< Drop every packet.
+	batch_delay, ///< The first packet opens a batch; every packet of the batch leaves `delay_ms` later.
+	baseline,	 ///< Hold each packet for a delay drawn from `model` (always-on baseline latency).
+};
+
+/// Distribution of a baseline delay.
+enum class ShapeModel
+{
+	fixed,
+	uniform, ///< delay +/- jitter, uniformly.
+	normal,	 ///< delay with the jitter as standard deviation.
+};
+
+/// A stage that delays or drops packets inside the kernel, without them reaching user space. Backends that cannot do this
+/// report why from open_shape_stage(); the engine then uses an ordinary capture channel with the same filter.
+struct ShapeSpec
+{
+	/// Filter expression in the backend's syntax, selecting the packets (same meaning as OpenOptions::filter).
+	std::string	   filter;
+	bool		   forward		   = false;
+	bool		   include_forward = false;
+	ShapeBehaviour behaviour	   = ShapeBehaviour::fixed_delay;
+	ShapeModel	   model		   = ShapeModel::fixed;
+	uint32_t	   delay_ms		   = 0;
+	uint32_t	   jitter_ms	   = 0;
+	/// Upper clamp of a sampled baseline delay.
+	uint32_t	   max_delay_ms	   = 0;
+	/// Never release a packet before an earlier one (baseline only).
+	bool		   preserve_order  = true;
+	/// Inbound packets are not delayed by this stage, so the filter may also match them without affecting them.
+	bool		   ignore_inbound  = false;
+	/// Name used in log messages.
+	std::string	   label;
+};
+
+/// Counters of a shaping stage since it was activated.
+struct ShapeStats
+{
+	uint64_t matched = 0; ///< Packets that matched the stage's filter.
+	uint64_t delayed = 0; ///< Packets given a later departure time.
+	uint64_t dropped = 0;
+	uint64_t clamped = 0; ///< Sampled delays that hit the allowed range.
+};
+
+/// An open kernel-shaping stage. Not active until activate() is called; destroying it deactivates it.
+class ShapeStage
+{
+public:
+	virtual ~ShapeStage() = default;
+	virtual bool		activate(std::string& error) = 0;
+	virtual void		deactivate()				 = 0;
+	virtual ShapeStats	stats() const				 = 0;
+};
+
+/// How kernel shaping is selected (Linux backend; other backends ignore it).
+enum class ShapingTier
+{
+	automatic, ///< Use kernel shaping where a stage supports it, and ordinary capture channels otherwise.
+	capture,   ///< Never use kernel shaping.
+	kernel,	   ///< Require kernel shaping; a stage that cannot use it fails.
+};
+
+struct ShapingConfig
+{
+	ShapingTier				 tier = ShapingTier::automatic;
+	/// Network interfaces whose egress is shaped. Without any, kernel shaping is unavailable.
+	std::vector<std::string> interfaces;
+};
+
+/// Applies the shaping configuration; call before the first open_shape_stage().
+void configure_shaping(const ShapingConfig& config);
+/// Opens a kernel-shaping stage, or returns nullptr with `reason` explaining why the stage must use a capture channel.
+std::unique_ptr<ShapeStage> open_shape_stage(const ShapeSpec& spec, std::string& reason);
+
 /// Everything needed to describe the traffic a profile captures.
 struct ProfileFilter
 {

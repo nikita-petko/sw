@@ -110,6 +110,7 @@ xmake build packet_test && xmake run packet_test visible   # only cases whose na
 | `net_monitor_test` | net monitor on the same in-memory backend: sniff channel setup, passive RTT and retransmission measurement, pause/reset, ports, packet sizes, handshakes, TCP health, flows, chart and frame rendering |
 | `format_test` | text formatting of profile options |
 | `nfqueue_filter_test` | capture-filter to nftables compiler (not built on Windows) |
+| `shaper_plan_test` | the egress-tier planner: which stages the eBPF program can serve and the exact data it receives, plus the normal-distribution table (not built on Windows) |
 | `verdict_tracker_test` | which waiting NFQUEUE packets one batch verdict may release, including id wraparound (not built on Windows) |
 | `nft_batch_test` | nf_tables netlink batches built by the Linux backend, decoded with libnftnl and compared with the expected tables, chains, sets and expressions (not built on Windows) |
 
@@ -134,6 +135,9 @@ xmake test -v
   `libnetfilter_queue`, `libmnl`, `libnftnl`, `libnfnetlink` and `libcurl`
   (Debian/Ubuntu: `libnetfilter-queue-dev libmnl-dev libnftnl-dev libnfnetlink-dev libcurl4-openssl-dev`;
   Arch: `libnetfilter_queue libmnl libnftnl libnfnetlink curl`)
+- For the optional [kernel shaping](#kernel-shaping-ebpf) tier: `libbpf` (Debian/Ubuntu `libbpf-dev`, Arch `libbpf`) and,
+  at build time only, `clang` with the bpf target. Without them the build continues without that tier and prints a warning;
+  `xmake f --linux_bpf=n` leaves it out deliberately
 - At runtime: `CAP_NET_ADMIN` (root, or a file capability, see below) and read access to `/dev/input/event*`
   (root or the `input` group), because hotkeys are read from evdev rather than the terminal
 
@@ -237,9 +241,51 @@ added: the rules, the DHCP server, an address `up` assigned, and it restores the
 The script does not create the access point itself (use hostapd, or your desktop's hotspot feature, which
 may fight over the interface and its address), and it does not persist across reboots.
 
+### Kernel shaping (eBPF)
+
+By default every delayed packet makes a round trip through user space (NFQUEUE) and is held in the kernel while it waits.
+For behaviours that only need a release time or a drop, lagsw can instead stamp the packet in an eBPF program on the egress
+of chosen interfaces and let the `fq` qdisc send it at that time, so the packet never reaches user space, there is no queue
+length to overflow, and the delay is exact. It is off until you name interfaces:
+
+```yaml
+features:
+  linux_bpf:
+    tier: auto            # auto (default) | nfqueue (never use it) | bpf (require it)
+    interfaces: [lan0, wan0]   # the gateway's LAN and WAN devices; both directions of forwarded traffic are covered
+```
+
+What runs in the kernel (everything else keeps using NFQUEUE, and `auto` logs the reason for each fallback at debug level):
+
+| Feature | Kernel shaping when |
+|---|---|
+| Profile `delay_mode: from_timestamp`, `drop`, `send_all_after_delay` | `delay_ms > 0` (a delay of 0 holds packets until deactivation), no `ack_restoration`, `retransmission_mode: none`, not `sniff`, no PCAP files, and the filter matches only forwarded (`forward: true`) or locally generated (`outbound: true`) traffic |
+| `passive_latency` (fixed, uniform and normal; `preserve_order`, `max_delay_ms`) | no inbound delay (`direction: outbound`, or `inbound_delay_ms: 0`) |
+
+Only egress traffic is shaped, so local inbound delays, sniffing, discovery, PCAP and every verb that decides per packet in
+user space (`hold_and_send`, `hold_until_deactivation`, `ratio`, `drop_and_send`, `drop_until_toggle`, `packet_group_send`,
+region enforcement) stay on NFQUEUE. A kernel profile and an NFQUEUE profile can be active together; their delays add up.
+`tier: bpf` refuses instead of falling back.
+
+Requirements and behaviour:
+
+- Linux 6.6+ (tcx), the `sch_fq` and `cls_bpf` modules, `CAP_NET_ADMIN`, `CAP_BPF` and `CAP_PERFMON`. With file
+  capabilities: `sudo setcap cap_net_admin,cap_bpf,cap_perfmon+ep ./lagsw` (hotkeys still need `/dev/input` access).
+- The first profile that needs it loads the program, replaces each interface's root qdisc with `fq` and attaches the
+  program. Only `noqueue`, `pfifo_fast`, `fq_codel`, `mq` and `fq` are replaced; any other root qdisc is left alone and the
+  profile falls back (or fails with `tier: bpf`). On an orderly exit (`q`, SIGTERM, SIGHUP) lagsw waits up to 2 seconds for
+  queued packets, detaches the program and puts the previous qdisc kind back with default parameters.
+- After SIGKILL or a crash the kernel detaches the program by itself; the `fq` qdisc stays, which is harmless without
+  timestamps (`sudo tc qdisc del dev <if> root` restores the default).
+- `fq` limits: 262144 packets in total and 65536 per flow, so *delay × packet rate* must fit; a delay may be up to
+  600000 ms and the total stamped delay is capped at 890 s (`fq`'s horizon is 900 s and caps instead of dropping).
+- Pausing the passive latency stops delaying new packets at once; packets already stamped still leave on their schedule.
+- With `netfilter_monitor` enabled the extra status line also shows the kernel counters (stages, packets matched, delayed and
+  dropped).
+
 ### Testing
 
-`scripts/test_nfqueue_localhost.sh` and `scripts/test_nfqueue_gateway.sh` run end to end in a
+`scripts/test_nfqueue_localhost.sh`, `scripts/test_nfqueue_gateway.sh` and `scripts/test_bpf_gateway.sh` run end to end in a
 throwaway privileged Docker container (see [Included profiles](#included-profiles)).
 
 ## Usage
@@ -782,7 +828,10 @@ against the Linux backend inside a throwaway privileged Docker container
 held keys (whitespace-separated names such as `d`, `ctrl`, `space`) from that
 file instead of `/dev/input`; this exists for the harness. `scripts/test_nfqueue_gateway.sh` additionally tests the forward hook
 between two network namespaces ([`profiles/gateway.test.sw.yml`](profiles/gateway.test.sw.yml)),
-SIGTERM cleanup and fail-open after SIGKILL.
+SIGTERM cleanup and fail-open after SIGKILL. `scripts/test_bpf_gateway.sh` does the same for the
+[kernel shaping](#kernel-shaping-ebpf) tier with [`profiles/bpf.test.sw.yml`](profiles/bpf.test.sw.yml): delay accuracy,
+drop, batches, the passive-latency models and ordering, fallback and forced-tier behaviour, qdisc restoration, SIGTERM,
+SIGKILL and unprivileged operation.
 
 ## Troubleshooting
 

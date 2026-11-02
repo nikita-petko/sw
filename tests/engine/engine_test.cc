@@ -341,6 +341,131 @@ void test_failed_sends_are_logged_and_not_retried()
 	CHECK(channel->sent_count() == 0);
 }
 
+// Kernel shaping: the engine asks the backend to run eligible profiles as shaping stages and falls back to a capture channel otherwise.
+PacketEngineOptions shaping_options(std::vector<ProfileOptions> profiles, LinuxTier tier = LinuxTier::automatic)
+{
+	PacketEngineOptions options			   = engine_options(std::move(profiles));
+	options.features.linux_bpf.tier		   = tier;
+	options.features.linux_bpf.interfaces = {"lan0", "wan0"};
+	return options;
+}
+
+void test_the_shaping_configuration_reaches_the_backend()
+{
+	fakes::reset();
+	PacketEngine engine(shaping_options({profile("A", PacketDelayMode::from_timestamp, 100)}, LinuxTier::bpf));
+	const backend::ShapingConfig config = fakes::shaping_config();
+	CHECK(config.tier == backend::ShapingTier::kernel);
+	CHECK(config.interfaces == (std::vector<std::string>{"lan0", "wan0"}));
+	fakes::reset();
+	PacketEngine quiet(shaping_options({profile("A")}, LinuxTier::nfqueue));
+	CHECK(fakes::shaping_config().tier == backend::ShapingTier::capture);
+}
+
+void test_profiles_fall_back_to_a_channel_when_shaping_is_unavailable()
+{
+	fakes::reset();
+	PacketEngine engine(shaping_options({profile("A", PacketDelayMode::from_timestamp, 100)}));
+	engine.setup(1);
+	CHECK(fakes::channels().size() == 1);
+	CHECK(fakes::shaping_refusals() == (std::vector<std::string>{"A"}));
+	CHECK(engine.is_running(1));
+}
+
+void test_an_eligible_profile_runs_as_a_shaping_stage()
+{
+	fakes::reset();
+	fakes::set_shaping_unavailable("");
+	ProfileOptions options = profile("A", PacketDelayMode::from_timestamp, 250);
+	options.capture_options.forward = true;
+	PacketEngine engine(shaping_options({options}));
+	engine.setup(1);
+	CHECK(fakes::channels().empty());
+	const auto stages = fakes::shape_stages();
+	CHECK(stages.size() == 1);
+	if (stages.size() == 1)
+	{
+		CHECK(stages[0]->active && stages[0]->activations == 1);
+		CHECK(stages[0]->spec.behaviour == backend::ShapeBehaviour::fixed_delay && stages[0]->spec.delay_ms == 250);
+		CHECK(stages[0]->spec.forward && stages[0]->spec.filter == "profile#0" && stages[0]->spec.label == "A");
+	}
+	CHECK(engine.is_running(1));
+	CHECK(engine.pending_packets() == 0);
+
+	engine.teardown(1);
+	CHECK(!engine.is_running(1));
+	if (stages.size() == 1)
+		CHECK(!stages[0]->active && stages[0]->deactivations == 1);
+	engine.setup(1);
+	CHECK(fakes::shape_stages().size() == 2 && fakes::channels().empty());
+}
+
+void test_drop_and_batch_modes_map_to_shaping_behaviours()
+{
+	fakes::reset();
+	fakes::set_shaping_unavailable("");
+	PacketEngine engine(shaping_options({profile("D", PacketDelayMode::drop), profile("B", PacketDelayMode::send_all_after_delay, 300)}));
+	engine.setup(1);
+	engine.setup(2);
+	const auto stages = fakes::shape_stages();
+	CHECK(stages.size() == 2);
+	if (stages.size() == 2)
+	{
+		CHECK(stages[0]->spec.behaviour == backend::ShapeBehaviour::drop);
+		CHECK(stages[1]->spec.behaviour == backend::ShapeBehaviour::batch_delay && stages[1]->spec.delay_ms == 300);
+	}
+	CHECK(fakes::channels().empty());
+}
+
+void test_profiles_that_need_packets_never_ask_for_a_shaping_stage()
+{
+	fakes::reset();
+	fakes::set_shaping_unavailable("");
+	std::vector<ProfileOptions> profiles;
+	profiles.push_back(profile("hold", PacketDelayMode::hold_until_deactivation));
+	profiles.push_back(profile("ratio", PacketDelayMode::ratio, 100));
+	profiles.push_back(profile("zero", PacketDelayMode::from_timestamp, 0));
+	ProfileOptions acks = profile("acks", PacketDelayMode::from_timestamp, 100);
+	acks.ack_restoration = true;
+	profiles.push_back(acks);
+	ProfileOptions retransmissions = profile("retransmissions", PacketDelayMode::from_timestamp, 100);
+	retransmissions.retransmission_mode = RetransmissionMode::only_seq;
+	profiles.push_back(retransmissions);
+	ProfileOptions sniffer = profile("sniffer", PacketDelayMode::from_timestamp, 100);
+	sniffer.capture_options.sniff = true;
+	profiles.push_back(sniffer);
+	PacketEngine engine(shaping_options(profiles));
+	for (int index = 1; index <= 6; ++index)
+		engine.setup(index);
+	// A delay of 0 holds packets until deactivation, so it is a user-space behaviour too.
+	CHECK(fakes::shape_stages().empty() && fakes::shaping_refusals().empty());
+	CHECK(fakes::channels().size() == 6);
+}
+
+void test_the_nfqueue_tier_never_asks_for_a_shaping_stage()
+{
+	fakes::reset();
+	fakes::set_shaping_unavailable("");
+	PacketEngine engine(shaping_options({profile("A", PacketDelayMode::from_timestamp, 100)}, LinuxTier::nfqueue));
+	engine.setup(1);
+	CHECK(fakes::shape_stages().empty() && fakes::channels().size() == 1);
+}
+
+void test_the_bpf_tier_refuses_profiles_it_cannot_serve()
+{
+	fakes::reset();
+	fakes::set_shaping_unavailable("no fq here");
+	PacketEngine engine(shaping_options({profile("A", PacketDelayMode::from_timestamp, 100), profile("B", PacketDelayMode::hold_until_deactivation)}, LinuxTier::bpf));
+	const std::string log = logged([&] {
+		engine.setup(1);
+		engine.setup(2);
+	}, logging::level::error);
+	CHECK(!engine.is_running(1) && !engine.is_running(2));
+	CHECK(fakes::channels().empty());
+	CHECK(log.find("kernel shaping is required") != std::string::npos && log.find("no fq here") != std::string::npos);
+	CHECK(log.find("decides per packet in user space") != std::string::npos);
+}
+
 void test_toggle_releases_held_packets()
 {
 	fakes::reset();
@@ -803,6 +928,13 @@ int main(int argc, char** argv)
 		{"non_sniffing_profiles_open_a_plain_channel", test_non_sniffing_profiles_open_a_plain_channel},
 		{"dropped_packets_are_reported_to_the_backend", test_dropped_packets_are_reported_to_the_backend},
 		{"failed_sends_are_logged_and_not_retried", test_failed_sends_are_logged_and_not_retried},
+		{"the_shaping_configuration_reaches_the_backend", test_the_shaping_configuration_reaches_the_backend},
+		{"profiles_fall_back_to_a_channel_when_shaping_is_unavailable", test_profiles_fall_back_to_a_channel_when_shaping_is_unavailable},
+		{"an_eligible_profile_runs_as_a_shaping_stage", test_an_eligible_profile_runs_as_a_shaping_stage},
+		{"drop_and_batch_modes_map_to_shaping_behaviours", test_drop_and_batch_modes_map_to_shaping_behaviours},
+		{"profiles_that_need_packets_never_ask_for_a_shaping_stage", test_profiles_that_need_packets_never_ask_for_a_shaping_stage},
+		{"the_nfqueue_tier_never_asks_for_a_shaping_stage", test_the_nfqueue_tier_never_asks_for_a_shaping_stage},
+		{"the_bpf_tier_refuses_profiles_it_cannot_serve", test_the_bpf_tier_refuses_profiles_it_cannot_serve},
 		{"toggle_releases_held_packets", test_toggle_releases_held_packets},
 		{"flush_on_demand_releases_an_amount", test_flush_on_demand_releases_an_amount},
 		{"packet_mode_status_is_reported_while_active", test_packet_mode_status_is_reported_while_active},

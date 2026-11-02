@@ -361,9 +361,27 @@ struct NetMonitorOptions
 };
 #endif
 
+/// Which Linux data plane a profile or the passive latency uses.
+enum class LinuxTier
+{
+	automatic, ///< Kernel shaping (eBPF + fq) where it supports the profile, NFQUEUE otherwise.
+	nfqueue,   ///< Always NFQUEUE.
+	bpf,	   ///< Kernel shaping only; a profile it cannot serve fails to activate.
+};
+
+/// Linux kernel-shaping settings (the `linux_bpf` feature). Ignored by other backends.
+struct LinuxBpfOptions
+{
+	LinuxTier				 tier = LinuxTier::automatic;
+	/// Interfaces whose egress is shaped. Without any, every profile uses NFQUEUE.
+	std::vector<std::string> interfaces;
+};
+
 /// Optional packet-engine features and their configuration. Only the features compiled into the build are present.
 struct FeaturesOptions
 {
+	/// Linux kernel-shaping settings (always present; only the Linux backend uses them).
+	LinuxBpfOptions linux_bpf;
 #ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 	/// Server-discovery feature settings.
 	ServerDiscoveryOptions server_discovery;

@@ -438,6 +438,27 @@ void test_disabled_features_are_ignored()
 	}
 }
 
+void test_linux_bpf_settings()
+{
+	const LoadResult defaults = load_text(kProfile);
+	CHECK(defaults.ok && defaults.options.features.linux_bpf.tier == LinuxTier::automatic && defaults.options.features.linux_bpf.interfaces.empty());
+
+	const LoadResult listed = load_text("features:\n  linux_bpf:\n    tier: bpf\n    interfaces:\n      - eth0\n      - \"wlan0\"\n" + kProfile);
+	CHECK(listed.ok);
+	CHECK(listed.options.features.linux_bpf.tier == LinuxTier::bpf);
+	CHECK(listed.options.features.linux_bpf.interfaces == (std::vector<std::string>{"eth0", "wlan0"}));
+
+	const LoadResult inline_list = load_text("features:\n  linux_bpf:\n    tier: nfqueue\n    interfaces: [lan0, wan0]\n" + kProfile);
+	CHECK(inline_list.ok && inline_list.options.features.linux_bpf.tier == LinuxTier::nfqueue);
+	CHECK(inline_list.options.features.linux_bpf.interfaces == (std::vector<std::string>{"lan0", "wan0"}));
+
+	CHECK(!load_text("features:\n  linux_bpf:\n    tier: sometimes\n" + kProfile).ok);
+	CHECK(!load_text("features:\n  linux_bpf:\n    tier: bpf\n" + kProfile).ok);	// the bpf tier needs somewhere to attach
+	CHECK(!load_text("features:\n  linux_bpf:\n    interfaces: [\"a/b\"]\n" + kProfile).ok);
+	CHECK(!load_text("features:\n  linux_bpf:\n    interfaces: [averyveryverylongname]\n" + kProfile).ok);
+	CHECK(!load_text("features:\n  linux_bpf:\n    unknown: 1\n" + kProfile).ok);
+}
+
 void test_error_reports_line()
 {
 	const LoadResult result = load_text("profiles:\n  - name: A\n    key: x\n    delay_ms: soon\n");
@@ -467,6 +488,7 @@ int main(int argc, char** argv)
 		{"every_setting", test_every_setting},
 		{"rejected_files", test_rejected_files},
 		{"disabled_features_are_ignored", test_disabled_features_are_ignored},
+		{"linux_bpf_settings", test_linux_bpf_settings},
 		{"error_reports_line", test_error_reports_line},
 	};
 	return test::run_tests("options", cases, argc, argv);

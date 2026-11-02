@@ -2,7 +2,7 @@
 
 ## 0. Implementation status
 
-- **Phase 1 (spikes)** has been run on one kernel (Linux 7.2.11); **Phase 2 (Change A)** and most of **Phase 3 (Change C)** are implemented and tested in the shipped NFQUEUE backend. Results, deviations from this design and remaining cross-kernel checks are recorded in §13. Change B is still a proposal, and no behavior is certified across the proposed support range yet.
+- **Phase 1 (spikes)** has been run on one kernel (Linux 7.2.11); **Phase 2 (Change A)** and most of **Phase 3 (Change C)** are implemented and tested in the shipped NFQUEUE backend, and **Phase 4 (Change B, egress)** is implemented for the gateway/egress case (local inbound, sniff and pcap are Phase 5). Results, deviations from this design and remaining cross-kernel checks are recorded in §13. The ring buffer and local-inbound parts of Change B are still proposals, and no behavior is certified across the proposed support range yet.
 - This **evolves** [`linux_nfqueue_backend.md`](linux_nfqueue_backend.md) and builds on [`linux_tc_netem_backend.md`](linux_tc_netem_backend.md), replacing netem's fixed parameters with per-packet logic. It keeps the shipped NFQUEUE backend as the stateful fallback and changes how it is installed and when it is used.
 - The three changes (§1) are independent. Change A is useful on its own and is the recommended first phase (§13).
 
@@ -187,7 +187,7 @@ Each profile and the passive-latency feature are classified at start-up. A profi
 | `capture_options.forward` | both | forward = egress program on the outgoing interface (§7.4) |
 | Desync countdown | unchanged | depends only on active duration |
 
-A profile asking for a BPF-tier feature on a system that cannot load the program (kernel, capability, missing `fq`) falls back to NFQUEUE with a logged reason, never to an approximation. A new option, `linux_tier: auto|nfqueue|bpf` (default `auto`), allows forcing either for comparison and bug reports.
+A profile asking for a BPF-tier feature on a system that cannot load the program (kernel, capability, missing `fq`) falls back to NFQUEUE with a logged reason, never to an approximation. A new option, `linux_tier: auto|nfqueue|bpf` (default `auto`; shipped as `features: linux_bpf: tier:`, see Phase 4 results), allows forcing either for comparison and bug reports.
 
 ## 10. Lifecycle, failure and privileges
 
@@ -257,6 +257,35 @@ Reuse the privileged-container / network-namespace pattern of `scripts/test_nfqu
 
 ## 13. Phases
 
+### Phase 4 results (Change B, egress, 2026-11-02)
+
+Implemented (all under `backends/nfqueue/shaper/` unless noted):
+
+- **Data plane.** `lagsw.bpf.c` is one `tcx/egress` program. It parses IPv4 TCP/UDP, evaluates up to 16 rules of 8 conditions per stage (protocol, TCP flag, address or address set, port, input/output interface, each negatable) with `bpf_loop`, and for each matching stage adds a delay or drops. Stage delays add up, which is exactly what stacked channels did; a packet that already has a future departure time (TCP pacing) is delayed on top of it. The result is written with `bpf_skb_set_tstamp(..., BPF_SKB_TSTAMP_DELIVERY_MONO)` (Phase 1 §7.4 checks). Modes: fixed delay, drop, batch (the first packet fixes a deadline in a map, packets before it share it) and the baseline models fixed, uniform (`bpf_get_prandom_u32`) and normal (a 1024-entry table of standard scores filled from `shaper_plan.cc`, no floating point in BPF), with `max_delay_ms` clamp and `preserve_order` (compare-and-swap on a per-stage last-release time). Per-CPU counters feed the status line.
+- **Planner.** `shaper_plan.*` turns the typed `Match` lists of the existing filter compiler into the stage data and decides eligibility without touching the kernel, with a reason for every refusal (an input-hook rule, more than 16 rules or 8 conditions, a delay of 0, a delay above 600 s). It is unit tested (`shaper_plan_test`). "Never approximate" is therefore enforced in one place.
+- **Control plane.** `qdisc.cc` (rtnetlink): read the root qdisc, replace it with `fq` (limit 262144, flow limit 65536, horizon 900 s, `horizon_drop 0` so beyond-horizon times are capped, not dropped), restore, read the queue length. `shaper_bpf.cc` (libbpf): load the object embedded at build time, fill the maps, attach with tcx to the configured interfaces, hand out stage slots, switch a stage on and off by rewriting its map entry, read counters. Only `noqueue`, `pfifo_fast`, `fq_codel`, `mq` and `fq` roots are replaced. An orderly exit detaches, waits up to 2 s for the `fq` backlog, then restores the previous kind with default parameters.
+- **Engine and API.** `packet_backend.h` gains `ShapeSpec`/`ShapeStage`/`open_shape_stage()`/`configure_shaping()` (stubs for WinDivert and the stub backend). `PacketEngine::setup()` asks for a shaping stage first when the profile is `from_timestamp`, `drop` or `send_all_after_delay` with a positive delay and no `ack_restoration`, retransmission filtering, sniffing or PCAP; the session then has no channel and no threads. Passive latency does the same when it has no inbound delay (input-hook rules are ignored because they could not delay anything). Everything else, and every refusal under `tier: auto`, uses NFQUEUE as before with the reason logged. `tier: bpf` refuses instead.
+- **Configuration and build.** `features: linux_bpf: {tier: auto|nfqueue|bpf, interfaces: [...]}` (parser, validation, schema). `xmake f --linux_bpf=n` omits the tier; by default it is built when clang has the bpf target and libbpf's headers exist, otherwise the build warns and continues without it. This differs from the proposal in two names: the option is boolean `linux_bpf` because xmake reserves the value `auto`, and the runtime key is `linux_bpf.tier` rather than a top-level `linux_tier`.
+- **Status.** With `netfilter_monitor` enabled the extra line appends `bpf: N stage(s) on M iface(s), matched .. delayed .. dropped ..`.
+
+Verified (Linux 7.2.11, privileged container with a veth gateway, `scripts/test_bpf_gateway.sh`; every check passes):
+
+- Delay: a 300 ms forwarded profile gives 1.21 s for a four-packet exchange (NFQUEUE gives the same); no NFQUEUE queue is bound and no nftables rules exist. Drop, release and reactivation behave; counters report matched/delayed/dropped. Batch: three datagrams sent 100 ms apart leave together (spread 0.000 s, first reply at 1.200 s).
+- Passive latency, RTT through two shaped directions: fixed 100 ms gives 200.2 ms (sd 0.1); uniform 100±40 ms without `preserve_order` gives mean 199–202 ms and sd 31–32.5 ms (expected 200 and 32.7); normal 100/20 gives sd 28.1–28.9 ms (expected 28.3); `max_delay_ms` clamps every sample; with `preserve_order` there are no inversions at the server (the mean rises to about 250 ms, as the running maximum implies) and without it there are about 130 of 300. These are the `preserve_order` and `max_delay_ms` gaps the netem PoC listed.
+- Lifecycle: nothing is installed until a profile needs the kernel; activation installs `fq` and the tcx links on both interfaces; SIGTERM restores the previous qdisc and detaches; SIGKILL detaches the program (`bpftool net` shows no tcx) and leaves `fq` in place with traffic unaffected; a `tbf` root is refused and left untouched.
+- Routing: a `hold_until_deactivation` profile falls back to NFQUEUE with the reason logged, and an NFQUEUE hold stacks with a kernel delay (2.18 s: 1 s hold plus 1.2 s of delay); `tier: bpf` refuses that profile, `tier: nfqueue` never touches the qdisc, no interfaces means NFQUEUE; an inbound baseline falls back.
+- Privileges: as uid 65534 with `cap_net_admin,cap_bpf,cap_perfmon` the program loads and delays; with `cap_net_admin` alone it is refused with a message naming the capabilities; `cap_net_admin,cap_bpf` was also refused on this kernel (`cap_perfmon` is needed, the script prints it as information).
+- Unit and regression: `shaper_plan_test` (8), engine and passive-latency routing tests against fakes, option parsing; the NFQUEUE localhost and gateway scripts keep their previous results.
+
+Limits and open items:
+
+- Egress only. Local inbound (ifb), sniff/discovery copies (ring buffer) and PCAP are Phase 5; any profile or baseline that needs them stays on NFQUEUE.
+- Deviation from §7.2: stages are evaluated for *every* stage in a loop, so a packet matching several stages gets the sum; `preserve_order` orders per stage, not globally.
+- The tcx attach needs Linux 6.6+; there is no `cls_bpf` path or watchdog (open question 3 answered: "B requires tcx").
+- Not measured: CPU, added-latency error under load, maximum *delay × pps* before `fq` drops (§12 performance), NAT (§7.5; the program sees the address on the egress side), GSO/GRO super-packets, VLAN and non-Ethernet links beyond `ARPHRD_NONE`/`ARPHRD_RAWIP`, kernels other than 7.2.11.
+- A flush of a kernel stage is not possible: pausing or deactivating stops new packets only, packets already stamped leave on schedule (the NFQUEUE path flushed them at once).
+- The status line counts come from the maps; the per-profile "caught" and "sent" figures of the engine report stay at zero for kernel profiles.
+
 ### Phase 3 results (Change C, 2026-11-02)
 
 Implemented in `backends/nfqueue/` and the engine:
@@ -315,7 +344,7 @@ The current-kernel spikes support proceeding with the design, with the strict ho
 1. **Spikes (shell + `bpftool`/`tc`, no C++; done on one kernel):** current-kernel probes are recorded above. Before fixing the support matrix, repeat the owner-table, horizon/order, ingress/forwarding, and tcx/`cls_bpf` lifecycle tests on the minimum supported kernels; older-kernel behavior remains open.
 2. **Change A (done, see "Phase 2 results" above):** libmnl/libnftnl client behind the existing `nft_table.h` interface, set-based renderer, owner flag, privilege-check simplification, `setcap` docs. Delivers value even if B is abandoned.
 3. **Change C (partly done, see "Phase 3 results" above):** on-demand queue rules, pre-filter, batched verdicts, verdict mark.
-4. **Change B (egress, gateway first):** BPF program, maps, tcx attach, `fq`, mode routing and fallback, `stats` in the status line.
+4. **Change B (egress, gateway first; done, see "Phase 4 results" above):** BPF program, maps, tcx attach, `fq`, mode routing and fallback, `stats` in the status line.
 5. **Change B (local inbound, sniff ring buffer, pcap).**
 6. **Packaging/docs:** xmake option, README Linux section, capability and kernel-version table.
 
@@ -323,7 +352,7 @@ The current-kernel spikes support proceeding with the design, with the strict ho
 
 - `backends/nfqueue/` gains `netlink/` (libmnl, libnftnl) and `bpf/` (`lagsw.bpf.c`, built with clang `-target bpf -O2 -g` and embedded as a skeleton via libbpf/`bpftool gen skeleton`). Linux-only; Windows sources are untouched.
 - The BPF object is built at **package time** and embedded, so end users need neither clang nor kernel headers. CO-RE (BTF) is used so one object runs across kernels; kernels without BTF use the NFQUEUE tier.
-- xmake: `--linux_tier=nfqueue|auto` (default `auto`; `nfqueue` omits all BPF sources and libbpf, giving today's footprint plus Change A).
+- xmake: `--linux_bpf=n` (shipped name; default `y`) omits all BPF sources and libbpf, giving today's footprint plus Change A.
 - Runtime: kernel modules `nf_tables`, `nft_queue`, `nfnetlink_queue`, plus for B `sch_fq`, `cls_bpf`/tcx, `ifb`, `act_mirred`, and `CONFIG_BPF_SYSCALL`, `CONFIG_DEBUG_INFO_BTF`.
 - Minimum versions (proposal, to be fixed by the spikes): A: kernel ≥ 5.12; B: ≥ 5.18, with the cleanest lifecycle at ≥ 6.6. Older kernels are served by the shipped backend unchanged.
 
@@ -340,7 +369,7 @@ The current-kernel spikes support proceeding with the design, with the strict ho
 
 1. Is the gateway the primary use case? If so, local-host inbound (ifb) can be dropped from B, removing the riskiest spike.
 2. What is the minimum kernel? Requiring ≥ 6.6 for B gives clean `SIGKILL` semantics and one attach method; ≥ 5.18 widens support but needs a watchdog and a netlink attach path.
-3. Is a keep-alive/watchdog acceptable on kernels without tcx, or is "B requires tcx" the rule?
+3. ~~Is a keep-alive/watchdog acceptable on kernels without tcx?~~ **Decided for Phase 4:** the eBPF tier requires tcx (Linux 6.6+); older kernels use NFQUEUE.
 4. ~~Does the engine keep channels open for idle profiles today?~~ **Answered:** no. Profile channels exist only while the profile is active; the always-on channels are the discovery, net-monitor, passive-latency and region-enforcement ones. §8.1 only formalises current behaviour.
 5. Do `ratio` (count) and `drop_and_send` map to timestamps exactly enough to stay on the BPF tier, or are they NFQUEUE-only? Decide after the §13 spike.
 6. Is fq's horizon cap acceptable, or do delays above it (up to 600 s) always fall back to NFQUEUE?

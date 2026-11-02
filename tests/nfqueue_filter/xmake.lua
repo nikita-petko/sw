@@ -20,6 +20,15 @@ if not is_plat("windows") then
         add_tests("default")
     target_end()
 
+    target("shaper_plan_test")
+        set_kind("binary")
+        set_default(false)
+        add_files("shaper_plan_test.cc")
+        add_files("../../backends/nfqueue/filter_lexer.cc", "../../backends/nfqueue/filter_parser.cc", "../../backends/nfqueue/filter_compiler.cc", "../../backends/nfqueue/shaper_plan.cc")
+        add_includedirs("../../backends/nfqueue", "..")
+        add_tests("default")
+    target_end()
+
     target("verdict_tracker_test")
         set_kind("binary")
         set_default(false)

@@ -83,6 +83,24 @@ void									   fail_next_open(const std::string& message);
 std::vector<backend::ProfileFilter> profile_specs();
 backend::ProfileFilter			   last_profile_spec();
 
+/// A kernel-shaping stage the engine opened through backend::open_shape_stage(). The engine owns the stage object; this is the
+/// test-visible record of it.
+struct ShapeRecord
+{
+	backend::ShapeSpec spec;
+	bool			   active		 = false;
+	int				   activations	 = 0;
+	int				   deactivations = 0;
+	bool			   destroyed	 = false;
+};
+
+/// Makes open_shape_stage() succeed (empty reason, the default is "unavailable") or fail with `reason`.
+void set_shaping_unavailable(const std::string& reason);
+/// Stages in the order they were opened, and the configuration passed to configure_shaping() last.
+std::vector<std::shared_ptr<ShapeRecord>> shape_stages();
+backend::ShapingConfig					  shaping_config();
+std::vector<std::string>				  shaping_refusals();
+
 /// Counts of begin_timer_resolution() / end_timer_resolution() calls.
 int timer_resolution_begins();
 int timer_resolution_ends();

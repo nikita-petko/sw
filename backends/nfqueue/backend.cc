@@ -23,6 +23,7 @@
 #include "nft_table.h"
 #include "packet_backend.h"
 #include "privileges.h"
+#include "shaper/shaper.h"
 #include "verdict_tracker.h"
 
 LOG_DEFAULT_GROUP(logging::group::nfq)
@@ -505,6 +506,16 @@ std::unique_ptr<PacketChannel> open(const OpenOptions& options, std::string& err
 	return channel;
 }
 
+void configure_shaping(const ShapingConfig& config)
+{
+	nfq::shaper::configure(config);
+}
+
+std::unique_ptr<ShapeStage> open_shape_stage(const ShapeSpec& spec, std::string& reason)
+{
+	return nfq::shaper::open_stage(spec, reason);
+}
+
 bool validate_filter(const std::string& filter, bool forward, std::string& error, uint32_t& position)
 {
 	std::vector<nfq::CompiledRule> rules;
@@ -635,7 +646,13 @@ std::string forwarded_address(uint32_t inbound_if_index, uint32_t outbound_if_in
 #ifdef LAGSW_FEATURE_NETFILTER_MONITOR
 std::string monitor_status(uint64_t interval_ms, uint32_t backlog_threshold)
 {
-	return nfq::monitor_status(kFirstQueueNumber, next_channel_id.load(), interval_ms, backlog_threshold);
+	std::string line = nfq::monitor_status(kFirstQueueNumber, next_channel_id.load(), interval_ms, backlog_threshold);
+	// Kernel-shaping counters are cheap to read (a few per-CPU map lookups), so they are not cached.
+	const std::string shaping = nfq::shaper::status_text();
+	if (shaping.empty())
+		return line;
+	const size_t alert = line.size() >= 4 && line.compare(line.size() - 4, 4, " [!]") == 0 ? 4 : 0;
+	return line.substr(0, line.size() - alert) + " | " + shaping + line.substr(line.size() - alert);
 }
 #endif
 

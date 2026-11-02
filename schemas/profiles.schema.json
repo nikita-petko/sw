@@ -44,6 +44,25 @@
       "type": "object",
       "description": "Optional feature configurations.",
       "properties": {
+        "linux_bpf": {
+          "type": "object",
+          "description": "Linux kernel shaping: profiles using from_timestamp, drop or send_all_after_delay, and passive latency without an inbound delay, can run in an eBPF program on the egress of the listed interfaces (delay by departure time through the fq qdisc) instead of holding packets in user space through NFQUEUE. Needs Linux 6.6+ (tcx), sch_fq, CAP_NET_ADMIN, CAP_BPF and CAP_PERFMON. Other platforms ignore the block.",
+          "properties": {
+            "tier": {
+              "type": "string",
+              "enum": ["auto", "nfqueue", "bpf"],
+              "default": "auto",
+              "description": "auto uses kernel shaping where it can serve a profile and NFQUEUE otherwise (the reason is logged); nfqueue never uses kernel shaping; bpf requires it, so a profile it cannot serve fails to activate."
+            },
+            "interfaces": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1, "maxLength": 15, "pattern": "^[^/\\s]+$" },
+              "default": [],
+              "description": "Network interfaces whose egress carries the program, for example the LAN and WAN devices of a gateway. lagsw replaces their root qdisc (noqueue, pfifo_fast, fq_codel, mq or fq) with fq and restores it on exit. Without any interface kernel shaping is unavailable."
+            }
+          },
+          "additionalProperties": false
+        },
         "server_discovery": {
           "type": "object",
           "description": "Discovers the authoritative server from the traffic observed on a port: the remote address receiving the most packets in each window is selected.",

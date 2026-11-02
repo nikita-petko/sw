@@ -13,7 +13,64 @@ std::function<platform::HttpResponse(const std::string&, const std::string&)> ht
 std::vector<std::string>							   requested_paths;
 std::atomic<int>									   timer_begins{0};
 std::atomic<int>									   timer_ends{0};
+std::string											   shaping_reason = "kernel shaping is not available in tests";
+std::vector<std::shared_ptr<ShapeRecord>>			   shape_registry;
+backend::ShapingConfig								   last_shaping_config;
+std::vector<std::string>							   refusals;
 }  // namespace
+
+void set_shaping_unavailable(const std::string& reason)
+{
+	std::lock_guard<std::mutex> lock(registry_mutex);
+	shaping_reason = reason;
+}
+
+std::vector<std::shared_ptr<ShapeRecord>> shape_stages()
+{
+	std::lock_guard<std::mutex> lock(registry_mutex);
+	return shape_registry;
+}
+
+backend::ShapingConfig shaping_config()
+{
+	std::lock_guard<std::mutex> lock(registry_mutex);
+	return last_shaping_config;
+}
+
+std::vector<std::string> shaping_refusals()
+{
+	std::lock_guard<std::mutex> lock(registry_mutex);
+	return refusals;
+}
+
+class FakeShapeStage : public backend::ShapeStage
+{
+public:
+	explicit FakeShapeStage(std::shared_ptr<ShapeRecord> record) : record_(std::move(record)) {}
+	~FakeShapeStage() override
+	{
+		std::lock_guard<std::mutex> lock(registry_mutex);
+		record_->destroyed = true;
+	}
+	bool activate(std::string&) override
+	{
+		std::lock_guard<std::mutex> lock(registry_mutex);
+		record_->active = true;
+		++record_->activations;
+		return true;
+	}
+	void deactivate() override
+	{
+		std::lock_guard<std::mutex> lock(registry_mutex);
+		if (record_->active)
+			++record_->deactivations;
+		record_->active = false;
+	}
+	backend::ShapeStats stats() const override { return {}; }
+
+private:
+	std::shared_ptr<ShapeRecord> record_;
+};
 
 /// The engine-owned half of a channel.
 class FakeChannel : public backend::PacketChannel
@@ -159,6 +216,10 @@ void reset()
 	std::lock_guard<std::mutex> lock(registry_mutex);
 	registry.clear();
 	specs.clear();
+	shape_registry.clear();
+	refusals.clear();
+	last_shaping_config = {};
+	shaping_reason		= "kernel shaping is not available in tests";
 	next_open_failure.clear();
 	http_handler = nullptr;
 	requested_paths.clear();
@@ -263,6 +324,27 @@ std::unique_ptr<PacketChannel> open(const OpenOptions& options, std::string& err
 bool validate_filter(const std::string&, bool, std::string&, uint32_t&)
 {
 	return true;
+}
+
+void configure_shaping(const ShapingConfig& config)
+{
+	std::lock_guard<std::mutex> lock(fakes::registry_mutex);
+	fakes::last_shaping_config = config;
+}
+
+std::unique_ptr<ShapeStage> open_shape_stage(const ShapeSpec& spec, std::string& reason)
+{
+	std::lock_guard<std::mutex> lock(fakes::registry_mutex);
+	if (!fakes::shaping_reason.empty())
+	{
+		reason = fakes::shaping_reason;
+		fakes::refusals.push_back(spec.label);
+		return nullptr;
+	}
+	auto record	  = std::make_shared<fakes::ShapeRecord>();
+	record->spec  = spec;
+	fakes::shape_registry.push_back(record);
+	return std::make_unique<fakes::FakeShapeStage>(record);
 }
 
 void calc_checksums(uint8_t*, uint32_t) {}

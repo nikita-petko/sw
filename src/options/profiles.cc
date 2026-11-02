@@ -389,6 +389,7 @@ private:
 	{
 		[[maybe_unused]] static const Feature disabled{&ProfilesParser::ignore_feature, false};
 		static const std::unordered_map<std::string, Feature> table = {
+			{"linux_bpf", {&ProfilesParser::parse_linux_bpf, true}},
 #ifdef LAGSW_FEATURE_SERVER_DISCOVERY
 			{"server_discovery", {&ProfilesParser::parse_server_discovery, true}},
 #else
@@ -469,6 +470,17 @@ private:
 		if (key == "enabled_for")
 			return begin_enabled_for(value, indent, nullptr, "");
 		return Status::ok;
+	}
+
+	/// The `linux_bpf` block is accepted on every platform so a profiles file can be shared; only the Linux backend uses it.
+	Status parse_linux_bpf(const std::string& key, const std::string& value, int indent)
+	{
+		LinuxBpfOptions& linux_bpf = options_.features.linux_bpf;
+		if (key == "tier")
+			return to_status(assign_enum(context_, value, parse_linux_tier, linux_bpf.tier, "linux_bpf tier", ": expected auto, nfqueue, or bpf"));
+		if (key == "interfaces")
+			return begin_enabled_for(value, indent, &linux_bpf.interfaces, "linux_bpf interfaces value");
+		return Status::unhandled;
 	}
 
 #ifdef LAGSW_FEATURE_SERVER_DISCOVERY

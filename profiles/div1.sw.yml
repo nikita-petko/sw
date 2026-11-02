@@ -33,6 +33,10 @@ features:
     enabled: true
     port: 55000
 
+  linux_bpf:
+    tier: auto
+    interfaces: [eth0, wlan0]
+
   desync_countdown:
     enabled: true
     display: override

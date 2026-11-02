@@ -284,6 +284,84 @@ void test_packet_group_logs_each_packet()
 }
 #endif
 
+// Kernel shaping: the baseline runs in the kernel when the backend allows it and nothing needs the packets in user space.
+PacketEngineOptions shaping_passive_options(int32_t delay_ms)
+{
+	PacketEngineOptions options			   = passive_options(delay_ms);
+	options.features.linux_bpf.interfaces = {"lan0"};
+	return options;
+}
+
+void test_the_baseline_runs_as_a_shaping_stage()
+{
+	fakes::reset();
+	fakes::set_shaping_unavailable("");
+	PacketEngineOptions options					   = shaping_passive_options(80);
+	options.features.passive_latency.mode		   = PassiveLatencyMode::uniform;
+	options.features.passive_latency.jitter_ms	   = 20;
+	options.features.passive_latency.direction	   = PassiveLatencyDirection::outbound;
+	options.features.passive_latency.preserve_order = false;
+	PacketEngine engine(options);
+	engine.start_workers();
+	CHECK(fakes::channels().empty());
+	const auto stages = fakes::shape_stages();
+	CHECK(stages.size() == 1);
+	if (stages.size() == 1)
+	{
+		const backend::ShapeSpec& spec = stages[0]->spec;
+		CHECK(stages[0]->active);
+		CHECK(spec.behaviour == backend::ShapeBehaviour::baseline && spec.model == backend::ShapeModel::uniform);
+		CHECK(spec.delay_ms == 80 && spec.jitter_ms == 20 && spec.max_delay_ms == 140 && !spec.preserve_order);
+		CHECK(spec.include_forward && spec.ignore_inbound && spec.filter == "tcp");
+	}
+	CHECK(engine.is_passive_latency_enabled());
+	engine.stop_workers();
+	if (stages.size() == 1)
+		CHECK(!stages[0]->active);
+}
+
+void test_an_inbound_delay_keeps_the_baseline_in_user_space()
+{
+	fakes::reset();
+	fakes::set_shaping_unavailable("");
+	PacketEngine engine(shaping_passive_options(80));	// both directions by default
+	engine.start_workers();
+	CHECK(fakes::shape_stages().empty());
+	CHECK(fakes::channel_with_filter("tcp") != nullptr);
+	engine.stop_workers();
+}
+
+void test_pausing_the_kernel_baseline_deactivates_the_stage()
+{
+	fakes::reset();
+	fakes::set_shaping_unavailable("");
+	PacketEngineOptions options				   = shaping_passive_options(80);
+	options.features.passive_latency.direction = PassiveLatencyDirection::outbound;
+	PacketEngine engine(options);
+	engine.start_workers();
+	const auto stages = fakes::shape_stages();
+	CHECK(stages.size() == 1);
+	engine.toggle_passive_latency_pause();
+	CHECK(engine.is_passive_latency_paused() && stages.size() == 1 && !stages[0]->active);
+	engine.toggle_passive_latency_pause();
+	CHECK(!engine.is_passive_latency_paused() && stages[0]->active && stages[0]->activations == 2);
+	engine.stop_workers();
+}
+
+void test_the_bpf_tier_does_not_fall_back_for_the_baseline()
+{
+	fakes::reset();
+	fakes::set_shaping_unavailable("no tcx");
+	PacketEngineOptions options				   = shaping_passive_options(80);
+	options.features.linux_bpf.tier			   = LinuxTier::bpf;
+	options.features.passive_latency.direction = PassiveLatencyDirection::outbound;
+	PacketEngine engine(options);
+	const std::string log = test::capture_stdout([&] { engine.start_workers(); });
+	CHECK(fakes::channels().empty() && fakes::shape_stages().empty());
+	CHECK(log.find("requires kernel shaping") != std::string::npos);
+	engine.stop_workers();
+}
+
 void test_toggling_without_a_channel_is_harmless()
 {
 	fakes::reset();
@@ -367,6 +445,10 @@ int main(int argc, char** argv)
 #ifndef NDEBUG
 		{"packet_group_logs_each_packet", test_packet_group_logs_each_packet},
 #endif
+		{"the_baseline_runs_as_a_shaping_stage", test_the_baseline_runs_as_a_shaping_stage},
+		{"an_inbound_delay_keeps_the_baseline_in_user_space", test_an_inbound_delay_keeps_the_baseline_in_user_space},
+		{"pausing_the_kernel_baseline_deactivates_the_stage", test_pausing_the_kernel_baseline_deactivates_the_stage},
+		{"the_bpf_tier_does_not_fall_back_for_the_baseline", test_the_bpf_tier_does_not_fall_back_for_the_baseline},
 		{"toggling_without_a_channel_is_harmless", test_toggling_without_a_channel_is_harmless},
 #ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
 		{"probe_port_traffic_is_not_delayed", test_probe_port_traffic_is_not_delayed},

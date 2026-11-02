@@ -39,7 +39,9 @@ struct PacketEngine::Session
 	}
 
 	int									  profile;
+	/// Capture channel; null when the profile runs as a kernel-shaping stage (then there are no worker threads).
 	std::unique_ptr<backend::PacketChannel> handle;
+	std::unique_ptr<backend::ShapeStage>	  shape;
 	std::atomic<bool>			   stopping = false;
 	std::mutex					   packet_mutex;
 	std::condition_variable		   packet_changed;
@@ -123,6 +125,8 @@ struct PacketEngine::State
 
 #ifdef LAGSW_FEATURE_PASSIVE_LATENCY
 	std::unique_ptr<backend::PacketChannel> passive_latency_handle;
+	/// Set instead of passive_latency_handle when the baseline runs in the kernel.
+	std::unique_ptr<backend::ShapeStage> passive_latency_shape;
 	std::thread						passive_latency_recv_thread;
 	std::thread						passive_latency_send_thread;
 	std::mutex						passive_latency_mutex;
