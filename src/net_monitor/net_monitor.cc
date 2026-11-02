@@ -175,13 +175,43 @@ std::string bar(double fraction, size_t width)
 	return out;
 }
 
+/// Whole-second spans, scaled from seconds up to days.
+std::string format_age(double seconds)
+{
+	char			 text[32];
+	const long long	 total = static_cast<long long>(seconds);
+	if (total < 60)
+		std::snprintf(text, sizeof(text), "%llds", total);
+	else if (total < 3600)
+		std::snprintf(text, sizeof(text), "%lldm%02llds", total / 60, total % 60);
+	else if (total < 86400)
+		std::snprintf(text, sizeof(text), "%lldh%02lldm", total / 3600, total / 60 % 60);
+	else
+		std::snprintf(text, sizeof(text), "%lldd%02lldh", total / 86400, total / 3600 % 24);
+	return text;
+}
+
+/// A duration given in milliseconds, scaled to ms, s, minutes, hours or days.
 std::string format_ms(double value, bool available = true)
 {
 	if (!available)
 		return "-";
-	char text[24];
-	std::snprintf(text, sizeof(text), value < 10 ? "%.1f ms" : "%.0f ms", value);
+	char text[32];
+	if (value < 0)
+		value = 0;
+	if (value < 999.5)
+		std::snprintf(text, sizeof(text), value < 10 ? "%.1f ms" : "%.0f ms", value);
+	else if (value < 59950)
+		std::snprintf(text, sizeof(text), "%.1f s", value / 1000);
+	else
+		return format_age(value / 1000);
 	return text;
+}
+
+/// A signed millisecond difference, scaled like format_ms().
+std::string format_ms_delta(double value)
+{
+	return std::string(value < 0 ? "-" : "+") + format_ms(std::fabs(value));
 }
 
 std::string format_clock(uint64_t seconds)
@@ -201,7 +231,9 @@ std::string pad(const std::string& text, size_t width)
 
 std::string pad_left(const std::string& text, size_t width)
 {
-	return text.size() >= width ? text : std::string(width - text.size(), ' ') + text;
+	if (text.size() >= width)
+		return text.substr(0, width);
+	return std::string(width - text.size(), ' ') + text;
 }
 
 /// Renders the last `width` values as a block-character chart. The scale starts at zero and ends at the
@@ -1747,20 +1779,6 @@ std::string NetMonitor::render_frame(int console_columns, int console_rows)
 	return out;
 }
 
-namespace {
-std::string format_age(double seconds)
-{
-	char text[24];
-	if (seconds < 60)
-		std::snprintf(text, sizeof(text), "%.0fs", seconds);
-	else if (seconds < 3600)
-		std::snprintf(text, sizeof(text), "%dm%02ds", static_cast<int>(seconds) / 60, static_cast<int>(seconds) % 60);
-	else
-		std::snprintf(text, sizeof(text), "%dh%02dm", static_cast<int>(seconds) / 3600, static_cast<int>(seconds) / 60 % 60);
-	return text;
-}
-}  // namespace
-
 std::string NetMonitor::render_flow_view(int console_columns, int console_rows)
 {
 	const size_t width		= static_cast<size_t>(console_columns > 0 ? std::max(console_columns, 60) : 100);
@@ -1915,7 +1933,7 @@ std::string NetMonitor::render_profile_view(int console_columns, int console_row
 	line("");
 
 	line(std::string(kBold) + " Network while active" + kReset + kDim + "  compared with the seconds in which no profile was active" + kReset);
-	line(std::string(kDim) + " " + pad("profile", name_cols) + pad_left("seconds", 9) + pad_left("RTT", 10) + pad_left("vs idle", 10) +
+	line(std::string(kDim) + " " + pad("profile", name_cols) + pad_left("time", 9) + pad_left("RTT", 10) + pad_left("vs idle", 10) +
 		 pad_left("retrans", 9) + pad_left("down", 14) + kReset);
 	const auto average_rtt = [](const Conditions& c) { return c.rtt_samples > 0 ? c.rtt_sum_ms / static_cast<double>(c.rtt_samples) : 0.0; };
 	const auto row		   = [&](const std::string& name, const Conditions& c, bool compare) {
@@ -1924,9 +1942,8 @@ std::string NetMonitor::render_profile_view(int console_columns, int console_row
 		   std::string delta	   = "-";
 		   if (compare && c.rtt_samples > 0 && baseline_.rtt_samples > 0)
 		   {
-			   const double difference = average_rtt(c) - average_rtt(baseline_);
-			   std::snprintf(text, sizeof(text), "%+.0f ms", difference);
-			   delta		= text;
+		   const double difference = average_rtt(c) - average_rtt(baseline_);
+		   delta				   = format_ms_delta(difference);
 			   delta_color = difference > 20 ? kRed : difference > 5 ? kYellow : kGreen;
 		   }
 		   const double loss = c.data_packets > 0 ? 100.0 * static_cast<double>(c.retransmits) / static_cast<double>(c.data_packets) : 0;
@@ -1935,7 +1952,7 @@ std::string NetMonitor::render_profile_view(int console_columns, int console_row
 		   else
 			   std::snprintf(text, sizeof(text), "-");
 		   const std::string loss_text = text;
-		   line(" " + pad(name, name_cols) + pad_left(std::to_string(c.ticks), 9) + (c.rtt_samples > 0 ? rtt_color(average_rtt(c)) : kDim) +
+		   line(" " + pad(name, name_cols) + pad_left(format_age(static_cast<double>(c.ticks)), 9) + (c.rtt_samples > 0 ? rtt_color(average_rtt(c)) : kDim) +
 				pad_left(format_ms(average_rtt(c), c.rtt_samples > 0), 10) + kReset + delta_color + pad_left(delta, 10) + kReset +
 				(c.data_packets > 0 ? loss_color(loss) : kDim) + pad_left(loss_text, 9) + kReset +
 				pad_left(c.ticks > 0 ? format_rate(static_cast<double>(c.bytes_down) / static_cast<double>(c.ticks)) : "-", 14));
