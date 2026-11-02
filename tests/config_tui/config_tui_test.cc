@@ -70,7 +70,7 @@ void type(App& app, const std::string& text)
 
 void test_recent_files_round_trip()
 {
-	TempDirectory directory;
+	TempDirectory	  directory;
 	const std::string file = recent_files_path(directory.file("config"));
 	CHECK(!file.empty() && recent_files_path("").empty());
 	CHECK(load_recent(file).empty());
@@ -81,7 +81,8 @@ void test_recent_files_round_trip()
 	CHECK(entries.size() == 2 && entries[0].path == "/a/one.yml" && entries[0].last_opened == "t3");
 	CHECK(save_recent(file, entries));
 	const std::vector<RecentEntry> loaded = load_recent(file);
-	CHECK(loaded.size() == 2 && loaded[0].path == "/a/one.yml" && loaded[1].path == "/b/odd \"name\": #1.yml" && loaded[1].last_opened == "t2");
+	CHECK(loaded.size() == 2 && loaded[0].path == "/a/one.yml" && loaded[1].path == "/b/odd \"name\": #1.yml" &&
+		  loaded[1].last_opened == "t2");
 	for (int i = 0; i < 30; ++i)
 		add_recent(entries, "/f/" + std::to_string(i), "t");
 	CHECK(entries.size() == kMaxRecent);
@@ -89,7 +90,7 @@ void test_recent_files_round_trip()
 
 void test_recent_files_bad_file_is_empty()
 {
-	TempDirectory directory;
+	TempDirectory	  directory;
 	const std::string file = directory.file("recent.yml");
 	write(file, "this is { not a recent list\n  - path: x\n");
 	CHECK(load_recent(file).empty());
@@ -221,7 +222,7 @@ void test_loader_keys_and_outcomes()
 
 void test_open_path_and_new_profile()
 {
-	TempDirectory directory;
+	TempDirectory  directory;
 	const Services services = services_in(directory);
 	App			   app(services);
 	app.handle_key('o');
@@ -255,7 +256,7 @@ void test_open_path_and_new_profile()
 
 void test_form_editing_keeps_comments_and_makes_a_backup()
 {
-	TempDirectory directory;
+	TempDirectory	  directory;
 	const std::string path = directory.file("p.yml");
 	write(path, std::string(new_profile_template()) + "    # trailing comment\n");
 	App app(services_in(directory), path);
@@ -265,7 +266,8 @@ void test_form_editing_keeps_comments_and_makes_a_backup()
 	app.handle_key(key::enter);
 	CHECK(app.prompting());
 	const std::string drop = app.render(100, 20);
-	CHECK(drop.find("Select value") != std::string::npos && drop.find("net_monitor") != std::string::npos && drop.find("Edit value") == std::string::npos);
+	CHECK(drop.find("Select value") != std::string::npos && drop.find("net_monitor") != std::string::npos &&
+		  drop.find("Edit value") == std::string::npos);
 	app.handle_key(key::down);
 	app.handle_key(key::escape);
 	CHECK(!app.dirty() && app.lines()[1] == "default_view: log");
@@ -304,7 +306,6 @@ void test_form_editing_keeps_comments_and_makes_a_backup()
 		changed = changed || line == "    delay_ms: 250";
 	CHECK(changed);
 
-
 	// capture_options is a submenu of checkboxes; Enter toggles one and Esc steps back out
 	app.handle_key(key::down);
 	app.handle_key(key::down);
@@ -320,13 +321,14 @@ void test_form_editing_keeps_comments_and_makes_a_backup()
 	CHECK(app.render(100, 20).find("profiles") != std::string::npos && app.render(100, 20).find("delay_ms") == std::string::npos);
 
 	app.handle_key(key::ctrl('S'));
-	CHECK(!app.dirty() && read(path).find("delay_ms: 250") != std::string::npos && read(path).find("# trailing comment") != std::string::npos);
+	CHECK(!app.dirty() && read(path).find("delay_ms: 250") != std::string::npos &&
+		  read(path).find("# trailing comment") != std::string::npos);
 	CHECK(fs::exists(path + ".bak") && read(path + ".bak").find("delay_ms: 100") != std::string::npos);
 }
 
 void test_invalid_save_needs_confirmation()
 {
-	TempDirectory directory;
+	TempDirectory	  directory;
 	const std::string path = directory.file("p.yml");
 	write(path, new_profile_template());
 	App app(services_in(directory), path);
@@ -358,7 +360,7 @@ void test_invalid_save_needs_confirmation()
 
 void test_discarding_changes_is_confirmed()
 {
-	TempDirectory directory;
+	TempDirectory	  directory;
 	const std::string path = directory.file("p.yml");
 	write(path, new_profile_template());
 	App app(services_in(directory), path);
@@ -377,7 +379,7 @@ void test_discarding_changes_is_confirmed()
 
 void test_raw_editing()
 {
-	TempDirectory directory;
+	TempDirectory	  directory;
 	const std::string path = directory.file("p.yml");
 	write(path, "a: 1\r\n  b: 2\r\n");
 	App app(services_in(directory), path);
@@ -425,10 +427,10 @@ void test_reserved_key_is_rejected()
 }
 void test_list_entries_can_be_added_and_removed()
 {
-	TempDirectory directory;
+	TempDirectory	  directory;
 	const std::string path = directory.file("p.yml");
 	write(path, new_profile_template());
-	App app(services_in(directory), path);
+	App			 app(services_in(directory), path);
 	const size_t original = app.lines().size();
 	const auto	 count_of = [&](const std::string& needle) {
 		size_t count = 0;

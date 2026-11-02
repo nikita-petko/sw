@@ -27,8 +27,8 @@ Choice run(const std::optional<std::string>& current_file)
 	unsigned last_revision = 0;
 	while (app.outcome() == Outcome::running)
 	{
-		const int columns = platform::console_width() > 0 ? platform::console_width() : 80;
-		const int rows	  = platform::console_height() > 0 ? platform::console_height() : 24;
+		const int  columns = platform::console_width() > 0 ? platform::console_width() : 80;
+		const int  rows	   = platform::console_height() > 0 ? platform::console_height() : 24;
 		const bool resized = columns != last_columns || rows != last_rows;
 		if (resized || app.revision() != last_revision)
 		{

@@ -53,6 +53,10 @@ local function syntax_flags(target, kdir, srcroot, file)
     if ms_extensions and #ms_extensions > 0 then
         table.insert(flags, ms_extensions)
     end
+    -- The kernel Makefile defines this when function tracing is on; headers such as ftrace.h #error without it
+    if autoconf:find("CONFIG_FUNCTION_TRACER=y", 1, true) and arch == "x86" then
+        table.insert(flags, "-DCC_USING_FENTRY")
+    end
     local compiler_include = try { function () return (os.iorunv(compiler, {"-print-file-name=include"})):trim() end }
     if compiler_include and os.isdir(compiler_include) then
         table.join2(flags, {"-isystem", compiler_include})
@@ -74,6 +78,10 @@ local function syntax_flags(target, kdir, srcroot, file)
     for _, header in ipairs({"compiler-version.h", "kconfig.h", "compiler_types.h"}) do
         if os.isfile(path.join(kdir, "include/linux", header)) then
             table.join2(flags, {"-include", path.join(kdir, "include/linux", header)})
+        end
+        -- Right after kconfig.h (which defines the CONFIG_ options) and before anything that depends on them
+        if header == "kconfig.h" then
+            table.join2(flags, {"-include", path.absolute(path.join(os.scriptdir(), "..", "intellisense", "edg_compat.h"))})
         end
     end
     table.insert(flags, "-I" .. srcroot)
@@ -117,7 +125,8 @@ function build_commands(target, batchcmds, opt)
     assert(#sources > 0, "target(" .. name .. "): add_files(\"*.c\") is empty")
 
     -- The generated Kbuild file: xmake is the source of truth for what the module consists of and how it is built
-    local flags = {"-I$(src)"}
+    -- Headers are used in place: the target directory is on the include path next to the staged copy of the sources
+    local flags = {"-I$(src)", "-I" .. srcroot}
     for _, dir in ipairs(target:get("includedirs") or {}) do
         table.insert(flags, "-I" .. path.absolute(dir, os.projectdir()))
     end

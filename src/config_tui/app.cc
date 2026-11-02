@@ -14,7 +14,7 @@
 
 namespace config_tui {
 namespace {
-	namespace fs = std::filesystem;
+	namespace fs  = std::filesystem;
 	namespace key = platform::edit_key;
 
 	constexpr const char* kReset   = "\033[0m";
@@ -183,7 +183,7 @@ bool App::open_file(const std::string& requested)
 {
 	// `requested` may refer into recent_, which remember() reorders
 	const std::string path = requested;
-	std::ifstream input(path, std::ios::binary);
+	std::ifstream	  input(path, std::ios::binary);
 	if (!input)
 	{
 		message_		  = (exists(path) ? "Cannot read " : "Not found: ") + path;
@@ -191,13 +191,13 @@ bool App::open_file(const std::string& requested)
 		return false;
 	}
 	const std::string content((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-	lines_		   = split_lines(content);
-	crlf_		   = content.find("\r\n") != std::string::npos;
-	file_path_	   = path;
-	dirty_		   = false;
-	backed_up_	   = false;
-	screen_		   = Screen::editor;
-	tab_		   = Tab::form;
+	lines_	   = split_lines(content);
+	crlf_	   = content.find("\r\n") != std::string::npos;
+	file_path_ = path;
+	dirty_	   = false;
+	backed_up_ = false;
+	screen_	   = Screen::editor;
+	tab_	   = Tab::form;
 	menu_reset();
 	cursor_row_	   = 0;
 	cursor_column_ = 0;
@@ -218,18 +218,18 @@ void App::start_new(const std::string& path)
 		message_is_error_ = true;
 		return;
 	}
-	lines_		   = split_lines(new_profile_template());
-	crlf_		   = false;
-	file_path_	   = absolute;
-	dirty_		   = true;
-	backed_up_	   = false;
-	screen_		   = Screen::editor;
-	tab_		   = Tab::form;
+	lines_	   = split_lines(new_profile_template());
+	crlf_	   = false;
+	file_path_ = absolute;
+	dirty_	   = true;
+	backed_up_ = false;
+	screen_	   = Screen::editor;
+	tab_	   = Tab::form;
 	menu_reset();
-	cursor_row_	   = 0;
-	cursor_column_ = 0;
-	raw_scroll_	   = 0;
-	message_	   = "New file, not saved yet";
+	cursor_row_		  = 0;
+	cursor_column_	  = 0;
+	raw_scroll_		  = 0;
+	message_		  = "New file, not saved yet";
 	message_is_error_ = false;
 }
 
@@ -347,7 +347,8 @@ void App::activate_selected()
 		refresh_statuses();
 	if (statuses_[selected_].state == FileState::missing)
 	{
-		begin_prompt(Prompt::Kind::confirm_missing, recent_[selected_].path + " is gone. [r] re-create from the template  [d] remove from the list  Esc cancel");
+		begin_prompt(Prompt::Kind::confirm_missing,
+					 recent_[selected_].path + " is gone. [r] re-create from the template  [d] remove from the list  Esc cancel");
 		return;
 	}
 	open_file(recent_[selected_].path);
@@ -467,8 +468,8 @@ void App::menu_up()
 	if (menu_path_.empty())
 		return;
 	const std::vector<OutlineEntry> outline = build_outline(lines_);
-	const auto						found	= std::find_if(outline.begin(), outline.end(), [&](const OutlineEntry& e) { return !e.leaf && e.path == menu_path_; });
-	std::string						parent;
+	const auto found = std::find_if(outline.begin(), outline.end(), [&](const OutlineEntry& e) { return !e.leaf && e.path == menu_path_; });
+	std::string parent;
 	if (found != outline.end())
 	{
 		// the parent is the nearest earlier header one level up
@@ -496,7 +497,8 @@ std::vector<size_t> App::menu_items(const std::vector<OutlineEntry>& outline)
 	size_t				first = 0;
 	if (!menu_path_.empty())
 	{
-		const auto found = std::find_if(outline.begin(), outline.end(), [&](const OutlineEntry& e) { return !e.leaf && e.path == menu_path_; });
+		const auto found =
+			std::find_if(outline.begin(), outline.end(), [&](const OutlineEntry& e) { return !e.leaf && e.path == menu_path_; });
 		if (found == outline.end())
 		{
 			menu_reset();
@@ -520,7 +522,8 @@ bool App::is_list_menu(const std::vector<OutlineEntry>& outline, const std::vect
 
 void App::start_add(const std::vector<OutlineEntry>& outline, const std::vector<size_t>& items)
 {
-	const auto header = std::find_if(outline.begin(), outline.end(), [&](const OutlineEntry& e) { return !e.leaf && e.path == menu_path_; });
+	const auto header =
+		std::find_if(outline.begin(), outline.end(), [&](const OutlineEntry& e) { return !e.leaf && e.path == menu_path_; });
 	const bool scalar = items.empty() ? header == outline.end() || list_item_template(header->key).empty() : outline[items.front()].leaf;
 	if (scalar)
 	{
@@ -534,16 +537,17 @@ void App::start_add(const std::vector<OutlineEntry>& outline, const std::vector<
 void App::add_item(const std::string& scalar)
 {
 	const std::vector<OutlineEntry> outline = build_outline(lines_);
-	const auto header = std::find_if(outline.begin(), outline.end(), [&](const OutlineEntry& e) { return !e.leaf && e.path == menu_path_; });
+	const auto						header =
+		std::find_if(outline.begin(), outline.end(), [&](const OutlineEntry& e) { return !e.leaf && e.path == menu_path_; });
 	if (header == outline.end())
 		return;
-	const std::vector<size_t> items = menu_items(outline);
-	size_t					  at	= header->line + 1;
+	const std::vector<size_t> items	 = menu_items(outline);
+	size_t					  at	 = header->line + 1;
 	size_t					  indent = lines_[header->line].find_first_not_of(' ') + 2;
 	if (!items.empty())
 	{
-		at		= subtree_end(outline, items.back()) + 1;
-		indent	= lines_[outline[items.front()].line].find_first_not_of(' ');
+		at	   = subtree_end(outline, items.back()) + 1;
+		indent = lines_[outline[items.front()].line].find_first_not_of(' ');
 	}
 	std::vector<std::string> added;
 	if (!scalar.empty())
@@ -598,7 +602,7 @@ void App::key_form(int code)
 			menu_up();
 		return;
 	}
-	menu_selected_	  = (std::min)(menu_selected_, rows - 1);
+	menu_selected_		= (std::min)(menu_selected_, rows - 1);
 	const bool	 on_add = list && menu_selected_ == items.size();
 	const size_t page	= static_cast<size_t>(page_rows_);
 	switch (code)
@@ -706,9 +710,9 @@ void App::key_raw(int code)
 {
 	if (lines_.empty())
 		lines_.emplace_back();
-	cursor_row_		= (std::min)(cursor_row_, lines_.size() - 1);
+	cursor_row_		  = (std::min)(cursor_row_, lines_.size() - 1);
 	std::string& line = lines_[cursor_row_];
-	cursor_column_	= (std::min)(cursor_column_, line.size());
+	cursor_column_	  = (std::min)(cursor_column_, line.size());
 	switch (code)
 	{
 		case key::left:
@@ -748,16 +752,18 @@ void App::key_raw(int code)
 			cursor_column_ = line.size();
 			return;
 		case key::enter:
-		{
-			const size_t indent = (std::min)(line.find_first_not_of(' ') == std::string::npos ? line.size() : line.find_first_not_of(' '), cursor_column_);
-			const std::string rest = line.substr(cursor_column_);
-			line.erase(cursor_column_);
-			lines_.insert(lines_.begin() + static_cast<std::ptrdiff_t>(cursor_row_) + 1, std::string(indent, ' ') + rest);
-			++cursor_row_;
-			cursor_column_ = indent;
-			touch();
-			return;
-		}
+			{
+				const size_t indent =
+					(std::min)(line.find_first_not_of(' ') == std::string::npos ? line.size() : line.find_first_not_of(' '),
+							   cursor_column_);
+				const std::string rest = line.substr(cursor_column_);
+				line.erase(cursor_column_);
+				lines_.insert(lines_.begin() + static_cast<std::ptrdiff_t>(cursor_row_) + 1, std::string(indent, ' ') + rest);
+				++cursor_row_;
+				cursor_column_ = indent;
+				touch();
+				return;
+			}
 		case key::backspace:
 			if (cursor_column_ > 0)
 			{
@@ -824,32 +830,34 @@ void App::key_prompt(int code)
 				prompt_.kind = Prompt::Kind::none;
 			return;
 		case Prompt::Kind::select_value:
-		{
-			const size_t count = prompt_.options.size();
-			if (code == key::up)
-				prompt_.choice = prompt_.choice > 0 ? prompt_.choice - 1 : 0;
-			else if (code == key::down)
-				prompt_.choice = (std::min)(prompt_.choice + 1, count - 1);
-			else if (code == key::home)
-				prompt_.choice = 0;
-			else if (code == key::end)
-				prompt_.choice = count - 1;
-			else if (code == key::escape)
-				prompt_.kind = Prompt::Kind::none;
-			else if (code == key::enter)
 			{
-				const std::string value = prompt_.options[prompt_.choice];
-				prompt_.kind			= Prompt::Kind::none;
-				const std::vector<OutlineEntry> outline = build_outline(lines_);
-				const auto found = std::find_if(outline.begin(), outline.end(), [&](const OutlineEntry& e) { return e.leaf && e.path == edit_path_; });
-				if (found != outline.end() && lines_[found->line].substr(found->value_begin, found->value_end - found->value_begin) != value)
+				const size_t count = prompt_.options.size();
+				if (code == key::up)
+					prompt_.choice = prompt_.choice > 0 ? prompt_.choice - 1 : 0;
+				else if (code == key::down)
+					prompt_.choice = (std::min)(prompt_.choice + 1, count - 1);
+				else if (code == key::home)
+					prompt_.choice = 0;
+				else if (code == key::end)
+					prompt_.choice = count - 1;
+				else if (code == key::escape)
+					prompt_.kind = Prompt::Kind::none;
+				else if (code == key::enter)
 				{
-					lines_[found->line] = replace_value(lines_[found->line], *found, value);
-					touch();
+					const std::string value					= prompt_.options[prompt_.choice];
+					prompt_.kind							= Prompt::Kind::none;
+					const std::vector<OutlineEntry> outline = build_outline(lines_);
+					const auto						found =
+						std::find_if(outline.begin(), outline.end(), [&](const OutlineEntry& e) { return e.leaf && e.path == edit_path_; });
+					if (found != outline.end() &&
+						lines_[found->line].substr(found->value_begin, found->value_end - found->value_begin) != value)
+					{
+						lines_[found->line] = replace_value(lines_[found->line], *found, value);
+						touch();
+					}
 				}
+				return;
 			}
-			return;
-		}
 		case Prompt::Kind::confirm_remove:
 			prompt_.kind = Prompt::Kind::none;
 			if (code == 'y' || code == 'Y')
@@ -879,8 +887,8 @@ void App::key_prompt(int code)
 	}
 	if (code == key::enter)
 	{
-		const Prompt prompt = prompt_;
-		prompt_.kind		= Prompt::Kind::none;
+		const Prompt prompt		= prompt_;
+		prompt_.kind			= Prompt::Kind::none;
 		const std::string value = prompt.kind == Prompt::Kind::edit_value ? prompt.text : trimmed(prompt.text);
 		if (prompt.kind == Prompt::Kind::add_value)
 		{
@@ -891,7 +899,8 @@ void App::key_prompt(int code)
 		if (prompt.kind == Prompt::Kind::edit_value)
 		{
 			const std::vector<OutlineEntry> outline = build_outline(lines_);
-			const auto found = std::find_if(outline.begin(), outline.end(), [&](const OutlineEntry& e) { return e.leaf && e.path == edit_path_; });
+			const auto						found =
+				std::find_if(outline.begin(), outline.end(), [&](const OutlineEntry& e) { return e.leaf && e.path == edit_path_; });
 			if (found != outline.end())
 			{
 				const OutlineEntry& entry = *found;
@@ -942,18 +951,19 @@ std::string App::render(int width, int height)
 			list_scroll_ = selected_ + 1 - body;
 		for (size_t row = 0; row < body && list_scroll_ + row < count; ++row)
 		{
-			const size_t index	  = list_scroll_ + row;
-			const bool	 current  = index == selected_;
-			const char*	 base	  = current ? kReverse : "";
+			const size_t index	 = list_scroll_ + row;
+			const bool	 current = index == selected_;
+			const char*	 base	 = current ? kReverse : "";
 			std::string	 line;
 			if (index < recent_.size())
 			{
-				const FileStatus& status  = statuses_[index];
-				const bool		  problem = status.state != FileState::ok;
-				std::string		  label	  = status.state == FileState::missing ? "not found" : "cannot read: " + status.message;
-				std::string		  plain	  = fit(recent_[index].path + (problem ? "  " + label : std::string()), columns - 3);
+				const FileStatus& status	  = statuses_[index];
+				const bool		  problem	  = status.state != FileState::ok;
+				std::string		  label		  = status.state == FileState::missing ? "not found" : "cannot read: " + status.message;
+				std::string		  plain		  = fit(recent_[index].path + (problem ? "  " + label : std::string()), columns - 3);
 				const size_t	  path_length = (std::min)(recent_[index].path.size(), plain.size());
-				line = std::string(base) + " " + (problem ? std::string(kRed) + "!" + kReset + base : " ") + " " + plain.substr(0, path_length);
+				line						  = std::string(base) + " " + (problem ? std::string(kRed) + "!" + kReset + base : " ") + " " +
+												plain.substr(0, path_length);
 				if (problem)
 					line += std::string(kRed) + plain.substr(path_length) + kReset;
 				else
@@ -978,14 +988,14 @@ std::string App::render(int width, int height)
 			const bool						list	= is_list_menu(outline, items);
 			const size_t					count	= items.size() + (list ? 1 : 0);
 			// rows 1 .. total-3 hold a bordered box, centred, as tall as its content needs
-			const size_t inner_max = total - 5;
-			const size_t inner	   = (std::min)((std::max)(count, size_t{3}), inner_max);
-			const size_t box_width = (std::min)(columns - 2, size_t{76});
+			const size_t inner_max	= total - 5;
+			const size_t inner		= (std::min)((std::max)(count, size_t{3}), inner_max);
+			const size_t box_width	= (std::min)(columns - 2, size_t{76});
 			const size_t text_width = box_width - 4;
-			const size_t left	   = (columns - box_width) / 2 + 1;
-			const size_t top	   = 2 + (inner_max - inner) / 2;
-			page_rows_			   = static_cast<int>(inner);
-			menu_selected_		   = count == 0 ? 0 : (std::min)(menu_selected_, count - 1);
+			const size_t left		= (columns - box_width) / 2 + 1;
+			const size_t top		= 2 + (inner_max - inner) / 2;
+			page_rows_				= static_cast<int>(inner);
+			menu_selected_			= count == 0 ? 0 : (std::min)(menu_selected_, count - 1);
 			if (menu_selected_ < form_scroll_)
 				form_scroll_ = menu_selected_;
 			if (menu_selected_ >= form_scroll_ + inner)
@@ -1039,7 +1049,7 @@ std::string App::render(int width, int height)
 						else
 						{
 							const std::string name = fit(entry.key, label_width);
-							text = name + "  " + entry.value;
+							text				   = name + "  " + entry.value;
 						}
 					}
 				}
@@ -1054,15 +1064,17 @@ std::string App::render(int width, int height)
 					style = kDim;
 				}
 				const bool current = index == menu_selected_ && index < count;
-				place(top + 1 + row, std::string(kReset) + "\u2502 " + (current ? kReverse : style) + fit(text, text_width) + kReset + " \u2502");
+				place(top + 1 + row,
+					  std::string(kReset) + "\u2502 " + (current ? kReverse : style) + fit(text, text_width) + kReset + " \u2502");
 			}
 			std::string position;
 			if (count > inner)
 				position = std::to_string(menu_selected_ + 1) + "/" + std::to_string(count);
 			place(top + 1 + inner, border("\u2514", "\u2518", position));
-			rows[1] = styled(kDim, " Settings of the file; comments and untouched lines are kept as they are");
-			rows[total - 1] = styled(kDim, list ? " Up/Down select  Enter edit  a add  Del remove  Left/Esc back  Ctrl+S save  Tab raw"
-												: " Up/Down select  Enter open/edit/pick  Space toggle  Left/Esc back  Ctrl+S save  Tab raw");
+			rows[1]			= styled(kDim, " Settings of the file; comments and untouched lines are kept as they are");
+			rows[total - 1] = styled(kDim,
+									 list ? " Up/Down select  Enter edit  a add  Del remove  Left/Esc back  Ctrl+S save  Tab raw"
+										  : " Up/Down select  Enter open/edit/pick  Space toggle  Left/Esc back  Ctrl+S save  Tab raw");
 		}
 		else
 		{
@@ -1075,8 +1087,8 @@ std::string App::render(int width, int height)
 			const size_t text_width = columns > 6 ? columns - 6 : 1;
 			for (size_t row = 0; row < body && raw_scroll_ + row < (std::max)(lines_.size(), size_t{1}); ++row)
 			{
-				const size_t index = raw_scroll_ + row;
-				const std::string line = index < lines_.size() ? lines_[index] : std::string();
+				const size_t	  index = raw_scroll_ + row;
+				const std::string line	= index < lines_.size() ? lines_[index] : std::string();
 				char			  number[16];
 				std::snprintf(number, sizeof(number), "%4zu ", index + 1);
 				const size_t offset = index == cursor_row_ && cursor_column_ >= text_width ? cursor_column_ + 1 - text_width : 0;
@@ -1084,7 +1096,7 @@ std::string App::render(int width, int height)
 				std::string	 out	= std::string(kDim) + number + kReset;
 				if (index == cursor_row_)
 				{
-					const size_t at = cursor_column_ - offset;
+					const size_t at		= cursor_column_ - offset;
 					std::string	 before = fit(shown.substr(0, (std::min)(at, shown.size())), at);
 					std::string	 under	= at < shown.size() ? shown.substr(at, 1) : " ";
 					std::string	 after	= at + 1 < shown.size() ? shown.substr(at + 1) : std::string();
@@ -1101,10 +1113,12 @@ std::string App::render(int width, int height)
 	if (prompt_.kind != Prompt::Kind::none)
 	{
 		const bool text_prompt = prompt_.kind == Prompt::Kind::open_path || prompt_.kind == Prompt::Kind::new_path;
-		const bool dialog = prompt_.kind == Prompt::Kind::edit_value || prompt_.kind == Prompt::Kind::add_value || prompt_.kind == Prompt::Kind::select_value;
+		const bool dialog	   = prompt_.kind == Prompt::Kind::edit_value || prompt_.kind == Prompt::Kind::add_value ||
+								 prompt_.kind == Prompt::Kind::select_value;
 		if (!dialog)
-		rows[total - 2] = text_prompt ? std::string(kBold) + fit(" " + prompt_.label + ": " + prompt_.text, columns - 1) + kReverse + " " + kReset
-									  : styled(kBold, " " + prompt_.label);
+			rows[total - 2] =
+				text_prompt ? std::string(kBold) + fit(" " + prompt_.label + ": " + prompt_.text, columns - 1) + kReverse + " " + kReset
+							: styled(kBold, " " + prompt_.label);
 		if (text_prompt)
 			rows[total - 1] = styled(kDim, " Enter confirm  Esc cancel");
 	}
@@ -1115,14 +1129,15 @@ std::string App::render(int width, int height)
 	for (size_t row = 0; row < rows.size(); ++row)
 		frame += "\033[" + std::to_string(row + 1) + ";1H" + rows[row] + kReset;
 	frame += overlay;
-	const bool dialog = prompt_.kind == Prompt::Kind::edit_value || prompt_.kind == Prompt::Kind::add_value || prompt_.kind == Prompt::Kind::select_value;
+	const bool dialog =
+		prompt_.kind == Prompt::Kind::edit_value || prompt_.kind == Prompt::Kind::add_value || prompt_.kind == Prompt::Kind::select_value;
 	if (dialog && columns >= 12 && total >= 9)
 	{
-		const bool	 select = prompt_.kind == Prompt::Kind::select_value;
-		const size_t width	= (std::min)(columns - 4, size_t{64});
-		const size_t inner	= width - 4;
-		const std::string title = select ? "Select value" : prompt_.kind == Prompt::Kind::add_value ? "Add item" : "Edit value";
-		const auto line = [&](const std::string& content, const char* style) {
+		const bool		  select = prompt_.kind == Prompt::Kind::select_value;
+		const size_t	  width	 = (std::min)(columns - 4, size_t{64});
+		const size_t	  inner	 = width - 4;
+		const std::string title	 = select ? "Select value" : prompt_.kind == Prompt::Kind::add_value ? "Add item" : "Edit value";
+		const auto		  line	 = [&](const std::string& content, const char* style) {
 			return std::string(kBold) + "\u2502 " + kReset + style + fit(content, inner) + kReset + kBold + " \u2502" + kReset;
 		};
 		const auto edge = [&](const char* open, const char* close, const std::string& heading) {
@@ -1142,7 +1157,8 @@ std::string App::render(int width, int height)
 			for (size_t i = 0; i < visible; ++i)
 			{
 				const size_t index = first + i;
-				box.push_back(line(std::string(index == prompt_.choice ? "> " : "  ") + prompt_.options[index], index == prompt_.choice ? kReverse : ""));
+				box.push_back(line(std::string(index == prompt_.choice ? "> " : "  ") + prompt_.options[index],
+								   index == prompt_.choice ? kReverse : ""));
 			}
 			box.push_back(line("Up/Down choose  Enter select  Esc cancel", kDim));
 		}

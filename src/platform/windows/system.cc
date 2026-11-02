@@ -13,9 +13,9 @@
 #include <iphlpapi.h>
 #include <netioapi.h>
 #pragma warning(pop)
+#include <io.h>
 #include <objbase.h>
 #include <timeapi.h>
-#include <io.h>
 #include <cstdio>
 #include <cstdlib>
 

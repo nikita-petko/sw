@@ -97,7 +97,8 @@ std::vector<RecentEntry> load_recent(const std::string& file)
 		else if (text.rfind("last_opened:", 0) == 0 && !entries.empty())
 			entries.back().last_opened = unquote(trim(text.substr(12)));
 	}
-	entries.erase(std::remove_if(entries.begin(), entries.end(), [](const RecentEntry& entry) { return entry.path.empty(); }), entries.end());
+	entries.erase(std::remove_if(entries.begin(), entries.end(), [](const RecentEntry& entry) { return entry.path.empty(); }),
+				  entries.end());
 	if (entries.size() > kMaxRecent)
 		entries.resize(kMaxRecent);
 	return entries;
@@ -139,7 +140,8 @@ bool save_recent(const std::string& file, const std::vector<RecentEntry>& entrie
 
 void add_recent(std::vector<RecentEntry>& entries, const std::string& path, const std::string& timestamp)
 {
-	entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const RecentEntry& entry) { return entry.path == path; }), entries.end());
+	entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const RecentEntry& entry) { return entry.path == path; }),
+				  entries.end());
 	entries.insert(entries.begin(), {path, timestamp});
 	if (entries.size() > kMaxRecent)
 		entries.resize(kMaxRecent);
@@ -155,7 +157,7 @@ std::string absolute_path(const std::string& path)
 std::string utc_timestamp()
 {
 	const std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-	std::tm			  utc {};
+	std::tm			  utc{};
 #	ifdef _WIN32
 	gmtime_s(&utc, &now);
 #	else

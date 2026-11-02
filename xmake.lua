@@ -85,6 +85,8 @@ includes("tests/passive_latency")
 includes("tests/net_monitor")
 includes("tests/nfqueue_filter")
 includes("tests/kmod_echo")
+includes("tests/kmod_ring")
+includes("pocs/linux_kernel_module_backend")
 if is_plat("windows") then
     includes("pocs/tcp_tls_proxy")
     includes("pocs/tls_segment_removal")

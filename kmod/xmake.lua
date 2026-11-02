@@ -55,4 +55,5 @@ if is_plat("linux") then
     rule_end()
 
     includes("echo")
+    includes("swdivert")
 end

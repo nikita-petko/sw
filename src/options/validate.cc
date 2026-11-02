@@ -378,12 +378,14 @@ namespace {
 #	ifdef LAGSW_FEATURE_NET_MONITOR
 		const NetMonitorOptions& monitor = options.features.net_monitor;
 		if (monitor.enabled)
-			for (const int other : {monitor.key, monitor.pause_key, monitor.reset_key, monitor.flows_key, monitor.profiles_key, monitor.export_key})
+			for (const int other :
+				 {monitor.key, monitor.pause_key, monitor.reset_key, monitor.flows_key, monitor.profiles_key, monitor.export_key})
 				if (reserved(other))
 					return fail("A net_monitor key");
 #	endif
 #	ifdef LAGSW_FEATURE_PASSIVE_LATENCY
-		if (options.features.passive_latency.enabled && options.features.passive_latency.pause_key && reserved(*options.features.passive_latency.pause_key))
+		if (options.features.passive_latency.enabled && options.features.passive_latency.pause_key &&
+			reserved(*options.features.passive_latency.pause_key))
 			return fail("The passive_latency pause_key");
 #	endif
 		return true;
@@ -429,7 +431,6 @@ namespace {
 		return true;
 	}
 }  // namespace
-
 
 bool validate_profiles(const char* path, const PacketEngineOptions& options)
 {

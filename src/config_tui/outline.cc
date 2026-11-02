@@ -89,13 +89,13 @@ std::vector<OutlineEntry> build_outline(const std::vector<std::string>& lines)
 		bool   in_item	  = false;
 		if (line[position] == '-' && (position + 1 == line.size() || line[position + 1] == ' '))
 		{
-			while (stack.size() > 1 &&
-				   (stack.back().indent > static_cast<int>(indent) || (stack.back().indent == static_cast<int>(indent) && stack.back().item)))
+			while (stack.size() > 1 && (stack.back().indent > static_cast<int>(indent) ||
+										(stack.back().indent == static_cast<int>(indent) && stack.back().item)))
 				stack.pop_back();
 			const std::string name = "[" + std::to_string(stack.back().next_item++) + "]";
 			header(index, path_of() + name, name);
 			stack.push_back({static_cast<int>(indent), name, true, 0});
-			in_item			= true;
+			in_item			   = true;
 			const size_t after = line.find_first_not_of(' ', position + 1);
 			if (after == std::string::npos || line[after] == '#')
 				continue;
@@ -142,10 +142,10 @@ std::vector<OutlineEntry> build_outline(const std::vector<std::string>& lines)
 
 		std::string key = line.substr(position, separator - position);
 		key.erase(key.find_last_not_of(' ') + 1);
-		key							= unquoted(key);
-		const size_t value_start	= line.find_first_not_of(' ', separator + 1);
-		const std::string base		= path_of();
-		const std::string full_path = base.empty() ? key : base + "." + key;
+		key							  = unquoted(key);
+		const size_t	  value_start = line.find_first_not_of(' ', separator + 1);
+		const std::string base		  = path_of();
+		const std::string full_path	  = base.empty() ? key : base + "." + key;
 		if (value_start == std::string::npos || line[value_start] == '#' || line[value_start] == '\r')
 		{
 			header(index, full_path, key);
@@ -195,8 +195,15 @@ std::vector<std::string> value_choices(const OutlineEntry& entry)
 		{"display", {"alongside", "override", "until_reactivated"}},
 		{"key_mode", {"combination", "oneof"}},
 		{"delay_mode",
-		 {"from_timestamp", "send_all_after_delay", "ratio", "drop", "drop_and_send", "hold_and_send", "drop_until_toggle",
-		  "hold_until_deactivation", "packet_group_send"}},
+		 {"from_timestamp",
+		  "send_all_after_delay",
+		  "ratio",
+		  "drop",
+		  "drop_and_send",
+		  "hold_and_send",
+		  "drop_until_toggle",
+		  "hold_until_deactivation",
+		  "packet_group_send"}},
 		{"retransmission_mode", {"none", "only_seq", "only_ack", "both"}},
 		{"subsequent_packet_hold_mode", {"none", "seq_only", "ack_only", "seq_ack"}},
 		{"group_order", {"fifo", "lifo", "random"}},
