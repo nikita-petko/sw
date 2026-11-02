@@ -113,6 +113,26 @@ void add_set_lookup(nftnl_rule* rule, bool negated, const std::string& name, uin
 	nftnl_rule_add_expr(rule, expr);
 }
 
+void add_mask32(nftnl_rule* rule, uint32_t mask)
+{
+	const uint32_t xor_value = 0;
+	nftnl_expr*	   expr		 = make_expr("bitwise");
+	nftnl_expr_set_u32(expr, NFTNL_EXPR_BITWISE_SREG, NFT_REG_1);
+	nftnl_expr_set_u32(expr, NFTNL_EXPR_BITWISE_DREG, NFT_REG_1);
+	nftnl_expr_set_u32(expr, NFTNL_EXPR_BITWISE_LEN, sizeof(uint32_t));
+	nftnl_expr_set(expr, NFTNL_EXPR_BITWISE_MASK, &mask, sizeof(mask));
+	nftnl_expr_set(expr, NFTNL_EXPR_BITWISE_XOR, &xor_value, sizeof(xor_value));
+	nftnl_rule_add_expr(rule, expr);
+}
+
+void add_verdict(nftnl_rule* rule, uint32_t verdict)
+{
+	nftnl_expr* expr = make_expr("immediate");
+	nftnl_expr_set_u32(expr, NFTNL_EXPR_IMM_DREG, NFT_REG_VERDICT);
+	nftnl_expr_set_u32(expr, NFTNL_EXPR_IMM_VERDICT, verdict);
+	nftnl_rule_add_expr(rule, expr);
+}
+
 void add_queue(nftnl_rule* rule, uint16_t queue_number)
 {
 	nftnl_expr* expr = make_expr("queue");
@@ -249,6 +269,24 @@ void NftBatch::add_chain(const std::string& name, Hook hook, int priority)
 	commit(message);
 }
 
+void NftBatch::add_release_guard(const std::string& chain, uint32_t release_bit)
+{
+	RulePtr rule(nftnl_rule_alloc());
+	if (!rule)
+		return fail("out of memory");
+	nftnl_rule_set_u32(rule.get(), NFTNL_RULE_FAMILY, kFamily);
+	nftnl_rule_set_str(rule.get(), NFTNL_RULE_TABLE, kTableName);
+	nftnl_rule_set_str(rule.get(), NFTNL_RULE_CHAIN, chain.c_str());
+	const uint32_t zero = 0;
+	add_meta_load(rule.get(), NFT_META_MARK);
+	add_mask32(rule.get(), release_bit);
+	add_compare(rule.get(), true, &zero, sizeof(zero));
+	add_verdict(rule.get(), NFT_RETURN);
+	nlmsghdr* message = header(NFT_MSG_NEWRULE, NLM_F_CREATE | NLM_F_APPEND);
+	nftnl_rule_nlmsg_build_payload(message, rule.get());
+	commit(message);
+}
+
 void NftBatch::add_queue_rule(const std::string& chain, const CompiledRule& compiled, uint16_t queue_number, const AddressSets& sets)
 {
 	RulePtr rule(nftnl_rule_alloc());
@@ -323,7 +361,7 @@ void NftBatch::add_queue_rule(const std::string& chain, const CompiledRule& comp
 	commit(message);
 }
 
-void NftBatch::add_channel(uint32_t channel_id, uint16_t queue_number, int priority, const std::vector<CompiledRule>& rules, ChannelChains& chains)
+void NftBatch::add_channel(uint32_t channel_id, uint16_t queue_number, int priority, const std::vector<CompiledRule>& rules, ChannelChains& chains, uint32_t release_bit)
 {
 	try
 	{
@@ -352,6 +390,8 @@ void NftBatch::add_channel(uint32_t channel_id, uint16_t queue_number, int prior
 				continue;
 			const std::string chain = "ch" + std::to_string(channel_id) + "_" + hook_name(hook);
 			add_chain(chain, hook, priority);
+			if (release_bit != 0)
+				add_release_guard(chain, release_bit);
 			for (const CompiledRule& rule : rules)
 				if (rule.hook == hook)
 					add_queue_rule(chain, rule, queue_number, sets);

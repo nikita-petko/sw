@@ -36,7 +36,10 @@ public:
 
 	/// Adds one base chain and a `queue flags bypass to <queue_number>` rule per compiled rule for every hook used,
 	/// and one set per distinct address list with several members. Fills `chains` for later removal.
-	void add_channel(uint32_t channel_id, uint16_t queue_number, int priority, const std::vector<CompiledRule>& rules, ChannelChains& chains);
+	/// With a non-zero `release_bit`, every chain starts with `meta mark & <bit> != 0 return`: the channel sets that bit on
+	/// the packets it releases, so a released packet is not queued a second time by another chain of the same channel
+	/// (for example on loopback, which crosses both the output and the input hook). Other channels ignore the bit.
+	void add_channel(uint32_t channel_id, uint16_t queue_number, int priority, const std::vector<CompiledRule>& rules, ChannelChains& chains, uint32_t release_bit = 0);
 
 	/// Deletes the rules, chains and sets of a channel.
 	void delete_channel(const ChannelChains& chains);
@@ -68,6 +71,7 @@ private:
 	void fail(const std::string& message);
 	void add_set(const std::string& name, uint32_t id, const std::vector<uint32_t>& addrs);
 	void add_chain(const std::string& name, Hook hook, int priority);
+	void add_release_guard(const std::string& chain, uint32_t release_bit);
 	void add_queue_rule(const std::string& chain, const CompiledRule& rule, uint16_t queue_number, const AddressSets& sets);
 
 	std::vector<uint8_t> bytes_;

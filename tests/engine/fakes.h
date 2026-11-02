@@ -36,6 +36,8 @@ public:
 	void fail_sends(bool fail);
 
 	size_t				   sent_count() const;
+	/// Sizes of the send_batch() calls the engine made, in order (single sends are not counted).
+	std::vector<size_t>	   batch_sizes() const;
 	std::vector<SentPacket> sent_packets() const;
 	/// Timestamps (ids) of the packets the engine discarded.
 	std::vector<int64_t>   discarded() const;
@@ -59,6 +61,7 @@ private:
 	std::deque<Inbound>		inbound_;
 	std::vector<SentPacket> sent_;
 	std::vector<int64_t>	discarded_;
+	std::vector<size_t>		batch_sizes_;
 	size_t					consumed_		  = 0;
 	bool					recv_shutdown_	  = false;
 	bool					closed_			  = false;

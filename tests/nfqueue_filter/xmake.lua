@@ -19,4 +19,13 @@ if not is_plat("windows") then
         add_syslinks("nftnl", "mnl")
         add_tests("default")
     target_end()
+
+    target("verdict_tracker_test")
+        set_kind("binary")
+        set_default(false)
+        add_files("verdict_tracker_test.cc")
+        add_files("../../backends/nfqueue/verdict_tracker.cc")
+        add_includedirs("../../backends/nfqueue", "..")
+        add_tests("default")
+    target_end()
 end

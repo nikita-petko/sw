@@ -29,13 +29,15 @@ void remove_table();
 /// Creates one chain per hook used by `rules` and a queue-to-`queue_number` rule for each entry. Address lists with
 /// several members become named sets, shared by every rule of the channel that uses the same list.
 /// `priority` is the nftables chain priority (lower runs first). Rules use `bypass`, so packets are
-/// accepted whenever no program is bound to the queue.
+/// accepted whenever no program is bound to the queue. A non-zero `release_bit` adds the "already released by this
+/// channel" guard described at NftBatch::add_channel().
 bool add_channel_rules(uint32_t				  channel_id,
 					   uint16_t				  queue_number,
 					   int					  priority,
 					   const std::vector<CompiledRule>& rules,
 					   ChannelChains&		  chains,
-					   std::string&			  error);
+					   std::string&			  error,
+					   uint32_t				  release_bit = 0);
 
 /// Removes the chains and sets of a channel. Failures are ignored; the table is deleted on exit anyway.
 void remove_channel_rules(ChannelChains& chains);

@@ -57,11 +57,19 @@ r=$(rtt 5); python -c "import sys; sys.exit(0 if float(\"$r\")<0.3 else 1)"; che
 sleep 2.5
 grep -q "counted for server 10.2.0.2" /tmp/lagsw.log; check "discovery counts forwarded packets for the server address" $?
 grep -q "counted for server 10.1.0.2" /tmp/lagsw.log; [ $? -ne 0 ]; check "discovery never mistakes the client for the server" $?
+# Capture rules exist only while a channel does: an idle profile owns no chain, only the discovery sniffer does.
+idle_chains=$(nft list table inet lagsw | grep -c "^	chain ")
+[ "$idle_chains" -ge 1 ]; check "idle: discovery chains present ($idle_chains)" $?
+nft list table inet lagsw | grep -q "meta mark"; [ $? -ne 0 ]; check "idle: sniff channel has no release-mark guard" $?
 echo d > $KEYS; sleep 0.5
 nft list table inet lagsw | grep -q "hook forward"; check "table has a forward hook chain" $?
+active_chains=$(nft list table inet lagsw | grep -c "^	chain ")
+[ "$active_chains" -gt "$idle_chains" ]; check "activation adds the profile chain ($idle_chains -> $active_chains)" $?
+nft list table inet lagsw | grep -qE "meta mark & 0x01000000 != 0x00000000 return"; check "intercepting chain starts with the release-mark guard" $?
 r=$(rtt 10); python -c "import sys; sys.exit(0 if float(\"$r\")>=0.5 else 1)"; check "forwarded traffic is delayed ($r)" $?
 echo > $KEYS; sleep 0.5
 r=$(rtt 5); python -c "import sys; sys.exit(0 if float(\"$r\")<0.3 else 1)"; check "released ($r)" $?
+[ "$(nft list table inet lagsw | grep -c "^	chain ")" -eq "$idle_chains" ]; check "deactivation removes the profile chain again" $?
 echo d > $KEYS; sleep 0.5
 kill -TERM $pid; for i in $(seq 50); do kill -0 $pid 2>/dev/null || break; sleep 0.1; done
 kill -0 $pid 2>/dev/null; [ $? -ne 0 ]; check "SIGTERM exits" $?

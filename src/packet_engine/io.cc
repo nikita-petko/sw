@@ -35,25 +35,41 @@ void log_received_packet([[maybe_unused]] const std::string& profile_label, cons
 	}
 }
 
-/// Sends a packet the mode released and logs the outcome. `failure` and `success` name the situation in the log
-/// ("send: failed" / "send: delayed packet", or the flush variants). Returns the number of bytes sent.
-uint32_t transmit_packet(PacketMode&				mode,
-						 backend::PacketChannel&	handle,
-						 PacketNode*				node,
-						 const std::string&			profile_label,
-						 const char*				failure,
-						 [[maybe_unused]] const char* success,
-						 std::atomic<uint64_t>&		sent_counter)
+/// Sends the packets the mode released, in order, and logs each outcome. The backend gets them as one batch so it can
+/// release them with fewer system calls. `failure` and `success` name the situation in the log ("send: failed" /
+/// "send: delayed packet", or the flush variants). `sent_bytes[i]` receives the number of bytes sent for `nodes[i]`.
+void transmit_packets(PacketMode&				  mode,
+					  backend::PacketChannel&	  handle,
+					  const std::vector<PacketNode*>& nodes,
+					  const std::string&		  profile_label,
+					  const char*				  failure,
+					  [[maybe_unused]] const char* success,
+					  std::atomic<uint64_t>&	  sent_counter,
+					  std::vector<uint32_t>&	  sent_bytes)
 {
-	uint32_t	sent = 0;
-	std::string io_error;
-	mode.prepare_packet_for_send(node->packet, node->length, node->address);
-	if (handle.send(node->packet, node->length, *node->address, sent, io_error) != backend::IoStatus::ok)
+	std::vector<backend::SendItem> items(nodes.size());
+	for (size_t index = 0; index < nodes.size(); ++index)
 	{
-		LOG_ERROR("%s %s: %s", profile_label.c_str(), failure, io_error.c_str());
+		PacketNode* node = nodes[index];
+		mode.prepare_packet_for_send(node->packet, node->length, node->address);
+		items[index].packet = node->packet;
+		items[index].length = node->length;
+		items[index].meta	= node->address;
 	}
-	else if (sent != 0)
+	handle.send_batch(items.data(), items.size());
+	sent_bytes.assign(nodes.size(), 0);
+	for (size_t index = 0; index < nodes.size(); ++index)
 	{
+		const PacketNode*		node = nodes[index];
+		const backend::SendItem& item = items[index];
+		if (item.status != backend::IoStatus::ok)
+		{
+			LOG_ERROR("%s %s: %s", profile_label.c_str(), failure, item.error.c_str());
+			continue;
+		}
+		sent_bytes[index] = item.sent;
+		if (item.sent == 0)
+			continue;
 		sent_counter.fetch_add(1);
 		const PacketAddresses				  addresses = packet_addresses(node->packet, node->length);
 		ParsedPacket						  parsed;
@@ -66,9 +82,8 @@ uint32_t transmit_packet(PacketMode&				mode,
 				  has_tcp_header ? format_tcp_flags(*tcp_header).c_str() : "-",
 				  addresses.source.c_str(),
 				  addresses.destination.c_str(),
-				  sent);
+				  item.sent);
 	}
-	return sent;
 }
 }  // namespace
 
@@ -145,12 +160,12 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 				}
 				session->mode->release(session->delayed_packets, now, ready_packets);
 			}
-			for (PacketNode* node : ready_packets)
+			std::vector<uint32_t> sent_bytes;
+			transmit_packets(*session->mode, *session->handle, ready_packets, profile_label, "send: failed", "send: delayed packet", stats.delayed_packets_sent, sent_bytes);
+			for (size_t index = 0; index < ready_packets.size(); ++index)
 			{
-				const uint32_t sent = transmit_packet(
-					*session->mode, *session->handle, node, profile_label, "send: failed", "send: delayed packet", stats.delayed_packets_sent);
 				std::lock_guard<std::mutex> packet_lock(session->packet_mutex);
-				session->mode->packet_send_completed(*node, sent != 0);
+				session->mode->packet_send_completed(*ready_packets[index], sent_bytes[index] != 0);
 			}
 			for (PacketNode* node : ready_packets)
 				destroy_packet_node(node);
@@ -161,11 +176,10 @@ void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
 			std::lock_guard<std::mutex> lock(session->packet_mutex);
 			session->mode->flush(session->delayed_packets, pending_packets);
 		}
+		std::vector<uint32_t> flushed_bytes;
+		transmit_packets(*session->mode, *session->handle, pending_packets, profile_label, "flush: send failed", "flush: sent packet", stats.teardown_packets_sent, flushed_bytes);
 		for (PacketNode* node : pending_packets)
-		{
-			transmit_packet(*session->mode, *session->handle, node, profile_label, "flush: send failed", "flush: sent packet", stats.teardown_packets_sent);
 			destroy_packet_node(node);
-		}
 	}
 	LOG_DEBUG_GROUP(logging::group::packet_send, "%s flush: stopped", profile_label.c_str());
 }

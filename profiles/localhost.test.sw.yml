@@ -6,8 +6,9 @@
 # pocs/linux_nfqueue_backend/localhost_harness.py and hold the profile keys.
 #
 # Notes for loopback:
-#  - A loopback packet crosses the output hook and then the input hook, so an unrestricted capture holds
-#    it twice. Most profiles use `outbound: true` so a packet is captured once, on the way out.
+#  - A loopback packet crosses the output hook and then the input hook. A channel that holds packets marks the ones
+#    it releases, so it does not hold the same packet a second time at the other hook (sniff channels still see both).
+#    Most profiles use `outbound: true` anyway, so a packet is captured once, on the way out.
 #  - The forward hook never sees loopback traffic; the `Forward` profile only proves the rules load.
 
 global_filter: "tcp"

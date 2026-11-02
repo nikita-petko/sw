@@ -9,12 +9,10 @@
 LOG_DEFAULT_GROUP(logging::group::passive_latency)
 
 namespace {
-/// Sends one packet immediately, logging the outcome. Used for both the fail-open overflow path and final flush.
-void send_passive_packet(backend::PacketChannel& handle, const uint8_t* packet, uint32_t length, const backend::PacketMeta& address, const char* reason)
+/// Logs the outcome of one passive-latency send.
+void log_passive_send(const char* reason, const uint8_t* packet, uint32_t length, const backend::IoStatus status, uint32_t sent, const std::string& io_error)
 {
-	uint32_t	sent = 0;
-	std::string io_error;
-	if (handle.send(packet, length, address, sent, io_error) != backend::IoStatus::ok)
+	if (status != backend::IoStatus::ok)
 	{
 		LOG_ERROR("Passive latency %s: failed: %s", reason, io_error.c_str());
 		return;
@@ -30,6 +28,15 @@ void send_passive_packet(backend::PacketChannel& handle, const uint8_t* packet, 
 			  addresses.source.c_str(),
 			  addresses.destination.c_str(),
 			  sent);
+}
+
+/// Sends one packet immediately, logging the outcome. Used for the fail-open overflow path and delayed releases.
+void send_passive_packet(backend::PacketChannel& handle, const uint8_t* packet, uint32_t length, const backend::PacketMeta& address, const char* reason)
+{
+	uint32_t	sent = 0;
+	std::string io_error;
+	const backend::IoStatus status = handle.send(packet, length, address, sent, io_error);
+	log_passive_send(reason, packet, length, status, sent, io_error);
 }
 }  // namespace
 
@@ -243,10 +250,18 @@ void PacketEngine::flush_passive_latency_queue()
 			state_->passive_latency_queue.pop();
 		}
 	}
-	for (PacketNode* node : pending_packets)
+	std::vector<backend::SendItem> items(pending_packets.size());
+	for (size_t index = 0; index < pending_packets.size(); ++index)
 	{
-		send_passive_packet(*state_->passive_latency_handle, node->packet, node->length, *node->address, "flush: sent packet");
-		destroy_packet_node(node);
+		items[index].packet = pending_packets[index]->packet;
+		items[index].length = pending_packets[index]->length;
+		items[index].meta	= pending_packets[index]->address;
+	}
+	state_->passive_latency_handle->send_batch(items.data(), items.size());
+	for (size_t index = 0; index < pending_packets.size(); ++index)
+	{
+		log_passive_send("flush: sent packet", items[index].packet, items[index].length, items[index].status, items[index].sent, items[index].error);
+		destroy_packet_node(pending_packets[index]);
 	}
 }
 

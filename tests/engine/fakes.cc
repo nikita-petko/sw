@@ -54,6 +54,15 @@ public:
 		return backend::IoStatus::ok;
 	}
 
+	void send_batch(backend::SendItem* items, size_t count) override
+	{
+		{
+			std::lock_guard<std::mutex> lock(state_->m_);
+			state_->batch_sizes_.push_back(count);
+		}
+		backend::PacketChannel::send_batch(items, count);
+	}
+
 	void discard(const backend::PacketMeta& meta) override
 	{
 		std::lock_guard<std::mutex> lock(state_->m_);
@@ -107,6 +116,12 @@ size_t ChannelState::sent_count() const
 {
 	std::lock_guard<std::mutex> lock(m_);
 	return sent_.size();
+}
+
+std::vector<size_t> ChannelState::batch_sizes() const
+{
+	std::lock_guard<std::mutex> lock(m_);
+	return batch_sizes_;
 }
 
 std::vector<SentPacket> ChannelState::sent_packets() const

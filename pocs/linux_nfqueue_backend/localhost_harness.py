@@ -132,6 +132,8 @@ class Lagsw:
             if done:
                 return True
             time.sleep(0.1)
+        if shutil.which("gdb"):
+            print(subprocess.run(["gdb", "-p", str(self.pid), "-batch", "-ex", "thread apply all bt 12"], capture_output=True, text=True).stdout[-6000:])
         os.kill(self.pid, 9)
         os.waitpid(self.pid, 0)
         return False
@@ -168,7 +170,10 @@ def run(profile, label, body):
         if ok:
             body(app)
     finally:
-        check(f"{label}: clean exit", app.quit())
+        exited = app.quit()
+        check(f"{label}: clean exit", exited)
+        if not exited:
+            print("INFO  log tail of the process that had to be killed:\n" + "\n".join([l for l in app.log.splitlines() if "(STOPPED)" not in l][-25:]))
     check(f"{label}: nft table removed", "lagsw" not in nft_tables())
     check(f"{label}: no errors logged", not re.search(r"\[(ERROR|FATAL)\]", app.log),
           "\n".join(l for l in app.log.splitlines() if "[ERROR]" in l)[:400])
@@ -221,6 +226,20 @@ def behaviour(app):
     t.join()
     check("Hold Until Deactivation: released on key up", box.get("r") is not None, f"{box.get('r')}")
 
+    # Several held packets are released by one batch verdict instead of one netlink message each.
+    tap("w")
+    time.sleep(0.3)
+    boxes = [{} for _ in range(3)]
+    threads = [threading.Thread(target=lambda b=b: b.update(r=tcp_rtt(timeout=8))) for b in boxes]
+    for t in threads:
+        t.start()
+    time.sleep(0.6)
+    tap("w")
+    for t in threads:
+        t.join()
+    check("Hold Until Deactivation: every held connection completes", all(b.get("r") is not None for b in boxes), f"{[b.get('r') for b in boxes]}")
+    check("Hold Until Deactivation: held packets released with a batch verdict", re.search(r"batch accept of [2-9]\d* packets", app.log) is not None)
+
     tap("t")  # UDP profile
     r = udp_rtt()
     check("UDP: echo works under the profile", r is not None, f"{r}")
@@ -252,6 +271,17 @@ def behaviour(app):
 
     pcaps = os.listdir(os.path.join(WORK, "pcap_files")) if os.path.isdir(os.path.join(WORK, "pcap_files")) else []
     check("pcap files written", len(pcaps) > 0, f"{len(pcaps)} files")
+
+
+def guard_case(app):
+    # Without `outbound: true`, loopback traffic crosses the output and the input hook. A released packet carries the channel's
+    # release mark, so the input chain leaves it alone: the 300 ms delay applies once per packet (4 packets = 1.2 s), not twice.
+    tap("d")
+    r = tcp_rtt(timeout=10)
+    check("Release mark: loopback packet delayed once, not once per hook", r is not None and 1.0 <= r < 1.8, f"{r}")
+    tap("d")
+    r = tcp_rtt()
+    check("Release mark: traffic fast again after deactivation", r is not None and r < 0.5, f"{r}")
 
 
 def ack_case(app):
@@ -307,8 +337,17 @@ def main():
     # Discovered client addresses are added to every filter, so behaviour runs use fixed filters.
     open(fixed, "w").write(re.sub(r"(forwarded_address_discovery:\s*\n\s*enabled:) true", r"\1 false", text))
 
+    both_hooks = os.path.join(WORK, "both_hooks.yml")
+    open(both_hooks, "w").write(open(fixed).read().replace("outbound: true", "outbound: false"))
+    if only == "guard":
+        run(both_hooks, "release mark", guard_case)
+        shutil.rmtree(WORK, ignore_errors=True)
+        print(f"\n{sum(results)}/{len(results)} checks passed")
+        sys.exit(0 if all(results) else 1)
+
     if not only:
         run(fixed, "behaviour", behaviour)
+        run(both_hooks, "release mark", guard_case)
     run(fixed, "ack restoration", ack_case)
     for name, keys in ([] if only else SMOKE):
         run(fixed, name, smoke_case(name, keys))

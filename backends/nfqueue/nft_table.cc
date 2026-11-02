@@ -311,7 +311,8 @@ bool add_channel_rules(uint32_t channel_id,
 					   int		priority,
 					   const std::vector<CompiledRule>& rules,
 					   ChannelChains& chains,
-					   std::string& error)
+					   std::string& error,
+					   uint32_t release_bit)
 {
 	std::lock_guard<std::mutex> lock(table_mutex);
 	if (!table_created)
@@ -321,7 +322,7 @@ bool add_channel_rules(uint32_t channel_id,
 	}
 	ChannelChains created;
 	NftBatch	  batch(next_seq);
-	batch.add_channel(channel_id, queue_number, priority, rules, created);
+	batch.add_channel(channel_id, queue_number, priority, rules, created, release_bit);
 	if (created.names.empty() && batch.ok())
 		return true;
 	for ([[maybe_unused]] const CompiledRule& rule : rules)

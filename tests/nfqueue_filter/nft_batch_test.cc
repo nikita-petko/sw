@@ -56,6 +56,8 @@ int describe_expr(nftnl_expr* expr, void* user)
 		line += " mask=" + data_of(expr, NFTNL_EXPR_BITWISE_MASK) + " xor=" + data_of(expr, NFTNL_EXPR_BITWISE_XOR);
 	else if (line == "lookup")
 		line += std::string(" set=") + nftnl_expr_get_str(expr, NFTNL_EXPR_LOOKUP_SET) + (nftnl_expr_is_set(expr, NFTNL_EXPR_LOOKUP_FLAGS) ? " inv" : "");
+	else if (line == "immediate")
+		line += " verdict=" + std::to_string(static_cast<int32_t>(nftnl_expr_get_u32(expr, NFTNL_EXPR_IMM_VERDICT)));
 	else if (line == "queue")
 		line += " num=" + std::to_string(nftnl_expr_get_u16(expr, NFTNL_EXPR_QUEUE_NUM)) + " total=" + std::to_string(nftnl_expr_get_u16(expr, NFTNL_EXPR_QUEUE_TOTAL)) +
 				" flags=" + std::to_string(nftnl_expr_get_u16(expr, NFTNL_EXPR_QUEUE_FLAGS));
@@ -319,6 +321,33 @@ void test_negated_lists_invert_the_lookup()
 	CHECK(found);
 }
 
+void test_release_guard_leads_every_chain()
+{
+	nfq::NftBatch	   batch(1);
+	nfq::ChannelChains chains;
+	// Loopback traffic crosses the output and the input hook; the guard keeps a released packet from being queued twice.
+	batch.add_channel(0, 10, -150, compile("tcp.DstPort == 80"), chains, 0x01000000u);
+	CHECK(batch.finish());
+	const std::string guard = "meta key=" + std::to_string(NFT_META_MARK) + "; bitwise mask=00000001 xor=00000000; cmp neq 00000000; immediate verdict=" + std::to_string(NFT_RETURN);
+	const Lines		  expected = {
+		  "begin",
+		  "add chain ch0_input hook=1 prio=-150 type=filter policy=1",
+		  "add rule ch0_input: " + guard,
+		  "add rule ch0_input: " + kNfproto + "; " + net(9, 1) + "; cmp eq 06; " + transport(2, 2) + "; cmp eq 0050; " + kQueue,
+		  "add chain ch0_output hook=3 prio=-150 type=filter policy=1",
+		  "add rule ch0_output: " + guard,
+		  "add rule ch0_output: " + kNfproto + "; " + net(9, 1) + "; cmp eq 06; " + transport(2, 2) + "; cmp eq 0050; " + kQueue + " [ack]",
+		  "end",
+	  };
+	CHECK(decode(batch.bytes()) == expected);
+}
+
+void test_no_guard_without_a_release_bit()
+{
+	for (const std::string& line : channel_lines("tcp"))
+		CHECK(line.find("immediate") == std::string::npos);
+}
+
 void test_forward_hook_and_priority()
 {
 	nfq::NftBatch	   batch(1);
@@ -399,6 +428,8 @@ int main(int argc, char** argv)
 		{"flags_ports_and_interfaces", test_flags_ports_and_interfaces},
 		{"single_addresses_are_compared_and_lists_become_sets", test_single_addresses_are_compared_and_lists_become_sets},
 		{"negated_lists_invert_the_lookup", test_negated_lists_invert_the_lookup},
+		{"release_guard_leads_every_chain", test_release_guard_leads_every_chain},
+		{"no_guard_without_a_release_bit", test_no_guard_without_a_release_bit},
 		{"forward_hook_and_priority", test_forward_hook_and_priority},
 		{"channel_removal_batch", test_channel_removal_batch},
 		{"long_address_lists_are_split_across_messages", test_long_address_lists_are_split_across_messages},

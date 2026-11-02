@@ -268,6 +268,8 @@ void test_packets_without_a_delay_are_held_until_teardown()
 	CHECK(sent.size() == 3);
 	for (size_t index = 0; index < sent.size(); ++index)
 		CHECK(sent[index].meta.timestamp == static_cast<int64_t>(index + 1));
+	// The whole flush reaches the backend as one batch, in receive order.
+	CHECK(channel->batch_sizes() == (std::vector<size_t>{3}));
 	CHECK(engine.pending_packets() == 0 && engine.next_batch_in_ms() == 0);
 }
 

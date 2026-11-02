@@ -1,6 +1,7 @@
 #ifndef PACKET_BACKEND_H_
 #define PACKET_BACKEND_H_
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -69,6 +70,17 @@ struct OpenOptions
 	int16_t		priority = 0;
 };
 
+/// One packet of PacketChannel::send_batch(). `status`, `sent` and `error` are filled in by the call.
+struct SendItem
+{
+	const uint8_t*			packet = nullptr;
+	uint32_t				length = 0;
+	const PacketMeta*		meta   = nullptr;
+	IoStatus				status = IoStatus::ok;
+	uint32_t				sent   = 0;
+	std::string				error;
+};
+
 /// An open capture channel. Implementations must allow recv() to run concurrently with
 /// shutdown_recv() and send() from other threads.
 class PacketChannel
@@ -80,6 +92,14 @@ public:
 	virtual IoStatus recv(uint8_t* buffer, uint32_t capacity, uint32_t& length, PacketMeta& meta, std::string& error) = 0;
 	/// Reinjects a packet. `sent` receives the number of bytes sent.
 	virtual IoStatus send(const uint8_t* packet, uint32_t length, const PacketMeta& meta, uint32_t& sent, std::string& error) = 0;
+	/// Reinjects several packets that are released together (a flush, a hold being lifted), in order. Every item gets its own
+	/// status. The default sends them one by one; a backend may override it to release them with fewer system calls, but
+	/// the outcome must match sending each item with send() in order.
+	virtual void	 send_batch(SendItem* items, size_t count)
+	{
+		for (size_t index = 0; index < count; ++index)
+			items[index].status = send(items[index].packet, items[index].length, *items[index].meta, items[index].sent, items[index].error);
+	}
 	/// Tells the backend a received packet is intentionally never sent. Backends that hold packets until a
 	/// verdict (for example NFQUEUE) must release it as dropped; capture-and-reinject backends need nothing.
 	virtual void	 discard(const PacketMeta& meta) { (void)meta; }

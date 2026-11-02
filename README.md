@@ -110,6 +110,7 @@ xmake build packet_test && xmake run packet_test visible   # only cases whose na
 | `net_monitor_test` | net monitor on the same in-memory backend: sniff channel setup, passive RTT and retransmission measurement, pause/reset, ports, packet sizes, handshakes, TCP health, flows, chart and frame rendering |
 | `format_test` | text formatting of profile options |
 | `nfqueue_filter_test` | capture-filter to nftables compiler (not built on Windows) |
+| `verdict_tracker_test` | which waiting NFQUEUE packets one batch verdict may release, including id wraparound (not built on Windows) |
 | `nft_batch_test` | nf_tables netlink batches built by the Linux backend, decoded with libnftnl and compared with the expected tables, chains, sets and expressions (not built on Windows) |
 
 Suites are plain executables without external dependencies; the shared helpers are in
@@ -185,7 +186,14 @@ would not work. Re-run `setcap` after every rebuild, because replacing the file 
 - `nft list table inet lagsw` shows the installed rules while lagsw runs. At `-l debug` the `nft.script` log group shows every
   batch and rule that is sent to the kernel.
 - `forward: true` profiles capture routed traffic (gateway use). Loopback traffic crosses the
-  output and input hooks, so use `outbound: true` to capture it once.
+  output and input hooks. A channel that holds packets sets a reserved bit in the netfilter mark of every
+  packet it releases and skips marked packets at its other hook, so a loopback packet is held once, not
+  once per hook (sniff channels still observe it at both). The bits are `0xFF000000`, one per live channel,
+  and the released packet keeps its other mark bits; avoid using the top mark byte for other purposes on a
+  host that runs lagsw. `outbound: true` still restricts a profile to one direction.
+- Packets that a profile releases together (a flush, a `hold_until_deactivation` release, deactivation) are
+  accepted with one batch verdict when they are the oldest packets waiting in the queue, unmodified, and carry
+  the same mark; anything else is released one packet at a time, in order.
 - Filter terms outside the supported subset are rejected at startup with the position of the error.
 
 ### Setting up a gateway

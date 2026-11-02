@@ -15,6 +15,7 @@
 #include <deque>
 #include <mutex>
 #include <sstream>
+#include <unordered_set>
 
 #include "filter_compiler.h"
 #include "log.h"
@@ -22,6 +23,7 @@
 #include "nft_table.h"
 #include "packet_backend.h"
 #include "privileges.h"
+#include "verdict_tracker.h"
 
 LOG_DEFAULT_GROUP(logging::group::nfq)
 
@@ -35,7 +37,33 @@ constexpr uint32_t kMinIpv4Header	 = 20;
 // Capture priorities run high-to-low; nftables chain priorities run low-to-high.
 constexpr int kBasePriority = -150;
 
+// Mark bits reserved for released packets, one per live intercepting channel (see NftBatch::add_channel). They sit in
+// the top byte, which is rarely used by other tooling; channels beyond the eighth simply run without the guard.
+constexpr uint32_t kReleaseMarkPool = 0xFF000000u;
+
 std::atomic<uint32_t> next_channel_id{0};
+std::mutex			  release_mark_mutex;
+uint32_t			  release_marks_in_use = 0;
+
+uint32_t acquire_release_bit()
+{
+	std::lock_guard<std::mutex> lock(release_mark_mutex);
+	for (uint32_t bit = 1u << 24; (bit & kReleaseMarkPool) != 0; bit <<= 1)
+	{
+		if ((release_marks_in_use & bit) == 0)
+		{
+			release_marks_in_use |= bit;
+			return bit;
+		}
+	}
+	return 0;
+}
+
+void release_release_bit(uint32_t bit)
+{
+	std::lock_guard<std::mutex> lock(release_mark_mutex);
+	release_marks_in_use &= ~bit;
+}
 
 /// Backend-private state stored in PacketMeta::native.
 struct NativeMeta
@@ -43,6 +71,7 @@ struct NativeMeta
 	uint32_t packet_id;
 	uint32_t length;
 	uint64_t payload_hash;
+	uint32_t nfmark;
 };
 static_assert(sizeof(NativeMeta) <= sizeof(PacketMeta::native), "PacketMeta::native is too small");
 
@@ -59,7 +88,15 @@ class NfqChannel final : public PacketChannel
 public:
 	NfqChannel(bool sniff, uint32_t channel_id) : sniff_(sniff), channel_id_(channel_id), receive_buffer_(kReceiveBuffer) {}
 
-	~NfqChannel() override { close(); }
+	~NfqChannel() override
+	{
+		close();
+		if (release_bit_ != 0)
+			release_release_bit(release_bit_);
+	}
+
+	/// Packets this channel accepts are marked with `bit`, which the channel's own rules test to avoid queueing them again.
+	void set_release_bit(uint32_t bit) { release_bit_ = bit; }
 
 	bool start(uint16_t queue_number, int priority, const std::vector<nfq::CompiledRule>& rules, std::string& error)
 	{
@@ -105,7 +142,7 @@ public:
 			LOG_DEBUG("channel %u: SO_RCVBUF %d failed: %s", channel_id_, buffer, std::strerror(errno));
 
 		// The queue exists before the rules that feed it, so no packet is ever bypassed during setup.
-		return nfq::add_channel_rules(channel_id_, queue_number, priority, rules, chains_, error);
+		return nfq::add_channel_rules(channel_id_, queue_number, priority, rules, chains_, error, release_bit_);
 	}
 
 	IoStatus recv(uint8_t* buffer, uint32_t capacity, uint32_t& length, PacketMeta& meta, std::string& error) override
@@ -123,7 +160,7 @@ public:
 				if (packet.data.size() > capacity)
 				{
 					LOG_WARN("channel %u: accepting a %zu byte packet larger than the %u byte receive buffer unchanged", channel_id_, packet.data.size(), capacity);
-					verdict(native->packet_id, NF_ACCEPT, nullptr, 0);
+					verdict(native->packet_id, NF_ACCEPT, nullptr, 0, native->nfmark);
 					continue;
 				}
 				std::memcpy(buffer, packet.data.data(), packet.data.size());
@@ -178,7 +215,7 @@ public:
 		// An unmodified packet is accepted as-is so the kernel keeps its offload and checksum state.
 		const bool unchanged = length == native->length && hash_payload(packet, length) == native->payload_hash;
 		LOG_DEBUG_GROUP(logging::group::nfq_packet, "channel %u: accept packet id %u (%u bytes, %s)", channel_id_, native->packet_id, length, unchanged ? "unchanged" : "modified");
-		if (!verdict(native->packet_id, NF_ACCEPT, unchanged ? nullptr : packet, unchanged ? 0 : length))
+		if (!verdict(native->packet_id, NF_ACCEPT, unchanged ? nullptr : packet, unchanged ? 0 : length, native->nfmark))
 		{
 			LOG_ERROR("channel %u: failed to accept packet id %u: %s", channel_id_, native->packet_id, std::strerror(errno));
 			error = std::string("nfq_set_verdict failed: ") + std::strerror(errno);
@@ -186,6 +223,70 @@ public:
 		}
 		sent = length;
 		return IoStatus::ok;
+	}
+
+	// Packets that are still waiting for a verdict and are released together in order need one netlink message, not one each:
+	// a batch verdict accepts every waiting packet up to an id. It is used only for the oldest waiting packets (so nothing
+	// that is held for another reason is released by accident), only for unmodified packets, and only when they share
+	// one netfilter mark. Everything else is sent individually, in order.
+	void send_batch(SendItem* items, size_t count) override
+	{
+		std::vector<bool> handled(count, false);
+		if (!sniff_ && count >= 2)
+		{
+			std::vector<uint32_t> candidates;
+			std::vector<size_t>	  candidate_items;
+			for (size_t index = 0; index < count; ++index)
+			{
+				const NativeMeta* native = reinterpret_cast<const NativeMeta*>(items[index].meta->native);
+				if (items[index].length == native->length && hash_payload(items[index].packet, items[index].length) == native->payload_hash)
+				{
+					candidates.push_back(native->packet_id);
+					candidate_items.push_back(index);
+				}
+			}
+			std::lock_guard<std::mutex> lock(verdict_mutex_);
+			VerdictRun run;
+			if (queue_ != nullptr)
+			{
+				std::lock_guard<std::mutex> tracker_lock(tracker_mutex_);
+				run = tracker_.plan(candidates);
+			}
+			if (run.ids.size() >= 2)
+			{
+				const uint32_t mark = run.mark | release_bit_;
+				const int	   rc	= release_bit_ != 0 ? nfq_set_verdict_batch2(queue_, run.last_id, NF_ACCEPT, mark) : nfq_set_verdict_batch(queue_, run.last_id, NF_ACCEPT);
+				if (rc >= 0)
+				{
+					LOG_DEBUG("channel %u: batch accept of %zu packets up to id %u", channel_id_, run.ids.size(), run.last_id);
+					std::unordered_set<uint32_t> released(run.ids.begin(), run.ids.end());
+					{
+						std::lock_guard<std::mutex> tracker_lock(tracker_mutex_);
+						for (const uint32_t id : run.ids)
+							tracker_.remove(id);
+					}
+					for (size_t position = 0; position < candidates.size(); ++position)
+					{
+						if (released.count(candidates[position]) == 0)
+							continue;
+						SendItem& item = items[candidate_items[position]];
+						item.status	   = IoStatus::ok;
+						item.sent	   = item.length;
+						handled[candidate_items[position]] = true;
+					}
+					batch_verdicts_.fetch_add(1);
+					batched_packets_.fetch_add(run.ids.size());
+				}
+				else
+					LOG_DEBUG_GROUP(logging::group::nfq_packet, "channel %u: batch verdict failed (%s); sending individually", channel_id_, std::strerror(errno));
+			}
+		}
+		for (size_t index = 0; index < count; ++index)
+		{
+			if (handled[index])
+				continue;
+			items[index].status = send(items[index].packet, items[index].length, *items[index].meta, items[index].sent, items[index].error);
+		}
 	}
 
 	void discard(const PacketMeta& meta) override
@@ -233,7 +334,8 @@ public:
 		if (event_fd_ >= 0)
 			::close(event_fd_);
 		event_fd_ = -1;
-		LOG_DEBUG("channel %u: closed", channel_id_);
+		LOG_DEBUG("channel %u: closed (%llu batch verdict(s) released %llu packet(s))", channel_id_, static_cast<unsigned long long>(batch_verdicts_.load()),
+				  static_cast<unsigned long long>(batched_packets_.load()));
 	}
 
 private:
@@ -243,7 +345,10 @@ private:
 		PacketMeta			 meta;
 	};
 
-	bool verdict(uint32_t packet_id, uint32_t decision, const uint8_t* payload, uint32_t length)
+	using VerdictRun = nfq::VerdictTracker::Run;
+
+	// `nfmark` is the packet's original mark; accepted packets keep it and gain the channel's release bit.
+	bool verdict(uint32_t packet_id, uint32_t decision, const uint8_t* payload, uint32_t length, uint32_t nfmark = 0)
 	{
 		std::lock_guard<std::mutex> lock(verdict_mutex_);
 		if (queue_ == nullptr)
@@ -251,7 +356,14 @@ private:
 			errno = EBADF;
 			return false;
 		}
-		return nfq_set_verdict(queue_, packet_id, decision, length, payload) >= 0;
+		const bool mark_release = decision == NF_ACCEPT && release_bit_ != 0 && !sniff_;
+		const int  rc			= mark_release ? nfq_set_verdict2(queue_, packet_id, decision, nfmark | release_bit_, length, payload)
+											   : nfq_set_verdict(queue_, packet_id, decision, length, payload);
+		if (rc < 0)
+			return false;
+		std::lock_guard<std::mutex> tracker_lock(tracker_mutex_);
+		tracker_.remove(packet_id);
+		return true;
 	}
 
 	static int on_packet(nfq_q_handle*, nfgenmsg*, nfq_data* data, void* user)
@@ -275,7 +387,7 @@ private:
 		if (length < static_cast<int>(kMinIpv4Header) || payload == nullptr || (payload[0] >> 4) != 4)
 		{
 			LOG_DEBUG_GROUP(logging::group::nfq_packet, "channel %u: accept packet id %u untouched (not well-formed IPv4, length = %d)", channel_id_, packet_id, length);
-			verdict(packet_id, NF_ACCEPT, nullptr, 0);
+			verdict(packet_id, NF_ACCEPT, nullptr, 0, nfq_get_nfmark(data));
 			return;
 		}
 		Pending packet;
@@ -285,9 +397,15 @@ private:
 		timeval stamp{};
 		if (nfq_get_timestamp(data, &stamp) == 0)
 			packet.meta.timestamp = static_cast<int64_t>(stamp.tv_sec) * 1000000 + stamp.tv_usec;
-		NativeMeta native{packet_id, static_cast<uint32_t>(length), hash_payload(payload, static_cast<uint32_t>(length))};
+		NativeMeta native{packet_id, static_cast<uint32_t>(length), hash_payload(payload, static_cast<uint32_t>(length)), nfq_get_nfmark(data)};
 		std::memcpy(packet.meta.native, &native, sizeof(native));
 		LOG_DEBUG_GROUP(logging::group::nfq_packet, "channel %u: queued packet id %u (%d bytes, hook = %u, outbound = %d)", channel_id_, packet_id, length, static_cast<unsigned>(header->hook), packet.meta.outbound ? 1 : 0);
+		if (!sniff_)
+		{
+			// Not verdict_mutex_: close() holds it while the library waits for the kernel and may re-enter this callback.
+			std::lock_guard<std::mutex> lock(tracker_mutex_);
+			tracker_.add(packet_id, native.nfmark);
+		}
 		pending_.push_back(std::move(packet));
 	}
 
@@ -304,6 +422,12 @@ private:
 	std::deque<Pending>		pending_;
 	std::vector<uint8_t>	receive_buffer_;
 	nfq::ChannelChains		chains_;
+	// Lock order: verdict_mutex_, then tracker_mutex_. Nothing may call into libnetfilter_queue while holding tracker_mutex_.
+	std::mutex				tracker_mutex_;
+	nfq::VerdictTracker		tracker_;  ///< Guarded by tracker_mutex_.
+	uint32_t				release_bit_ = 0;
+	std::atomic<uint64_t>	batch_verdicts_{0};
+	std::atomic<uint64_t>	batched_packets_{0};
 };
 
 std::string address_chain(const char* field, const std::vector<std::string>& addresses)
@@ -363,6 +487,14 @@ std::unique_ptr<PacketChannel> open(const OpenOptions& options, std::string& err
 	const uint32_t channel_id	= next_channel_id.fetch_add(1);
 	const int	   priority		= kBasePriority - static_cast<int>(options.priority);
 	auto		   channel		= std::make_unique<NfqChannel>(options.sniff, channel_id);
+	// Only channels that hold and release packets need the guard; a sniffer accepts before the engine looks at the packet.
+	if (!options.sniff)
+	{
+		const uint32_t release_bit = acquire_release_bit();
+		if (release_bit == 0)
+			LOG_WARN("nfqueue: all %d release mark bits are in use; channel %u runs without loop protection", __builtin_popcount(kReleaseMarkPool), channel_id);
+		channel->set_release_bit(release_bit);
+	}
 	channel->set_description(options.forward ? "forward hook" : options.include_forward ? "input/output + forward hooks" : "input/output hooks");
 	if (!channel->start(static_cast<uint16_t>(kFirstQueueNumber + channel_id), priority, rules, error))
 	{

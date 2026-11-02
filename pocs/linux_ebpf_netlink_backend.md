@@ -2,7 +2,7 @@
 
 ## 0. Implementation status
 
-- **Phase 1 (spikes)** has been run on one kernel (Linux 7.2.11); **Phase 2 (Change A)** is implemented and tested in the shipped NFQUEUE backend. Results, deviations from this design and remaining cross-kernel checks are recorded in §13. Changes B and C are still proposals, and no behavior is certified across the proposed support range yet.
+- **Phase 1 (spikes)** has been run on one kernel (Linux 7.2.11); **Phase 2 (Change A)** and most of **Phase 3 (Change C)** are implemented and tested in the shipped NFQUEUE backend. Results, deviations from this design and remaining cross-kernel checks are recorded in §13. Change B is still a proposal, and no behavior is certified across the proposed support range yet.
 - This **evolves** [`linux_nfqueue_backend.md`](linux_nfqueue_backend.md) and builds on [`linux_tc_netem_backend.md`](linux_tc_netem_backend.md), replacing netem's fixed parameters with per-packet logic. It keeps the shipped NFQUEUE backend as the stateful fallback and changes how it is installed and when it is used.
 - The three changes (§1) are independent. Change A is useful on its own and is the recommended first phase (§13).
 
@@ -162,11 +162,11 @@ tc sees GSO/GRO super-packets and `fq` shapes them as one unit, then segmentatio
 
 ## 8. Change C: narrow and speed up NFQUEUE
 
-1. **Install on demand.** The queue rule exists only while a stateful verb is active (§6.3). Idle profiles cost nothing. **(Confirm how the engine opens and holds channels today before committing to this.)**
-2. **Pre-filter in the kernel.** The nft rule is the DNF match plus, where possible, TCP flag matches (for example excluding bare ACKs unless `ack_restoration` is on, as `ProfileFilter::include_bare_acks` already allows), so fewer packets reach the queue.
-3. **Batched verdicts.** `NFQNL_MSG_VERDICT_BATCH` accepts or drops every queued packet up to an id with one message. Releases that are a plain accept (`hold_until_deactivation`, `hold_and_send` flush) become one syscall. It does not apply to packets with modified payload.
+1. **Install on demand.** The queue rule exists only while a stateful verb is active (§6.3). Idle profiles cost nothing. The engine already works this way for profiles (answer to open question 4: a profile channel is opened by `PacketEngine::setup()` when the profile activates and closed by `teardown()`), so with no BPF tier yet this item is satisfied and verified, not changed. Narrowing it to *stateful verbs only* needs Change B.
+2. **Pre-filter in the kernel.** The nft rule is the DNF match plus, where possible, TCP flag matches (for example excluding bare ACKs unless `ack_restoration` is on, as `ProfileFilter::include_bare_acks` already allows), so fewer packets reach the queue. **Not done, because it would change behaviour:** `include_bare_acks` only *adds* bare ACKs to the filter; without it a bare ACK that matches the user filter (the default filter matches every packet on the port) is held, delayed or dropped like any other packet, so excluding it in the kernel would let ACKs through undelayed. The kernel rule already carries the whole filter (protocol, flags, addresses, ports, direction, interface). A safe pre-filter would need a per-mode statement of which packets the engine ignores, and there is none today.
+3. **Batched verdicts.** `NFQNL_MSG_VERDICT_BATCH` accepts or drops every queued packet up to an id with one message. Releases that are a plain accept (`hold_until_deactivation`, `hold_and_send` flush) become one syscall. It does not apply to packets with modified payload. Because the kernel applies a batch to *every* packet up to the id, it is used only for the oldest waiting packets (§13, "Phase 3 results").
 4. **Fanout, per flow.** `queue flags fanout` with a flow hash keeps per-flow order. The engine currently reads each channel from one thread and some modes depend on cross-flow order, so this stays deferred until §12 measurements justify it, as before.
-5. **Verdict mark.** Reinject with `NFQA_MARK` set to a reserved value and add `meta mark ... return` to the queue chain so a released packet cannot be re-queued by a lower-priority rule of the same table.
+5. **Verdict mark.** Reinject with `NFQA_MARK` set to a reserved value and add `meta mark ... return` to the queue chain so a released packet cannot be re-queued by a lower-priority rule of the same table. Implemented per channel, not with one global value: channels are meant to stack (a released packet continues to the next channel's chain, as with WinDivert priorities, and passive latency relies on it), so each intercepting channel owns one bit and only its own chains test it. `NFQA_MARK` replaces the whole mark, so the channel sets `original mark | its bit`.
 
 ## 9. Mode routing
 
@@ -257,6 +257,25 @@ Reuse the privileged-container / network-namespace pattern of `scripts/test_nfqu
 
 ## 13. Phases
 
+### Phase 3 results (Change C, 2026-11-02)
+
+Implemented in `backends/nfqueue/` and the engine:
+
+- **Batched verdicts.** `PacketChannel::send_batch()` (default: send one by one) lets the engine release packets together; `io.cc` uses it for the send thread's ready list and for the teardown flush, and `flush_passive_latency_queue()` for the passive-latency flush. The NFQUEUE channel tracks packets waiting for a verdict (`verdict_tracker.*`, ids widened to 64 bits so wraparound is safe) and uses `nfq_set_verdict_batch(2)` only for the longest run of the *oldest* waiting packets that are all in the release, unmodified and share one netfilter mark. Anything else is sent individually in order. A run needs at least two packets. Drops are not batched: the engine discards packets one at a time inside the modes.
+- **Release mark.** Each non-sniff channel takes one bit of `0xFF000000` (up to eight live channels; further ones run without the guard and log a warning). Accepted packets get `original mark | bit`, and every chain of that channel starts with `meta mark & bit != 0 return`. A loopback packet is therefore held once instead of at both hooks; sniff channels are unchanged.
+- **Install on demand:** already the case for profiles (see §8.1); the gateway script now asserts that an idle profile owns no chain, that activation adds one and that deactivation removes it.
+- **Pre-filter:** deliberately not done (§8.2).
+- **Fanout:** still deferred (§8.4).
+
+Verified (Linux 7.2.11, privileged containers, debug build):
+
+- Unit suites: `verdict_tracker_test` (9 cases), `nft_batch_test` (12, adds the guard rule), `engine_test` (the teardown flush reaches the backend as one batch of three) and the existing suites pass.
+- `scripts/test_nfqueue_localhost.sh`: 99 of 101 checks; the same two failures as before. New checks: three held connections are released with `batch accept of N packets` in the log and all complete; a profile without `outbound: true` delays a loopback exchange by 1.2 s with the guard, where the pre-change binary takes 2.4 s (the packet was held at both hooks).
+- `scripts/test_nfqueue_gateway.sh`: the new chain-count and guard checks pass and every earlier result is unchanged.
+- A first version took the tracker lock inside `verdict_mutex_`'s critical section, and `close()` deadlocked because `nfq_destroy_queue()` re-enters the receive callback while waiting for the kernel; the tracker now has its own mutex (lock order `verdict_mutex_`, then `tracker_mutex_`; nothing calls into libnetfilter_queue while holding the latter).
+
+Not measured: whether batching changes CPU or latency (that needs the §12 performance runs), behaviour on kernels before 7.2.11, and behaviour with policy routing keyed on the mark. Changing the mark on a locally generated packet makes the kernel re-run its routing lookup after the output hook; hosts that route on the top mark byte should not use it for that.
+
 ### Phase 2 results (Change A, 2026-11-02)
 
 Implemented in `backends/nfqueue/`:
@@ -295,7 +314,7 @@ The current-kernel spikes support proceeding with the design, with the strict ho
 
 1. **Spikes (shell + `bpftool`/`tc`, no C++; done on one kernel):** current-kernel probes are recorded above. Before fixing the support matrix, repeat the owner-table, horizon/order, ingress/forwarding, and tcx/`cls_bpf` lifecycle tests on the minimum supported kernels; older-kernel behavior remains open.
 2. **Change A (done, see "Phase 2 results" above):** libmnl/libnftnl client behind the existing `nft_table.h` interface, set-based renderer, owner flag, privilege-check simplification, `setcap` docs. Delivers value even if B is abandoned.
-3. **Change C:** on-demand queue rules, pre-filter, batched verdicts, verdict mark.
+3. **Change C (partly done, see "Phase 3 results" above):** on-demand queue rules, pre-filter, batched verdicts, verdict mark.
 4. **Change B (egress, gateway first):** BPF program, maps, tcx attach, `fq`, mode routing and fallback, `stats` in the status line.
 5. **Change B (local inbound, sniff ring buffer, pcap).**
 6. **Packaging/docs:** xmake option, README Linux section, capability and kernel-version table.
@@ -322,7 +341,7 @@ The current-kernel spikes support proceeding with the design, with the strict ho
 1. Is the gateway the primary use case? If so, local-host inbound (ifb) can be dropped from B, removing the riskiest spike.
 2. What is the minimum kernel? Requiring ≥ 6.6 for B gives clean `SIGKILL` semantics and one attach method; ≥ 5.18 widens support but needs a watchdog and a netlink attach path.
 3. Is a keep-alive/watchdog acceptable on kernels without tcx, or is "B requires tcx" the rule?
-4. Does the engine keep channels open for idle profiles today? If so, §8.1 is a larger win than assumed; if not, it only formalises current behaviour.
+4. ~~Does the engine keep channels open for idle profiles today?~~ **Answered:** no. Profile channels exist only while the profile is active; the always-on channels are the discovery, net-monitor, passive-latency and region-enforcement ones. §8.1 only formalises current behaviour.
 5. Do `ratio` (count) and `drop_and_send` map to timestamps exactly enough to stay on the BPF tier, or are they NFQUEUE-only? Decide after the §13 spike.
 6. Is fq's horizon cap acceptable, or do delays above it (up to 600 s) always fall back to NFQUEUE?
 7. Is fanout worth enabling for the stateful tier once idle cost is gone, or does the single-thread-per-channel read model stay?
