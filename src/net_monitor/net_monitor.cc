@@ -1838,10 +1838,15 @@ std::string NetMonitor::render_frame(int console_columns, int console_rows)
 				   stats.pps_down.values[stats.pps_down.values.size() - samples + i];
 		return sum / static_cast<double>(samples);
 	};
+#ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+	const bool focus_authoritative = engine_.is_authoritative_server();
+#else
+	const bool focus_authoritative = false;
+#endif
 	std::vector<std::string> table_order = server_order_;
 	std::stable_sort(table_order.begin(), table_order.end(), [&](const std::string& a, const std::string& b) {
-		const bool a_leads = engine_.is_authoritative_server() && a == focus_address;
-		const bool b_leads = engine_.is_authoritative_server() && b == focus_address;
+		const bool a_leads = focus_authoritative && a == focus_address;
+		const bool b_leads = focus_authoritative && b == focus_address;
 		if (a_leads != b_leads)
 			return a_leads;
 		return average_usage(servers_.at(a)) > average_usage(servers_.at(b));

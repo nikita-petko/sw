@@ -14,7 +14,7 @@ concurrency:
 
 env:
   # Packages the Linux build links against; the unit tests need only libcurl and zlib, which the root xmake.lua requires.
-  LINUX_PACKAGES: libnetfilter-queue-dev libmnl-dev libnfnetlink-dev libcurl4-openssl-dev zlib1g-dev
+  LINUX_PACKAGES: libnetfilter-queue-dev libmnl-dev libnftnl-dev libnfnetlink-dev libcurl4-openssl-dev zlib1g-dev
 
 jobs:
   # Every optional feature is compiled in or out, so the tests run against each combination that changes the code paths.
