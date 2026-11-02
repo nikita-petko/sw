@@ -152,6 +152,46 @@ xmake
 
 The binary is `build/linux/x86_64/release/lagsw`.
 
+#### Cross-compiling for ARM64
+
+[`scripts/build_aarch64.sh`](scripts/build_aarch64.sh) builds an `aarch64`
+(XMake: `arm64`) binary on an x86-64 Arch Linux or Ubuntu/Debian host. It
+detects `pacman` or `apt`, installs the cross compiler if it is missing (one
+`sudo` call), assembles an aarch64 sysroot, and runs XMake:
+
+```sh
+scripts/build_aarch64.sh                 # build/linux/arm64/release/lagsw
+scripts/build_aarch64.sh --mode debug
+scripts/build_aarch64.sh --package       # also create dist/lagsw-v*-arm64-release.tar.gz
+scripts/build_aarch64.sh --sysroot-only  # just prepare the sysroot
+scripts/build_aarch64.sh -- --pcap_files=y   # extra `xmake f` arguments after --
+```
+
+The sysroot (default `build/sysroot/aarch64`, change it with `--sysroot`,
+recreate it with `--refresh`) is created without root and never installed on
+the host:
+
+| | Arch Linux host | Ubuntu/Debian host |
+| --- | --- | --- |
+| Cross compiler | `aarch64-linux-gnu-gcc` | `g++-aarch64-linux-gnu` |
+| Sysroot source | Arch Linux ARM (`ALARM_MIRROR`), via `pacman` in a user namespace; packages are not signature-checked | arm64 packages of your release (`UBUNTU_PORTS_MIRROR` / `DEBIAN_MIRROR`), resolved with a private `apt` setup and extracted with `dpkg-deb -x`; signatures are checked |
+| Libraries | `glibc linux-api-headers gcc-libs zlib curl libnetfilter_queue libmnl libnftnl libnfnetlink` | `libc6-dev libstdc++6 zlib1g-dev libcurl4-openssl-dev libnetfilter-queue-dev libmnl-dev libnftnl-dev libnfnetlink-dev` |
+
+Dependencies of these (for example OpenSSL) are pulled in automatically. The
+sysroot is also the C library the binary is linked against, so build with the
+distribution `lagsw` will run on: an Ubuntu sysroot for Ubuntu/Debian
+targets, an Arch Linux ARM one for Arch Linux ARM targets.
+
+The script does what you would do by hand: it configures XMake with
+`-p linux -a arm64 --toolchain=cross --bin=<compiler dir> --cross=aarch64-linux-gnu-`
+and passes `--sysroot` plus the sysroot's `usr/include` and `usr/lib`
+directories as compiler and linker flags (Arch's cross compiler does not look
+in `<sysroot>/usr/include` by itself). `--linux_bpf=n` leaves out the optional
+eBPF tier, and cross builds link `libcurl` and `zlib` from the sysroot
+(`-lcurl -lz`) instead of building them from source, which fails with cross
+toolchains. The script reconfigures XMake (`xmake f -c`), so run `xmake f`
+again afterwards to go back to a native build.
+
 ### Running
 
 Run as root:

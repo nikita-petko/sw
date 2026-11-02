@@ -53,3 +53,23 @@ jobs:
             dist/*.zip
             dist/*.tar.gz
           if-no-files-found: error
+
+  linux-arm64:
+    name: linux / arm64 cross-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+
+      - name: Build and package (scripts/build_aarch64.sh)
+        run: scripts/build_aarch64.sh --package
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lagsw-linux-arm64
+          path: dist/*.tar.gz
+          if-no-files-found: error

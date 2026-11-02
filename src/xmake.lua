@@ -26,9 +26,14 @@ target("lagsw")
         add_files("platform/windows/*.cc")
     else
         add_files("platform/posix/*.cc")
-        add_packages("libcurl")
-        -- The static libcurl from vcpkg does not propagate its zlib dependency to the link line
-        add_packages("zlib")
+        if get_config("cross") or get_config("sdk") then
+            -- Cross builds link the libraries of the target sysroot; building them from source fails with cross toolchains
+            add_syslinks("curl", "z")
+        else
+            add_packages("libcurl")
+            -- The static libcurl from vcpkg does not propagate its zlib dependency to the link line
+            add_packages("zlib")
+        end
     end
 
     -- Packet capture backend; WinDivert is Windows-only, other platforms use the stub until a real backend exists
