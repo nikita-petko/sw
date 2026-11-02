@@ -1691,8 +1691,29 @@ std::string NetMonitor::render_frame(int console_columns, int console_rows)
 	const size_t trend_cols = std::min<size_t>(kHistory, width > name_cols + 75 ? width - name_cols - 75 : 0);
 	line(std::string(kBold) + " " + pad("Server", name_cols) + pad_left("pkt/s v", 9) + pad_left("pkt/s ^", 9) + pad_left("RTT", 10) + pad_left("avg", 10) +
 		 pad_left("jitter", 9) + pad_left("retx%", 8) + pad_left("silent", 9) + pad_left("score", 7) + "  RTT trend" + kReset);
+	// The authoritative server leads the table; the others follow by average packets per second over the charted window.
+	const auto average_usage = [](const ServerStats& stats)
+	{
+		const size_t samples = std::min(stats.pps_up.values.size(), stats.pps_down.values.size());
+		if (samples == 0)
+			return 0.0;
+		double sum = 0;
+		for (size_t i = 0; i < samples; ++i)
+			sum += stats.pps_up.values[stats.pps_up.values.size() - samples + i] + stats.pps_down.values[stats.pps_down.values.size() - samples + i];
+		return sum / static_cast<double>(samples);
+	};
+	std::vector<std::string> table_order = server_order_;
+	std::stable_sort(table_order.begin(), table_order.end(),
+					 [&](const std::string& a, const std::string& b)
+					 {
+						 const bool a_leads = engine_.is_authoritative_server() && a == focus_address;
+						 const bool b_leads = engine_.is_authoritative_server() && b == focus_address;
+						 if (a_leads != b_leads)
+							 return a_leads;
+						 return average_usage(servers_.at(a)) > average_usage(servers_.at(b));
+					 });
 	size_t shown = 0;
-	for (const std::string& address : server_order_)
+	for (const std::string& address : table_order)
 	{
 		if (shown++ >= table_limit)
 			break;
