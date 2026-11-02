@@ -41,8 +41,8 @@ public:
 	/// Whether the view is currently shown.
 	bool active() const { return active_; }
 	/// Handles a key while the view is shown: space pauses/resumes the measurement, 'r' resets the statistics, 'f' switches
-	/// between the overview and the per-flow view, Up/Down select a flow and 'e' exports the measured window. Returns
-	/// whether the key was used by the view.
+	/// between the overview and the per-flow view, 'p' between the overview and the per-profile view, Up/Down select a
+	/// flow and 'e' exports the measured window. Returns whether the key was used by the view.
 	bool handle_key(int key);
 
 #ifdef LAGSW_NET_MONITOR_TESTING
@@ -55,6 +55,30 @@ private:
 	{
 		overview,
 		flows,
+		profiles,
+	};
+
+	/// What the network did over a number of measured seconds; used to compare the seconds a profile was active with
+	/// the seconds no profile was.
+	struct Conditions
+	{
+		uint64_t ticks		  = 0;
+		double	 rtt_sum_ms	  = 0;
+		uint64_t rtt_samples  = 0;
+		uint64_t data_packets = 0;
+		uint64_t retransmits  = 0;
+		uint64_t bytes_down	  = 0;
+		void	 add(const Conditions& other);
+	};
+
+	/// What was measured for one profile since the view opened or was reset.
+	struct ProfileStats
+	{
+		uint64_t   activations	 = 0;
+		uint64_t   current_ticks = 0;  // seconds of the activation that is running now
+		uint64_t   last_ticks	 = 0;  // seconds of the last finished activation
+		uint64_t   longest_ticks = 0;
+		Conditions active;			   // the seconds this profile was active in
 	};
 
 	/// The conditions that can raise an alert for a server.
@@ -254,8 +278,9 @@ private:
 	void evaluate_alerts_locked(const std::string& label, ServerStats& stats);
 	void raise_alert_locked(const std::string& label, ServerStats& stats, AlertKind kind, bool exceeded, const std::string& detail);
 	void add_event_locked(Event::Level level, const std::string& text);
-	/// Notes profile activations and deactivations. Requires mutex_.
-	void track_profiles_locked();
+	/// Notes profile activations and deactivations and attributes the measured second `sample` to the profiles that were
+	/// active during it. Requires mutex_.
+	void track_profiles_locked(const Conditions& sample);
 	/// Every flow of every server, active ones first. Requires mutex_.
 	struct FlowRef
 	{
@@ -279,6 +304,8 @@ private:
 	std::string render_frame(int console_columns, int console_rows);
 	/// The per-flow screen.
 	std::string render_flow_view(int console_columns, int console_rows);
+	/// The per-profile screen.
+	std::string render_profile_view(int console_columns, int console_rows);
 	/// The first lines shared by every screen.
 	std::string render_header(size_t width, std::vector<std::string>& warnings);
 
@@ -307,6 +334,8 @@ private:
 	Series								  cpu_, nic_problems_;
 	Series								  profile_active_, alerts_active_;
 	std::vector<bool>					  profile_state_;
+	std::vector<ProfileStats>			  profile_stats_;
+	Conditions							  baseline_;  // the seconds in which no profile was active
 	std::deque<Event>					  events_;
 	View								  view_				  = View::overview;
 	bool								  has_selection_	  = false;

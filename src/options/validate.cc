@@ -267,8 +267,8 @@ bool validate_net_monitor(const char* path, const PacketEngineOptions& options)
 	if (!monitor.enabled)
 		return true;
 	const int key = monitor.key >= 'a' && monitor.key <= 'z' ? monitor.key - 'a' + 'A' : monitor.key;
-	// Space, R, F and E are used inside the view itself.
-	if (key == 'Q' || key == 'R' || key == 'F' || key == 'E' || key == platform::key::space || key == platform::key::backspace ||
+	// Space, R, F, P and E are used inside the view itself.
+	if (key == 'Q' || key == 'R' || key == 'F' || key == 'P' || key == 'E' || key == platform::key::space || key == platform::key::backspace ||
 		key == platform::key::tab || key == platform::key::page_up || key == platform::key::page_down || key == platform::key::left ||
 		key == platform::key::right || key == platform::key::up || key == platform::key::down)
 	{

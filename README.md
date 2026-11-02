@@ -491,7 +491,7 @@ features:
 | Field | Required | Description |
 | --- | --- | --- |
 | `enabled` | No | Makes the view available. Defaults to `false`. |
-| `key` | No | Key that opens and closes the view. Defaults to `N`. Must not be `q`, `r`, `f`, `e`, Space, Backspace, Tab, Page Up/Down, the arrow keys, the passive latency `pause_key` or a profile activation key. |
+| `key` | No | Key that opens and closes the view. Defaults to `N`. Must not be `q`, `r`, `f`, `p`, `e`, Space, Backspace, Tab, Page Up/Down, the arrow keys, the passive latency `pause_key` or a profile activation key. |
 | `alert_rtt` | No | Latency in milliseconds above which a server raises an alert. Defaults to `150`; `0` disables it. |
 | `alert_jitter` | No | Smoothed RTT jitter in milliseconds above which a server raises an alert. Defaults to `30`; `0` disables it. |
 | `alert_retransmit` | No | Percentage of retransmitted TCP data packets over the last 10 seconds above which a server raises an alert. Defaults to `2`; `0` disables it. |
@@ -499,7 +499,9 @@ features:
 | `export_directory` | No | Directory for the CSV and JSON files written by the `e` key. Defaults to a `netmonitor` folder in the per-user data directory. |
 | `log_file` | No | JSON Lines file that receives one record per server and second, plus the events, while the view is open. Disabled when empty. |
 
-While the view is open, `f` switches to a per-flow view (`Up`/`Down` select a flow and show its history), `e` exports
+While the view is open, `f` switches to a per-flow view (`Up`/`Down` select a flow and show its history), `p` switches to
+a per-profile view (activations, active time and the latency, retransmits and throughput measured while each profile was
+active), `e` exports
 the measured window and `r` resets it. A server whose alert thresholds are exceeded turns red in the table, and the
 events panel lists alerts, profile activations and servers found by server discovery.
 

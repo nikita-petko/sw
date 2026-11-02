@@ -475,6 +475,78 @@ void test_profile_changes_become_events_and_markers()
 	CHECK(frame.find("profiles active") != std::string::npos && frame.find("profile 'A' deactivated") != std::string::npos);
 }
 
+void test_profile_view_tracks_activations_and_conditions()
+{
+	fakes::reset();
+	const PacketEngineOptions options = options_with_server();
+	PacketEngine			  engine(options);
+	NetMonitor				  monitor(engine, options);
+	monitor.toggle();
+	monitor.stop();
+
+	// One second without a profile becomes the baseline.
+	{
+		std::lock_guard<std::mutex> lock(monitor.mutex_);
+		auto&						stats = monitor.servers_[kServerAddress];
+		stats.tick_rtt_sum_ms = 20;
+		stats.tick_rtt_count  = 1;
+		monitor.tick();
+		CHECK(monitor.baseline_.ticks == 1 && monitor.baseline_.rtt_samples == 1);
+		CHECK(monitor.profile_stats_.size() == 1 && monitor.profile_stats_[0].activations == 0 && monitor.profile_stats_[0].active.ticks == 0);
+	}
+
+	engine.setup(1);
+	CHECK(engine.is_running(1));
+	for (int second = 0; second < 2; ++second)
+	{
+		std::lock_guard<std::mutex> lock(monitor.mutex_);
+		auto&						stats = monitor.servers_[kServerAddress];
+		stats.tick_rtt_sum_ms = 100;
+		stats.tick_rtt_count  = 1;
+		stats.data_up += 50;
+		stats.retrans_up += 5;
+		stats.down.bytes_tick = 1000;
+		monitor.tick();
+	}
+	{
+		std::lock_guard<std::mutex> lock(monitor.mutex_);
+		const NetMonitor::ProfileStats& profile = monitor.profile_stats_[0];
+		CHECK(profile.activations == 1 && profile.current_ticks == 2 && profile.active.ticks == 2);
+		CHECK(profile.active.rtt_samples == 2 && profile.active.data_packets == 100 && profile.active.retransmits == 10 &&
+			  profile.active.bytes_down == 2000);
+		CHECK(monitor.baseline_.ticks == 1);
+	}
+
+	engine.teardown(1);
+	{
+		std::lock_guard<std::mutex> lock(monitor.mutex_);
+		monitor.tick();
+		const NetMonitor::ProfileStats& profile = monitor.profile_stats_[0];
+		CHECK(profile.current_ticks == 0 && profile.last_ticks == 2 && profile.longest_ticks == 2 && profile.active.ticks == 2);
+		CHECK(monitor.baseline_.ticks == 2);
+	}
+
+	CHECK(monitor.handle_key('p'));
+	{
+		std::lock_guard<std::mutex> lock(monitor.mutex_);
+		CHECK(monitor.view_ == NetMonitor::View::profiles);
+		const std::string frame = monitor.render_profile_view(120, 30);
+		CHECK(frame.find("Profile activity") != std::string::npos && frame.find("Network while active") != std::string::npos);
+		CHECK(frame.find("no profile active") != std::string::npos && frame.find("+80 ms") != std::string::npos);
+		const auto count_lines = [](const std::string& text) { return std::count(text.begin(), text.end(), '\n'); };
+		CHECK(count_lines(frame) <= 29);
+	}
+	CHECK(monitor.handle_key('p'));
+	CHECK(monitor.view_ == NetMonitor::View::overview);
+
+	CHECK(monitor.handle_key('p'));
+	CHECK(monitor.handle_key('r'));
+	monitor.reset_requested_ = false;
+	std::lock_guard<std::mutex> lock(monitor.mutex_);
+	monitor.reset_locked();
+	CHECK(monitor.profile_stats_.size() == 1 && monitor.profile_stats_[0].activations == 0 && monitor.baseline_.ticks == 0);
+}
+
 void test_udp_and_tcp_flows_are_listed()
 {
 	fakes::reset();
@@ -741,6 +813,7 @@ int main(int argc, char** argv)
 		{"alerts_raise_and_clear", test_alerts_raise_and_clear},
 		{"alerts_can_be_disabled", test_alerts_can_be_disabled},
 		{"profile_changes_become_events_and_markers", test_profile_changes_become_events_and_markers},
+		{"profile_view_tracks_activations_and_conditions", test_profile_view_tracks_activations_and_conditions},
 		{"udp_and_tcp_flows_are_listed", test_udp_and_tcp_flows_are_listed},
 		{"flow_table_is_bounded", test_flow_table_is_bounded_and_prefers_closed_flows_for_eviction},
 		{"rtt_spread_is_recorded_and_drawn", test_rtt_spread_is_recorded_and_drawn},

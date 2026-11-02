@@ -8,6 +8,7 @@ captured or drawn until the view is opened; closing it stops both. While the vie
 | `Space` | pause/resume the measurement |
 | `r` | reset the statistics |
 | `f` | switch between the overview and the per-flow view |
+| `p` | switch between the overview and the per-profile view |
 | `Up` / `Down` | select a flow (flow view) |
 | `e` | export the measured window as CSV and JSON |
 | the configured key | close the view |
@@ -76,8 +77,8 @@ the log file are further keys of the same block, see the README.
   two inbound packets, so it is reported when traffic resumes, and an idle server can trip it.
 - The flow view keeps at most 256 flows per server (closed ones are dropped first) and the history of the selected flow
   only. UDP flows are keyed by the client and server port; they have no RTT or state beyond active/idle.
-- The key must differ from `q`, `r`, `f`, `e`, Space, the navigation keys, the passive latency pause key and every
-  profile key (checked at startup). `r`, `f` and `e` are not checked against profile keys, so a profile bound to one of
+- The key must differ from `q`, `r`, `f`, `p`, `e`, Space, the navigation keys, the passive latency pause key and every
+  profile key (checked at startup). `r`, `f`, `p` and `e` are not checked against profile keys, so a profile bound to one of
   them also triggers the view action while it is open.
 
 ### Alerts, events, flows and export
@@ -95,6 +96,11 @@ the log file are further keys of the same block, see the README.
   gets an RTT histogram (`<25`, `25-49`, `50-99`, `100-199`, `200-499`, `>=500 ms`).
 - **Flow view** (`f`): one row per TCP connection or UDP port pair with state, bytes, RTT and idle time; `Up`/`Down`
   select one and show its bytes/s and RTT history.
+- **Profile view** (`p`): one row per profile with its state, activation count, total active time (and share of the
+  measured time), the running, last and longest activation and the engine's packet-mode status. A second table shows the
+  mean RTT (and its difference to the seconds in which no profile was active), retransmit percentage and download rate
+  measured while each profile was active. A second is attributed to every profile active at its end, so profiles active
+  together share their seconds; the statistics are cleared by `r` and are not part of the export.
 - **Export** (`e`): writes `netmonitor-<date>-<time>.csv` (one row per server and second) and `.json` (totals, RTT
   statistics and histogram, alert counts, series, events, flows) to `export_directory` (default: a `netmonitor` folder in
   the per-user data directory).

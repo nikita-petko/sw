@@ -341,6 +341,16 @@ void NetMonitor::Series::push(double value)
 		values.pop_front();
 }
 
+void NetMonitor::Conditions::add(const Conditions& other)
+{
+	ticks += other.ticks;
+	rtt_sum_ms += other.rtt_sum_ms;
+	rtt_samples += other.rtt_samples;
+	data_packets += other.data_packets;
+	retransmits += other.retransmits;
+	bytes_down += other.bytes_down;
+}
+
 NetMonitor::NetMonitor(const PacketEngine& engine, const PacketEngineOptions& options)
 : engine_(engine)
 , options_(options)
@@ -536,9 +546,15 @@ bool NetMonitor::handle_key(int key)
 	if (upper == 'F')
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
-		view_ = view_ == View::overview ? View::flows : View::overview;
+		view_ = view_ == View::flows ? View::overview : View::flows;
 		if (view_ == View::flows && !has_selection_)
 			move_flow_selection_locked(0);
+		return true;
+	}
+	if (upper == 'P')
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		view_ = view_ == View::profiles ? View::overview : View::profiles;
 		return true;
 	}
 	if (upper == 'E')
@@ -645,6 +661,8 @@ void NetMonitor::reset_locked()
 	profile_state_.assign(options_.profiles.size(), false);
 	for (size_t i = 0; i < profile_state_.size(); ++i)
 		profile_state_[i] = engine_.is_running(static_cast<int>(i) + 1);
+	profile_stats_.assign(options_.profiles.size(), ProfileStats{});
+	baseline_		 = Conditions{};
 	elapsed_ticks_	 = 0;
 	last_tick_		 = Clock::now();
 }
@@ -1005,6 +1023,7 @@ void NetMonitor::tick()
 	uint32_t rtt_count = 0;
 	double	 total_rtt = total_.last_rtt_ms;
 	uint64_t retrans   = 0;
+	uint64_t data_tick = 0;
 	uint64_t flows_new = 0;
 	double	 pps_up = 0, pps_down = 0, bps_up = 0, bps_down = 0;
 	double	 band_min = 0, band_max = 0;
@@ -1041,6 +1060,7 @@ void NetMonitor::tick()
 		stats.retrans_prev = retrans_now;
 		const uint64_t data_now = stats.data_up + stats.data_down;
 		stats.data_pkts.push(static_cast<double>(data_now - stats.data_prev));
+		data_tick += data_now - stats.data_prev;
 		stats.data_prev = data_now;
 		if (stats.up.packets + stats.down.packets > 0)
 		{
@@ -1141,7 +1161,14 @@ void NetMonitor::tick()
 	}
 	if (view_ == View::flows && !has_selection_)
 		move_flow_selection_locked(0);
-	track_profiles_locked();
+	Conditions sample;
+	sample.ticks		= 1;
+	sample.rtt_sum_ms	= rtt_sum;
+	sample.rtt_samples	= rtt_count;
+	sample.data_packets = data_tick;
+	sample.retransmits	= retrans;
+	sample.bytes_down	= static_cast<uint64_t>(bps_down);
+	track_profiles_locked(sample);
 	alerts_active_.push(static_cast<double>(active_alerts));
 	write_log_locked();
 }
@@ -1160,20 +1187,37 @@ void NetMonitor::add_event_locked(Event::Level level, const std::string& text)
 	}
 }
 
-void NetMonitor::track_profiles_locked()
+void NetMonitor::track_profiles_locked(const Conditions& sample)
 {
 	size_t active = 0;
 	profile_state_.resize(options_.profiles.size(), false);
+	profile_stats_.resize(options_.profiles.size());
 	for (size_t i = 0; i < profile_state_.size(); ++i)
 	{
-		const bool running = engine_.is_running(static_cast<int>(i) + 1);
+		const bool	  running = engine_.is_running(static_cast<int>(i) + 1);
+		ProfileStats& stats	  = profile_stats_[i];
 		active += running ? 1 : 0;
 		if (running != profile_state_[i])
 		{
 			profile_state_[i] = running;
+			if (running)
+				++stats.activations;
+			else
+			{
+				stats.last_ticks	= stats.current_ticks;
+				stats.longest_ticks = std::max(stats.longest_ticks, stats.current_ticks);
+				stats.current_ticks = 0;
+			}
 			add_event_locked(Event::Level::info, "profile '" + options_.profiles[i].name + "' " + (running ? "activated" : "deactivated"));
 		}
+		if (running)
+		{
+			++stats.current_ticks;
+			stats.active.add(sample);
+		}
 	}
+	if (active == 0)
+		baseline_.add(sample);
 	profile_active_.push(static_cast<double>(active));
 }
 
@@ -1284,7 +1328,9 @@ void NetMonitor::render_loop()
 				tick();
 				last_tick_ += kTickInterval;
 			}
-			frame = view_ == View::flows ? render_flow_view(columns, frame_rows) : render_frame(columns, frame_rows);
+			frame = view_ == View::flows		? render_flow_view(columns, frame_rows)
+					: view_ == View::profiles ? render_profile_view(columns, frame_rows)
+											  : render_frame(columns, frame_rows);
 		}
 		// A resized console reflows what is on it, so the screen is wiped instead of repainted over the old layout.
 		if (columns != last_columns || rows != last_rows)
@@ -1308,9 +1354,9 @@ std::string NetMonitor::render_header(size_t width, std::vector<std::string>& wa
 	if (!status_message_.empty() && Clock::now() < status_until_)
 		status = std::string("  ") + kYellow + status_message_ + kReset;
 	line(std::string(kBold) + " NETMONITOR " + kReset + (paused ? std::string(kYellow) + "[PAUSED]" : std::string(kGreen) + "[MEASURING]") + kReset +
-		 "  " + (view_ == View::flows ? "flows" : "overview") + "  measured " + format_clock(elapsed_ticks_) + status);
-	line(std::string(kDim) + " space pause | r reset | f " + (view_ == View::flows ? "overview" : "flows") + " | e export | " + close_key + " close | q quit" +
-		 kReset);
+		 "  " + (view_ == View::flows ? "flows" : view_ == View::profiles ? "profiles" : "overview") + "  measured " + format_clock(elapsed_ticks_) + status);
+	line(std::string(kDim) + " space pause | r reset | f " + (view_ == View::flows ? "overview" : "flows") + " | p " +
+		 (view_ == View::profiles ? "overview" : "profiles") + " | e export | " + close_key + " close | q quit" + kReset);
 
 	uint64_t packets_up = 0, packets_down = 0;
 	for (const auto& entry : servers_)
@@ -1797,6 +1843,85 @@ std::string NetMonitor::render_flow_view(int console_columns, int console_rows)
 	for (const FlowRef& ref : flows)
 		active += ref.flow->closed ? 0 : 1;
 	line(std::string(kDim) + " " + std::to_string(flows.size()) + " flow(s), " + std::to_string(active) + " not closed" + kReset);
+	out += "\033[J";
+	return out;
+}
+
+std::string NetMonitor::render_profile_view(int console_columns, int console_rows)
+{
+	const size_t width = static_cast<size_t>(console_columns > 0 ? std::max(console_columns, 60) : 100);
+
+	std::string out	 = "\033[H";
+	auto		line = [&out](const std::string& text) { out += text + "\033[K\n"; };
+
+	std::vector<std::string> warnings;
+	out += render_header(width, warnings);
+	line("");
+
+	const size_t count = options_.profiles.size();
+	// Header, two titles and column rows, the baseline row, two blank lines and the footer stay; the rest is shared by both tables.
+	const int	 fixed = 4 + static_cast<int>(warnings.size()) + 9;
+	const size_t shown = console_rows > 0 ? std::min(count, static_cast<size_t>(std::max(2, console_rows - 1 - fixed) / 2)) : count;
+
+	const size_t name_cols	 = std::clamp<size_t>(width / 6, 10, 24);
+	const size_t status_cols = width > name_cols + 60 ? width - name_cols - 60 : 0;
+
+	line(std::string(kBold) + " Profile activity" + kReset + kDim + "  since the view opened or was reset" + kReset);
+	line(std::string(kDim) + " " + pad("profile", name_cols) + pad("state", 9) + pad_left("runs", 6) + pad_left("active", 9) + pad_left("share", 7) +
+		 pad_left("now", 9) + pad_left("last", 9) + pad_left("longest", 9) + (status_cols > 0 ? "  " + pad("status", status_cols - 2) : std::string()) +
+		 kReset);
+	if (count == 0)
+		line(std::string(kDim) + " no profiles are configured" + kReset);
+	for (size_t i = 0; i < shown; ++i)
+	{
+		const bool				 running = i < profile_state_.size() && profile_state_[i];
+		const ProfileStats		 empty;
+		const ProfileStats&		 stats	 = i < profile_stats_.size() ? profile_stats_[i] : empty;
+		const uint64_t			 longest = std::max(stats.longest_ticks, stats.current_ticks);
+		const std::string		 share	 = elapsed_ticks_ > 0 ? std::to_string(static_cast<int>(100.0 * static_cast<double>(stats.active.ticks) / static_cast<double>(elapsed_ticks_) + 0.5)) + "%" : "-";
+		const std::string		 status	 = running ? engine_.profile_packet_status(static_cast<int>(i) + 1) : std::string();
+		line(" " + pad(options_.profiles[i].name, name_cols) + (running ? kGreen : kDim) + pad(running ? "active" : "idle", 9) + kReset +
+			 pad_left(std::to_string(stats.activations), 6) + pad_left(format_age(static_cast<double>(stats.active.ticks)), 9) + pad_left(share, 7) +
+			 pad_left(running ? format_age(static_cast<double>(stats.current_ticks)) : "-", 9) +
+			 pad_left(stats.last_ticks > 0 ? format_age(static_cast<double>(stats.last_ticks)) : "-", 9) +
+			 pad_left(longest > 0 ? format_age(static_cast<double>(longest)) : "-", 9) +
+			 (status_cols > 0 ? "  " + std::string(kDim) + pad(status, status_cols - 2) + kReset : std::string()));
+	}
+	if (shown < count)
+		line(std::string(kDim) + " ... " + std::to_string(count - shown) + " more profile(s) do not fit" + kReset);
+	line("");
+
+	line(std::string(kBold) + " Network while active" + kReset + kDim + "  compared with the seconds in which no profile was active" + kReset);
+	line(std::string(kDim) + " " + pad("profile", name_cols) + pad_left("seconds", 9) + pad_left("RTT", 10) + pad_left("vs idle", 10) +
+		 pad_left("retrans", 9) + pad_left("down", 14) + kReset);
+	const auto average_rtt = [](const Conditions& c) { return c.rtt_samples > 0 ? c.rtt_sum_ms / static_cast<double>(c.rtt_samples) : 0.0; };
+	const auto row		   = [&](const std::string& name, const Conditions& c, bool compare) {
+		   char		   text[24] = "-";
+		   const char* delta_color = kDim;
+		   std::string delta	   = "-";
+		   if (compare && c.rtt_samples > 0 && baseline_.rtt_samples > 0)
+		   {
+			   const double difference = average_rtt(c) - average_rtt(baseline_);
+			   std::snprintf(text, sizeof(text), "%+.0f ms", difference);
+			   delta		= text;
+			   delta_color = difference > 20 ? kRed : difference > 5 ? kYellow : kGreen;
+		   }
+		   const double loss = c.data_packets > 0 ? 100.0 * static_cast<double>(c.retransmits) / static_cast<double>(c.data_packets) : 0;
+		   if (c.data_packets > 0)
+			   std::snprintf(text, sizeof(text), "%.1f%%", loss);
+		   else
+			   std::snprintf(text, sizeof(text), "-");
+		   const std::string loss_text = text;
+		   line(" " + pad(name, name_cols) + pad_left(std::to_string(c.ticks), 9) + (c.rtt_samples > 0 ? rtt_color(average_rtt(c)) : kDim) +
+				pad_left(format_ms(average_rtt(c), c.rtt_samples > 0), 10) + kReset + delta_color + pad_left(delta, 10) + kReset +
+				(c.data_packets > 0 ? loss_color(loss) : kDim) + pad_left(loss_text, 9) + kReset +
+				pad_left(c.ticks > 0 ? format_rate(static_cast<double>(c.bytes_down) / static_cast<double>(c.ticks)) : "-", 14));
+	};
+	row("no profile active", baseline_, false);
+	for (size_t i = 0; i < shown; ++i)
+		row(options_.profiles[i].name, i < profile_stats_.size() ? profile_stats_[i].active : Conditions{}, true);
+	line("");
+	line(std::string(kDim) + " A second counts for every profile that was active during it; profiles active together share their seconds." + kReset);
 	out += "\033[J";
 	return out;
 }
