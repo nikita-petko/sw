@@ -173,6 +173,10 @@ private:
 	void   key_loader(int key);
 	void   key_editor(int key);
 	void   key_form(int key);
+	void   menu_up();
+	void   menu_reset();
+	/// Outline indexes of the entries in the open menu; falls back to the top menu when it no longer exists.
+	std::vector<size_t> menu_items(const std::vector<OutlineEntry>& outline);
 	void   key_raw(int key);
 	void   key_prompt(int key);
 	void   activate_selected();
@@ -213,7 +217,12 @@ private:
 	bool					 dirty_			= false;
 	bool					 crlf_			= false;
 	bool					 backed_up_		= false;
-	size_t					 form_selected_ = 0;
+	/// The open menu: path of its section (empty for the top menu), the selected row, and the rows selected above it.
+	std::string				 menu_path_;
+	size_t					 menu_selected_ = 0;
+	std::vector<size_t>		 menu_trail_;
+	/// Path of the setting being edited in the value dialog.
+	std::string				 edit_path_;
 	size_t					 form_scroll_	= 0;
 	size_t					 cursor_row_	= 0;
 	size_t					 cursor_column_ = 0;

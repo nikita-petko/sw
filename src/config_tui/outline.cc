@@ -129,7 +129,7 @@ std::vector<OutlineEntry> build_outline(const std::vector<std::string>& lines)
 				continue;
 			// a plain list item such as `- "10.0.0.1:name"` is a leaf, not a header
 			outline.pop_back();
-			entry.depth		  = static_cast<int>(stack.size()) - 1;
+			entry.depth		  = static_cast<int>(stack.size()) - 2;
 			entry.leaf		  = true;
 			entry.path		  = path_of();
 			entry.key		  = stack.size() > 2 ? stack[stack.size() - 2].name : std::string();

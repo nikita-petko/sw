@@ -267,17 +267,23 @@ void test_form_editing_keeps_comments_and_makes_a_backup()
 	app.handle_key(' ');
 	CHECK(app.lines()[1] == "default_view: log");
 
-	// walk to profiles[0].delay_ms and type a new value
-	bool found = false;
-	for (int i = 0; i < 40 && !found; ++i)
-	{
+	// the top menu lists sections as submenus; profiles > [0] > delay_ms opens the value dialog
+	const std::string top = app.render(100, 20);
+	CHECK(top.find("default_view") != std::string::npos && top.find(" >") != std::string::npos);
+	CHECK(top.find("delay_ms") == std::string::npos);
+	app.handle_key(key::down);
+	app.handle_key(key::down);
+	app.handle_key(key::enter);
+	CHECK(app.render(100, 20).find("[0] \"Delay\"") != std::string::npos);
+	app.handle_key(key::enter);
+	const std::string profile = app.render(100, 20);
+	CHECK(profile.find("delay_ms") != std::string::npos && profile.find("[x]") == std::string::npos);
+	for (int i = 0; i < 4; ++i)
 		app.handle_key(key::down);
-		app.handle_key(key::enter);
-		found = app.prompting() && app.render(100, 20).find("profiles[0].delay_ms") != std::string::npos;
-		if (!found)
-			app.handle_key(key::escape);
-	}
-	CHECK(found);
+	app.handle_key(key::enter);
+	CHECK(app.prompting());
+	const std::string dialog = app.render(100, 20);
+	CHECK(dialog.find("Edit value") != std::string::npos && dialog.find("profiles[0].delay_ms") != std::string::npos);
 	for (int i = 0; i < 3; ++i)
 		app.handle_key(key::backspace);
 	type(app, "250");
@@ -286,6 +292,21 @@ void test_form_editing_keeps_comments_and_makes_a_backup()
 	for (const std::string& line : app.lines())
 		changed = changed || line == "    delay_ms: 250";
 	CHECK(changed);
+
+
+	// capture_options is a submenu of checkboxes; Enter toggles one and Esc steps back out
+	app.handle_key(key::down);
+	app.handle_key(key::down);
+	app.handle_key(key::enter);
+	const std::string boxes = app.render(100, 20);
+	CHECK(boxes.find("[x] outbound") != std::string::npos && boxes.find("[x] inbound") != std::string::npos);
+	app.handle_key(key::enter);
+	CHECK(app.render(100, 20).find("[ ] outbound") != std::string::npos);
+	app.handle_key(key::escape);
+	CHECK(app.screen() == App::Screen::editor && app.render(100, 20).find("capture_options") != std::string::npos);
+	app.handle_key(key::left);
+	app.handle_key(key::left);
+	CHECK(app.render(100, 20).find("profiles") != std::string::npos && app.render(100, 20).find("delay_ms") == std::string::npos);
 
 	app.handle_key(key::ctrl('S'));
 	CHECK(!app.dirty() && read(path).find("delay_ms: 250") != std::string::npos && read(path).find("# trailing comment") != std::string::npos);

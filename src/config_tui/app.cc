@@ -172,8 +172,7 @@ bool App::open_file(const std::string& requested)
 	backed_up_	   = false;
 	screen_		   = Screen::editor;
 	tab_		   = Tab::form;
-	form_selected_ = 0;
-	form_scroll_   = 0;
+	menu_reset();
 	cursor_row_	   = 0;
 	cursor_column_ = 0;
 	raw_scroll_	   = 0;
@@ -200,8 +199,7 @@ void App::start_new(const std::string& path)
 	backed_up_	   = false;
 	screen_		   = Screen::editor;
 	tab_		   = Tab::form;
-	form_selected_ = 0;
-	form_scroll_   = 0;
+	menu_reset();
 	cursor_row_	   = 0;
 	cursor_column_ = 0;
 	raw_scroll_	   = 0;
@@ -420,6 +418,8 @@ void App::key_editor(int code)
 		save_and_run();
 	else if (code == key::ctrl('T') || (code == key::tab && tab_ == Tab::form))
 		tab_ = tab_ == Tab::form ? Tab::raw : Tab::form;
+	else if (code == key::escape && tab_ == Tab::form && !menu_path_.empty())
+		menu_up();
 	else if (code == key::escape)
 		leave_editor();
 	else if (tab_ == Tab::form)
@@ -428,71 +428,138 @@ void App::key_editor(int code)
 		key_raw(code);
 }
 
+void App::menu_reset()
+{
+	menu_path_.clear();
+	menu_trail_.clear();
+	menu_selected_ = 0;
+	form_scroll_   = 0;
+}
+
+void App::menu_up()
+{
+	if (menu_path_.empty())
+		return;
+	const std::vector<OutlineEntry> outline = build_outline(lines_);
+	const auto						found	= std::find_if(outline.begin(), outline.end(), [&](const OutlineEntry& e) { return !e.leaf && e.path == menu_path_; });
+	std::string						parent;
+	if (found != outline.end())
+	{
+		// the parent is the nearest earlier header one level up
+		for (auto it = found; it != outline.begin();)
+		{
+			--it;
+			if (!it->leaf && it->depth == found->depth - 1)
+			{
+				parent = it->path;
+				break;
+			}
+		}
+	}
+	menu_path_	   = parent;
+	menu_selected_ = menu_trail_.empty() ? 0 : menu_trail_.back();
+	if (!menu_trail_.empty())
+		menu_trail_.pop_back();
+	form_scroll_ = 0;
+}
+
+std::vector<size_t> App::menu_items(const std::vector<OutlineEntry>& outline)
+{
+	std::vector<size_t> items;
+	int					depth = 0;
+	size_t				first = 0;
+	if (!menu_path_.empty())
+	{
+		const auto found = std::find_if(outline.begin(), outline.end(), [&](const OutlineEntry& e) { return !e.leaf && e.path == menu_path_; });
+		if (found == outline.end())
+		{
+			menu_reset();
+			return menu_items(outline);
+		}
+		first = static_cast<size_t>(found - outline.begin()) + 1;
+		depth = found->depth + 1;
+	}
+	for (size_t i = first; i < outline.size() && outline[i].depth >= depth; ++i)
+		if (outline[i].depth == depth)
+			items.push_back(i);
+	return items;
+}
+
 void App::key_form(int code)
 {
 	const std::vector<OutlineEntry> outline = build_outline(lines_);
-	if (outline.empty())
+	const std::vector<size_t>		items	= menu_items(outline);
+	if (items.empty())
+	{
+		if (code == key::left || code == key::backspace)
+			menu_up();
 		return;
-	form_selected_ = (std::min)(form_selected_, outline.size() - 1);
-	const auto step = [&](int direction, size_t count) {
-		size_t at = form_selected_;
-		while (count > 0)
-		{
-			size_t next = at;
-			do
-				next = direction > 0 ? next + 1 : next - 1;
-			while (next < outline.size() && !outline[next].leaf);
-			if (next >= outline.size())
-				break;
-			at = next;
-			--count;
-		}
-		form_selected_ = at;
-	};
-	if (!outline[form_selected_].leaf)
-		step(1, 1);
-	const OutlineEntry& entry = outline[form_selected_];
+	}
+	menu_selected_			  = (std::min)(menu_selected_, items.size() - 1);
+	const OutlineEntry& entry = outline[items[menu_selected_]];
+	const size_t		page  = static_cast<size_t>(page_rows_);
 	switch (code)
 	{
 		case key::up:
-			step(-1, 1);
+			menu_selected_ = menu_selected_ > 0 ? menu_selected_ - 1 : 0;
 			return;
 		case key::down:
-			step(1, 1);
+			menu_selected_ = (std::min)(menu_selected_ + 1, items.size() - 1);
 			return;
 		case key::page_up:
-			step(-1, static_cast<size_t>(page_rows_));
+			menu_selected_ = menu_selected_ > page ? menu_selected_ - page : 0;
 			return;
 		case key::page_down:
-			step(1, static_cast<size_t>(page_rows_));
+			menu_selected_ = (std::min)(menu_selected_ + page, items.size() - 1);
 			return;
 		case key::home:
-			form_selected_ = 0;
-			step(1, 1);
+			menu_selected_ = 0;
 			return;
 		case key::end:
-			form_selected_ = outline.size() - 1;
-			if (!outline[form_selected_].leaf)
-				step(-1, 1);
+			menu_selected_ = items.size() - 1;
 			return;
+		case key::left:
+		case key::backspace:
+			menu_up();
+			return;
+		case key::right:
 		case key::enter:
-			if (entry.leaf)
-				begin_prompt(Prompt::Kind::edit_value, entry.path, entry.value);
+		{
+			if (!entry.leaf)
+			{
+				menu_trail_.push_back(menu_selected_);
+				menu_path_	   = entry.path;
+				menu_selected_ = 0;
+				form_scroll_   = 0;
+				return;
+			}
+			const std::vector<std::string> options = value_choices(entry);
+			const bool					   toggle  = options.size() == 2 && options[0] == "true";
+			if (code == key::right || toggle)
+			{
+				if (toggle && code == key::enter)
+					break;
+				return;
+			}
+			edit_path_ = entry.path;
+			begin_prompt(Prompt::Kind::edit_value, entry.path, entry.value);
 			return;
+		}
+		default:
+			break;
 	}
-	if (!entry.leaf)
+	// Enter or Space toggles a checkbox; Space steps through the fixed values of other settings
+	if (!entry.leaf || (code != ' ' && code != key::enter))
 		return;
 	const std::vector<std::string> choices = value_choices(entry);
-	if (choices.empty() || (code != ' ' && code != key::left && code != key::right))
+	if (choices.empty())
 		return;
 	std::string current = entry.value;
 	if (current.size() >= 2 && (current.front() == '"' || current.front() == '\'') && current.back() == current.front())
 		current = current.substr(1, current.size() - 2);
 	const auto   found = std::find(choices.begin(), choices.end(), current);
 	const size_t index = found == choices.end() ? 0 : static_cast<size_t>(found - choices.begin());
-	size_t		 next	= index;
-	if (found != choices.end())
-		next = code == key::left ? (index + choices.size() - 1) % choices.size() : (index + 1) % choices.size();
+	const size_t next  = found == choices.end() ? 0 : (index + 1) % choices.size();
 	lines_[entry.line] = replace_value(lines_[entry.line], entry, choices[next]);
 	touch();
 }
@@ -648,9 +715,10 @@ void App::key_prompt(int code)
 		if (prompt.kind == Prompt::Kind::edit_value)
 		{
 			const std::vector<OutlineEntry> outline = build_outline(lines_);
-			if (form_selected_ < outline.size() && outline[form_selected_].leaf)
+			const auto found = std::find_if(outline.begin(), outline.end(), [&](const OutlineEntry& e) { return e.leaf && e.path == edit_path_; });
+			if (found != outline.end())
 			{
-				const OutlineEntry& entry = outline[form_selected_];
+				const OutlineEntry& entry = *found;
 				if (lines_[entry.line].substr(entry.value_begin, entry.value_end - entry.value_begin) != value)
 				{
 					lines_[entry.line] = replace_value(lines_[entry.line], entry, value);
@@ -729,37 +797,58 @@ std::string App::render(int width, int height)
 		if (tab_ == Tab::form)
 		{
 			const std::vector<OutlineEntry> outline = build_outline(lines_);
-			if (!outline.empty())
-			{
-				form_selected_ = (std::min)(form_selected_, outline.size() - 1);
-				if (!outline[form_selected_].leaf)
-					for (size_t i = form_selected_; i < outline.size(); ++i)
-						if (outline[i].leaf)
-						{
-							form_selected_ = i;
-							break;
-						}
-			}
-			if (form_selected_ < form_scroll_)
-				form_scroll_ = form_selected_;
-			if (form_selected_ >= form_scroll_ + body)
-				form_scroll_ = form_selected_ + 1 - body;
-			rows[1] = styled(kDim, " Settings of the file; comments and untouched lines are kept as they are");
-			for (size_t row = 0; row < body && form_scroll_ + row < outline.size(); ++row)
+			const std::vector<size_t>		items	= menu_items(outline);
+			menu_selected_							= items.empty() ? 0 : (std::min)(menu_selected_, items.size() - 1);
+			if (menu_selected_ < form_scroll_)
+				form_scroll_ = menu_selected_;
+			if (menu_selected_ >= form_scroll_ + body)
+				form_scroll_ = menu_selected_ + 1 - body;
+			std::string crumbs = " Settings";
+			for (const char c : menu_path_)
+				crumbs += c == '.' ? std::string(" > ") : std::string(1, c);
+			rows[1] = styled(kDim, crumbs);
+			const size_t label_width = (std::min)(columns / 2, size_t{34});
+			for (size_t row = 0; row < body && form_scroll_ + row < items.size(); ++row)
 			{
 				const size_t		index = form_scroll_ + row;
-				const OutlineEntry& entry = outline[index];
-				const std::string	indent(static_cast<size_t>(entry.depth) * 2 + 1, ' ');
+				const OutlineEntry& entry = outline[items[index]];
 				std::string			text;
 				if (!entry.leaf)
-					text = indent + entry.key + (entry.key.front() == '[' ? "" : ":");
-				else if (!entry.path.empty() && entry.path.back() == ']')
-					text = indent + "- " + entry.value;
+				{
+					std::string name = entry.key;
+					if (!name.empty() && name.front() == '[')
+						for (size_t i = items[index] + 1; i < outline.size() && outline[i].depth > entry.depth; ++i)
+							if (outline[i].leaf && outline[i].depth == entry.depth + 1 && outline[i].key == "name")
+							{
+								name += " " + outline[i].value;
+								break;
+							}
+					const std::string fitted = fit(name, columns > 8 ? columns - 8 : 1);
+					text					 = "   " + fitted + std::string(columns > 8 + fitted.size() ? columns - 8 - fitted.size() : 0, ' ') + " >";
+				}
 				else
-					text = indent + entry.key + ": " + entry.value;
-				rows[2 + row] = styled(index == form_selected_ ? kReverse : (entry.leaf ? "" : kDim), text);
+				{
+					const std::vector<std::string> options = value_choices(entry);
+					if (options.size() == 2 && options[0] == "true")
+					{
+						std::string value = entry.value;
+						if (value.size() >= 2 && (value.front() == '"' || value.front() == '\''))
+							value = value.substr(1, value.size() - 2);
+						text = std::string(" [") + (value == "true" ? "x" : " ") + "] " + entry.key;
+					}
+					else if (!entry.path.empty() && entry.path.back() == ']')
+						text = "   " + entry.value;
+					else
+					{
+						const std::string name = fit(entry.key, label_width);
+						text = "   " + name + std::string(label_width > name.size() ? label_width - name.size() : 0, ' ') + "  " + entry.value;
+					}
+				}
+				rows[2 + row] = styled(index == menu_selected_ ? kReverse : "", fit(text, columns));
 			}
-			rows[total - 1] = styled(kDim, " Up/Down select  Enter edit  Space/Left/Right change  Ctrl+S save  Ctrl+R save and run  Tab raw  Esc back");
+			if (items.empty() && body > 0)
+				rows[2] = styled(kDim, "   (empty)");
+			rows[total - 1] = styled(kDim, " Up/Down select  Enter/Right open or edit  Space toggle  Left/Esc back  Ctrl+S save  Ctrl+R run  Tab raw");
 		}
 		else
 		{
@@ -797,8 +886,7 @@ std::string App::render(int width, int height)
 
 	if (prompt_.kind != Prompt::Kind::none)
 	{
-		const bool text_prompt = prompt_.kind == Prompt::Kind::open_path || prompt_.kind == Prompt::Kind::new_path ||
-								 prompt_.kind == Prompt::Kind::edit_value;
+		const bool text_prompt = prompt_.kind == Prompt::Kind::open_path || prompt_.kind == Prompt::Kind::new_path;
 		rows[total - 2] = text_prompt ? std::string(kBold) + fit(" " + prompt_.label + ": " + prompt_.text, columns - 1) + kReverse + " " + kReset
 									  : styled(kBold, " " + prompt_.label);
 		if (text_prompt)
@@ -810,6 +898,29 @@ std::string App::render(int width, int height)
 	std::string frame;
 	for (size_t row = 0; row < rows.size(); ++row)
 		frame += "\033[" + std::to_string(row + 1) + ";1H" + rows[row] + kReset;
+	if (prompt_.kind == Prompt::Kind::edit_value && columns >= 12 && total >= 9)
+	{
+		// a centred dialog; the tail of a long value stays visible next to the cursor
+		const size_t width	= (std::min)(columns - 4, size_t{64});
+		const size_t inner	= width - 4;
+		const size_t left	= (columns - width) / 2 + 1;
+		const size_t top	= (total - 7) / 2 + 1;
+		const std::string value = prompt_.text.size() >= inner ? prompt_.text.substr(prompt_.text.size() - (inner - 1)) : prompt_.text;
+		const auto line = [&](const std::string& content, const char* style) {
+			return std::string(style) + "| " + fit(content, inner) + " |" + kReset;
+		};
+		const std::vector<std::string> box = {
+			std::string(kBold) + "+" + std::string(width - 2, '-') + "+" + kReset,
+			line("Edit value", kBold),
+			line(prompt_.label, kDim),
+			std::string(kReverse) + "| " + fit(value, inner - 1) + " " + " |" + kReset,
+			line("", ""),
+			line("Enter confirm  Esc cancel", kDim),
+			std::string(kBold) + "+" + std::string(width - 2, '-') + "+" + kReset,
+		};
+		for (size_t i = 0; i < box.size(); ++i)
+			frame += "\033[" + std::to_string(top + i) + ";" + std::to_string(left) + "H" + box[i];
+	}
 	return frame;
 }
 

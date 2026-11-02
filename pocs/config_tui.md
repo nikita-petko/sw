@@ -112,9 +112,10 @@ so it can be fixed in place. Entries are never removed automatically.
 
 ## Editor view
 
-- A form for the structured keys (`default_view`, `servers`, `profiles`, `features`, ...), driven by the JSON schema so
-  new keys show up without UI changes. Enumerations are pick lists, booleans are toggles, numbers are validated on
-  input.
+- A menu system over the file's structure. The top menu lists the sections (`servers`, `profiles`, ...); a section opens
+  as a submenu (`profiles` > `[0] "Name"` > `capture_options`), with a breadcrumb on top. `true`/`false` settings are
+  checkboxes (`[x]`/`[ ]`, toggled with `Enter` or `Space`); every other setting opens a centred "Edit value" dialog on
+  `Enter`. `Right`/`Enter` open a submenu, `Left`/`Backspace`/`Esc` go back up (`Esc` at the top menu leaves the editor).
 - A raw YAML tab for anything the form does not cover; switching tabs re-parses and shows any error.
 - `Ctrl+S` validates with the production loader and writes the file (atomic rename, original kept as `<file>.bak` once
   per session). Invalid content can be saved only after an explicit confirmation, and is then marked `!` in the list.
@@ -144,10 +145,10 @@ so it can be fixed in place. Entries are never removed automatically.
 ## Implementation status
 
 Implemented (see `include/config_tui.h`, `src/config_tui/`, `tests/config_tui/`): optional `--config`, recent list with
-`!` markers, loader, line-based form editor (comments preserved; choices come from a table keyed by key name, not the
-JSON schema) and raw editor, atomic save with `.bak`, new-profile template, hotkey swap with rollback, the
+`!` markers, loader, line-based form editor (menus and submenus, checkboxes and a value dialog; comments preserved; the checkbox/`Space` choices come from a table
+keyed by key name, not the JSON schema) and raw editor, atomic save with `.bak`, new-profile template, hotkey swap with rollback, the
 fixed `I` hotkey, always available when the `config_tui` build feature is on (no profile setting; a profile that uses
-`I` as a key fails to load). Not implemented: schema-driven form, keeping unsaved edits across a cancelled swap. The
+`I` as a key fails to load). Not implemented: schema-driven menus, adding/removing list items from the menu, keeping unsaved edits across a cancelled swap. The
 Windows platform code is written but untested.
 
 ## Open questions
