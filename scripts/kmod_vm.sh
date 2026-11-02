@@ -4,9 +4,11 @@
 # (readable), the kernel module tree of the same kernel under /usr/lib/modules and the usual host tools (bash, iproute2, util-linux,
 # kmod). Everything the VM runs is copied from the host into an initramfs; nothing is installed.
 #
-# usage: scripts/kmod_vm.sh [--mem MB] [--cpus N] [--timeout SEC] [--modules "m1 m2"] [--keep] [--file F]... -- script [args...]
+# usage: scripts/kmod_vm.sh [--mem MB] [--cpus N] [--timeout SEC] [--modules "m1 m2"] [--slub-debug FLAGS] [--keep] [--file F]... -- script [args...]
 #   --file F      also copy F into the VM at /opt/<basename F> (modules, test tools; the script is copied to /opt/run.sh)
 #   --modules     kernel modules (with dependencies) available to `modprobe` in the VM
+#   --slub-debug  slub_debug= flags (default FZP: sanity checks, red zones, poisoning: catches use-after-free and overflows of slab objects;
+#                 "" turns it off, which is what you want for timing)
 # The VM's console output is streamed; the exit status is the script's. A kernel panic or a timeout is a failure.
 set -euo pipefail
 
@@ -17,6 +19,7 @@ timeout_s=300
 modules="veth nf_conntrack nf_nat nf_tables nft_nat nft_masq nft_chain_nat nft_ct nft_queue nfnetlink_queue nf_conntrack_netlink"
 files=()
 keep=0
+slab_debug="FZP"
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--mem) mem="$2"; shift 2 ;;
@@ -25,6 +28,7 @@ while [ $# -gt 0 ]; do
 	--modules) modules="$2"; shift 2 ;;
 	--file) files+=("$2"); shift 2 ;;
 	--keep) keep=1; shift ;;
+	--slub-debug) slab_debug="$2"; shift 2 ;;
 	--) shift; break ;;
 	*) echo "unknown option $1" >&2; exit 2 ;;
 	esac
@@ -74,7 +78,7 @@ copy_libs() {
 }
 
 for tool in bash sh ls cat sleep echo mkdir rm cp mv ln date kill sort head tail wc tr cut sed awk grep egrep diff uniq seq true false env test \
-	chmod mount umount dmesg sync stat id uname hostname find xargs tee timeout \
+	chmod mount umount dmesg sync stat id uname hostname find xargs tee timeout mktemp readlink dirname basename \
 	ip nsenter unshare insmod rmmod lsmod modprobe depmod modinfo nft ping ss; do
 	copy_bin "$tool" || echo "note: $tool is not a program on the host, skipped" >&2
 done
@@ -135,7 +139,7 @@ log="$work/console.log"
 set +e
 timeout "$timeout_s" qemu-system-x86_64 -enable-kvm -cpu host -smp "$cpus" -m "$mem" -nographic -no-reboot \
 	-kernel "$kernel_image" -initrd "$img" \
-	-append "console=ttyS0 panic=-1 oops=panic rdinit=/init loglevel=4 net.ifnames=0" \
+	-append "console=ttyS0 panic=-1 oops=panic rdinit=/init loglevel=4 net.ifnames=0 ${slab_debug:+slub_debug=$slab_debug}" \
 	-nic none 2>&1 | tee "$log" | sed -u 's/\r$//'
 set -e
 code="$(sed -n 's/.*VM-EXIT:\([0-9]*\).*/\1/p' "$log" | tail -1)"

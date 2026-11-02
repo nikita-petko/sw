@@ -4,6 +4,7 @@
 
 - **Phase 1 (build system and echo module): done and verified end to end.** `kmod/xmake.lua` drives the kernel's kbuild from xmake and `kmod/echo/` is a minimal `/dev/swdivert_echo` module (details in §10 and §12). Verified on Linux 7.2.11 (Arch, gcc 16.2.1): `xmake build swdivert_echo` produces a `.ko` whose vermagic matches the running kernel, rebuilds are incremental, a missing kernel build tree gives an actionable error, and debug/release outputs are separate. `sudo scripts/test_kmod_echo.sh` was run as root on the same kernel: the module loads, all 9 user-space checks pass (ABI version ioctl, echo, replace, binary round-trip, second open, full-capacity write, `EMSGSIZE`, intact message after a rejected write, `ENOTTY`) and it unloads. Not covered: other kernels, Secure Boot signing, cross-compilation.
 - **Phase 2 (Spike A, capture-only ring): done and measured on 7.2.11. The ring matches AF_PACKET TPACKET_V3 on sniffer CPU when the wake-up is batched coarsely, and is ~10× cheaper than NFQUEUE.** `kmod/swdivert/` is a sniff-only `/dev/swdivert` with a FORWARD hook, one 5-tuple filter and an mmap ring; `pocs/linux_kernel_module_backend/` has the rig and the sniffers. `sudo scripts/test_kmod_sniff.sh --bench` passes every check (exact capture, decoy flow ignored, SIGKILLed reader leaves forwarding intact, module reference count 0 afterwards, nothing in `dmesg`) and the ring never dropped a packet up to 200 kpps, where NFQUEUE dropped 14–26 % of the *forwarded* traffic. Sniffer CPU per packet depends on how many packets one wake-up covers: 1.8–2.1 µs at one packet per wake-up, 0.28–0.42 µs at the default `wake_us=50`, and **0.06–0.08 µs at `wake_us=1000`, `wake_batch=256`, against 0.05–0.07 µs for AF_PACKET** and 3.9–4.3 µs for NFQUEUE. The price of the coarse setting is up to `wake_us` of added delay before a sleeping reader sees a packet, which was **not measured** and is irrelevant for sniffing but decisive for Phase 3's release path. The default stays at the latency-safe 50 µs / 32 until Phase 3 has measured that latency (§12 "Phase 2 results").
+- **Phase 3 (Spike B, steal and resume): implemented, verified in a VM on 7.2.11, and benchmarked once on real hardware (bare metal, same kernel).** A `HOLD` handle steals matching FORWARD packets (`NF_STOLEN`), copies them into the ring and parks the original until user space gives a verdict (`RESUME` or `DROP`, batched in one ioctl); a packet nobody answers is resumed after `hold_ms`; closing the handle, including by SIGKILL, resumes every held packet before the hook goes away. `scripts/test_kmod_hold_vm.sh` boots the host's own kernel in QEMU/KVM and runs 46 checks against the real module, with slab poisoning and red zones on: all pass, three runs in a row on 8 CPUs. Results: a TCP transfer through a 2 ms hold arrives intact with all 2915 data segments held (also through a masquerading gateway, so conntrack/NAT state survives a hold); **SIGKILLing the reader with packets held loses none (NFQUEUE loses every one that was waiting: 1000 of 2000 in the same test)**; exactly-once delivery holds under racing timeouts, verdicts and kills (79,999 of 79,999, no duplicates); and divert-and-resume costs less reader CPU than batched-verdict NFQUEUE: **2.4–2.5× less at 100 kpps and 1.4–1.5× less at 20 kpps on bare metal** (2.7–3.0× and 1.6× in the VM), with no loss and a lower median latency (8 vs 17 µs at 100 kpps, 11 vs 13 µs at 20 kpps). The advantage is real but smaller than the VM suggested and at low rates sits right at the 1.5× gate. Caveats remain large (one machine, `veth` not a NIC, one flow, one run per row, no packet modification yet, one kernel); see §12 "Phase 3 results".
 - **Everything from §7 on that is not listed above is design only.** Nothing there is implemented or measured. Every number in §11 is a hypothesis to be confirmed or killed by the spikes in §12.
 - This PoC is the third option next to the shipped backend ([`linux_nfqueue_backend.md`](linux_nfqueue_backend.md)) and the eBPF/EDT tier ([`linux_ebpf_netlink_backend.md`](linux_ebpf_netlink_backend.md)). Those two deliberately avoid a kernel module. This one asks the opposite question: *if we accept an out-of-tree module, can Linux match WinDivert's capabilities and per-packet cost, and is the gain large enough to justify the maintenance burden?*
 - Success criterion (go/no-go, §12): the module must beat **NFQUEUE with batched verdicts and fail-open (the current backend)** by a margin that the eBPF tier cannot also deliver for the verbs that need user space. If it does not, stop; the documented fallback is the existing backend.
@@ -311,7 +312,7 @@ WinDivert's own numbers are not a target, because they depend on Windows. The pa
 
 1. **Phase 1: kernel-module build system and echo module (done).** Add `kmod/` with the `kmod.module` xmake rule that drives kbuild, an echo module (`swdivert_echo`: a misc device that returns what was written, plus a version ioctl), a user-space test and a root-only load/test script (§10). Exit criteria: `xmake build swdivert_echo` yields a `.ko` for the selected kernel from a clean tree; incremental rebuilds are no-ops; a missing kernel tree gives a clear error; the default `xmake` build is unaffected; **and** `sudo scripts/test_kmod_echo.sh` loads the module, passes all user-space checks and unloads it cleanly (met on 7.2.11). Every later phase builds on this rule, so it is first.
 2. **Phase 2, Spike A: capture-only ring (done: functionally passes and matches AF_PACKET on sniffer CPU with a coarse wake-up, see "Phase 2 results").** Hook `FORWARD` on a veth netns gateway, filter by hard-coded 5-tuple, copy into an mmap ring, sniff only. Measure cost per packet against `AF_PACKET` and NFQUEUE sniff.
-3. **Phase 3, Spike B: steal and resume.** Add `HOLD`, `RESUME`, `DROP`. Verify TCP continues, conntrack and NAT state unaffected, `bypass`-like fail-open on `kill -9`, and netns teardown with held packets.
+3. **Phase 3, Spike B: steal and resume (done: functional tests in a VM, one bare-metal benchmark; gate provisionally met, see "Phase 3 results").** Add `HOLD`, `RESUME`, `DROP`. Verify TCP continues, conntrack and NAT state unaffected, `bypass`-like fail-open on `kill -9`, and netns teardown with held packets.
 4. **Phase 4, Spike C: modify and inject.** `RESUME_MOD`, `INJECT`, checksum flags, priority chaining, loop avoidance. Re-run the existing engine test profiles through a `backends/kmod` stub.
 5. **Go/no-go gate.** Compare against the §11 targets. If divert-and-resume is not at least ~1.5× faster than the batched NFQUEUE backend, **stop** and keep NFQUEUE + eBPF (record the numbers here).
 6. **Phase 5: filter VM and sets.** Bytecode emitter from the existing lexer/parser, verifier, fuzz harness (syzkaller-style, plus a user-space harness that runs the VM on random programs/packets under ASan).
@@ -319,6 +320,82 @@ WinDivert's own numbers are not a target, because they depend on Windows. The pa
 8. **Phase 7: packaging.** DKMS config, module signing (MOK) and the Secure Boot story, `modules_install`.
 9. **Phase 8: hardening.** KASAN/KCSAN/lockdep runs, netns churn, module reload under traffic, CPU hotplug, multiple handles with priority chains, kernel matrix.
 10. **Optional:** `RESUME_AT` in-kernel hold, IPv6, multi-queue fanout (one ring per CPU/flow hash, relevant only if the engine's single-thread-per-channel model changes).
+
+### Phase 3 results (Spike B)
+
+**What exists**
+- [`kmod/swdivert/hold.c`](../kmod/swdivert/hold.c) (new) plus changes in `hook.c`, `ring.c`, `main.c`; ABI additions in [`swdivert_abi.h`](../kmod/include/swdivert_abi.h) (`SWDIV_OPEN_HOLD`, `SWDIVERT_IOC_VERDICT`, slot `id`, more statistics; the slot header is now 48 bytes and `slot_bytes` a multiple of 16).
+- Tools: [`swbench.cc`](../pocs/linux_kernel_module_backend/swbench.cc) gained `sniff --mode swdiv-hold|nfq-hold` (delay, drop-every-N, never-answer, batched verdicts for NFQUEUE), timestamped and sequence-numbered packets with latency, duplicate, reorder and corruption detection in the sink, and TCP send/sink tools. [`scripts/test_kmod_hold.sh`](../scripts/test_kmod_hold.sh) is the test driver (it builds its own client–gateway–server namespaces and can run on a real kernel as root), [`scripts/kmod_vm.sh`](../scripts/kmod_vm.sh) runs a script as root in a throw-away QEMU/KVM VM that boots the host's kernel image with an initramfs built from host binaries (no root, nothing installed, a panic is contained; boots in about 3 s), and [`scripts/test_kmod_hold_vm.sh`](../scripts/test_kmod_hold_vm.sh) ties them together: `xmake build swdivert swbench && scripts/test_kmod_hold_vm.sh`.
+
+**How it works (and where it differs from §7)**
+- **Steal and resume.** The hook copies the packet into the ring and returns `NF_STOLEN`; the entry owns the skb, a copy of the `nf_hook_state` and a reference on each device. A resume runs the hooks that sort after this handle's (found by scanning the hook entries for this handle's hook; by priority if the hook is already gone) and then the original `okfn` (`ip_forward_finish`), under `local_bh_disable()` + `rcu_read_lock()`, which is what `nf_hook()` would have done. `nf_reinject()` is not usable because it needs the packet to have gone through `nf_queue()` and the one queue handler belongs to `nfnetlink_queue`. This answers §14.1 for the FORWARD hook (LOCAL_OUT and the others are not covered).
+- **Exactly once.** Every exit (verdict, timeout, flush, device removal) goes through one function that removes the entry from an xarray under its lock, so a packet is resumed or dropped by exactly one party. An entry is marked `ready` under the ring lock just before its slot becomes visible and the hook never touches it or the skb afterwards, which makes it safe for another CPU to resume the packet while the hook is still returning. Entries that are not ready are never taken (a reader guessing an id gets `ENOENT`).
+- **Fail-open.** Stop and close set a `closing` flag under the table lock (so no later packet can be held), resume everything while the hook is still registered, and only then unregister the hook. A reader that stops answering (hung, not dead) is covered by `hold_ms` (default 2000) and a limit `max_held` (default 4096) makes further packets pass unheld.
+- **Devices.** A held packet pins its devices; a netdevice notifier drops the held packets of a device that is being unregistered instead of stalling the unregistration.
+- **GSO.** Super-packets are segmented first (`skb_gso_segment`, as nf_queue does) and each segment is held on its own. The first version let them through unheld, which the TCP test caught: only 4 of about 2900 data packets of a 4 MiB transfer were held.
+- **Verdicts by ioctl, not a tx ring.** `SWDIVERT_IOC_VERDICT` takes an array of up to 4096 `(id, verdict)` pairs and returns a status per item; the tx ring of §7.5 is deferred (an ioctl per drain was enough for the measurements below).
+- **Wake policy.** Held handles do not batch the wake-up by default (`hold_wake_us=0`): batching adds its delay to every held packet one for one, and per-packet wake-up already costs 2–3× less CPU than NFQUEUE. Sniff-only handles keep the batched wake (`wake_us`, `wake_batch`). This answers the open question of Phase 2.
+- Not held, passed through (counted): packets owned by a socket, packets without a refcounted route, segmentation failures. A segment that cannot be held while its siblings were (limit, full ring) continues at once, which can reorder a connection but loses nothing.
+
+**Test results (VM: 7.2.11, KVM, 4–8 vCPUs, `slub_debug=FZP`; 46 checks, three consecutive runs all green)**
+
+| scenario | result |
+|---|---|
+| resume at once | 4000/4000 delivered, every packet held and resumed once, no duplicates, no corruption, no reordering |
+| 20 ms hold | 2000/2000 delivered, median latency 20.1 ms, order kept |
+| drop verdicts (every 4th) | delivered = sent − dropped exactly |
+| TCP, 4 MiB, 2 ms hold | intact (hash), 2915 segments held and resumed, 0 passed unheld |
+| same through masquerade | intact, 2905 segments held, the server sees the gateway's address |
+| reader SIGKILLed, packets held | **2000/2000 delivered**, no duplicates, module reference count 0 afterwards. Same test on NFQUEUE: **1000 of 2000 lost** |
+| reader stopped (SIGINT), packets held | 1000/1000 delivered, 1000 counted as flushed |
+| reader never answers, `hold_ms=300` | 500/500 delivered, median 318 ms, all counted as expired |
+| `max_held=50`, reader never answers | 50 held, 1950 passed unheld, 2000/2000 delivered |
+| device removed while packets held | `ip link del` returned in 14 ms, 503 held packets of that device dropped |
+| 20 kpps hold and resume | 40,000/40,000, no duplicates, no corruption |
+| races: 2 flows × 20 kpps, `hold_ms` = reader delay = 3 ms, reader killed mid-stream | 79,999/79,999 delivered, 0 duplicates, 0 corrupt |
+| sniff-only handle (Phase 2 regression) | 99,998/99,998 captured and forwarded, 13,582 wake-ups for 99,998 packets |
+| module unload / kernel log | reference count 0, `rmmod` succeeds, no BUG/WARNING/Oops/slab error (the slab cache is destroyed on unload, which reports leaked entries) |
+
+**Divert-and-resume against NFQUEUE (the §11 comparison), first in the VM**: UDP, 200-byte packets, every matching packet held and released at once, one flow, 3 s per row, VM with 4 vCPUs and no slab debugging, two runs. "Reader CPU" is the user+system time of the reader process per packet; the resume itself runs in that process for both (in the verdict ioctl or in `sendmsg`), so the figures are comparable, but softirq time of the hook is not in them.
+
+| mode | 20 kpps: p50 latency / reader CPU | 100 kpps: p50 latency / reader CPU / loss |
+|---|---|---|
+| no hold (baseline) | 8–9 µs | 4–6 µs |
+| NFQUEUE, one verdict per packet | 23–33 µs / 6.6–9.0 µs | 63–384 µs / 5.4–6.0 µs / 0–0.43 % |
+| NFQUEUE, batched verdicts (the shipped backend's way) | 22–24 µs / 6.5–6.7 µs | 85–3066 µs / 5.3–5.8 µs / 0 |
+| **swdivert, `hold_wake_us=0`** | **19 µs / 3.98–4.09 µs** | **15–19 µs / 1.8–2.1 µs / 0** |
+| swdivert, `hold_wake_us=50` | 67 µs / 3.3 µs | 63 µs / 1.3 µs / 0 |
+| swdivert, `hold_wake_us=250` | 149–154 µs / 2.0–2.1 µs | 114–121 µs / 1.0–1.1 µs / 0 |
+
+- **Reader CPU: 1.6× lower than batched NFQUEUE at 20 kpps and 2.7–3.0× lower at 100 kpps.** Median latency is similar at 20 kpps and far lower at 100 kpps, where NFQUEUE's median and tail rise (at 100 kpps its p99 was 8.8–101 ms in every row; swdivert's was 0.1–1.9 ms in four rows and 15–16 ms in two). **The tail figures of this VM are too noisy to use** (single outliers of milliseconds show up in every mode, the no-hold baseline included); medians and CPU are repeatable, tails are not.
+- The batched-wake rows show the cost of batching on a held path: each 50 µs of `hold_wake_us` adds about 50 µs of median latency for a CPU saving of well under 1 µs per packet, hence the default of 0.
+
+**The same benchmark on bare metal** (the host the module is developed on: 8 CPUs, Linux 7.2.11, `veth`, 3 s per row, **one run per row**, `sudo scripts/test_kmod_hold.sh KO SWBENCH bench`; the VM is not involved):
+
+| mode | 20 kpps: p50 / p99 latency, reader CPU | 100 kpps: p50 / p99 latency, reader CPU |
+|---|---|---|
+| no hold (baseline) | 5 / 96 µs | 4 / 40 µs |
+| NFQUEUE, one verdict per packet | 13 / 62 µs, 5.43 µs | 18 / 70 µs, 3.28 µs |
+| NFQUEUE, batched verdicts | 13 / 46 µs, 5.27 µs | 17 / 547 µs, 3.36 µs |
+| **swdivert, `hold_wake_us=0`** | **11 / 101 µs, 3.65 µs** | **8 / 51 µs, 1.36 µs** |
+| swdivert, `hold_wake_us=50` | 60 / 105 µs, 2.94 µs | 56 / 105 µs, 0.91 µs |
+| swdivert, `hold_wake_us=250` | 122 / 302 µs, 1.72 µs | 119 / 300 µs, 0.64 µs |
+
+Nothing was lost in any row (NFQUEUE did not lose packets at 100 kpps on this machine, unlike in the VM). Reader CPU of swdivert against batched NFQUEUE: **1.44× lower at 20 kpps, 2.47× lower at 100 kpps** (1.49× and 2.41× against one verdict per packet). Median latency: 11 vs 13 µs at 20 kpps (level), 8 vs 17 µs at 100 kpps (about half). The p99 columns are within each other's noise at this sample size (one NFQUEUE row has a 547 µs p99, the rest are 46–105 µs) and say nothing either way.
+
+- The bare-metal ratios are **lower than the VM's** (NFQUEUE is cheaper here: 5.3 against 6.5 µs at 20 kpps and 3.3 against 5.5 at 100 kpps) but point the same way. Trust these over the VM figures.
+- At 20 kpps both approaches spend most of their time in the sleep, wake-up and system-call cycle of one packet per round trip, which is why the advantage shrinks there: the module removes the netlink encode/decode and the second system call per packet, not the wake-up of the reader. A lower-rate advantage would need a different wake mechanism (for example the reader spinning briefly before it sleeps); this was not tried.
+- The batching rows repeat the Phase 2 lesson on this machine: every 50 µs of `hold_wake_us` adds about 50 µs of median latency (60 and 122 µs against 11) for a saving of 0.7 and 1.9 µs of CPU per packet at 20 kpps. Default 0 stands.
+
+**Against the §12 gate** ("if divert-and-resume is not at least ~1.5× faster than the batched NFQUEUE backend, stop"): **met at 100 kpps (2.5×), at the threshold at 20 kpps (1.44×, below 1.5 by a hair on a single run), and met on median latency.** That is enough to continue to Phase 4, not enough to call the gate passed. Still missing: (a) repeated runs and a spread (this is one run per row), (b) a real NIC and several flows, (c) the cost with **modification** (Phase 4: `RESUME_MOD`; NFQUEUE has to send the packet back, the module only the changed bytes, so the gap may widen or not), (d) host-wide CPU including softirq, which this rig cannot separate from background load, and (e) NFQUEUE as the real backend uses it (`bypass`, fanout, GSO flags), not as `swbench` does. Also note that "reader CPU" excludes the softirq work of the hook itself (copy into the ring versus building a netlink message); that is the half of the cost the rig cannot see.
+
+**Not covered / known gaps**
+- Only the FORWARD hook. LOCAL_IN/OUT/PRE/POSTROUTING, locally generated packets (`skb->sk`, TCP small queues, §14.4), IPv6, bridged traffic and fragments are untested; sockets are simply not held.
+- The module keeps a reference on the namespace of every open handle, so a namespace cannot be torn down while a reader keeps the device open (the "netns teardown with held packets" item of the plan is therefore only covered as "closing the handle releases them", not as a teardown race).
+- NAT was tested for masquerade (SNAT) only, not DNAT; conntrack was only used by NAT, not inspected.
+- Memory: held skbs are bounded by `max_held` per handle, not globally.
+- The functional tests ran in the VM only (the real-hardware run covers the benchmark, the module reference count, unload and the kernel log, not the 46 checks; `sudo scripts/test_kmod_hold.sh KO SWBENCH` runs those on the host too). One kernel, no KASAN/KCSAN/lockdep (the Arch kernel has none; `slub_debug` poisons and red-zones slab objects but not the vmalloc ring or page-level bugs). A KASAN/lockdep kernel run is still to do (Phase 8).
+- The IntelliSense compat header was not re-checked in cpptools for the new file; clangd is clean on all four sources.
 
 ### Phase 2 results (Spike A)
 
@@ -397,7 +474,7 @@ What these say, and do not say:
 - **Open for Phase 3, not Phase 2:** the latency a sleeping reader sees (bounded by `wake_us`), and whether the release path of held packets needs its own wake policy (`wake_us=0` or an explicit "wake now" when a verdict is waiting). The default stays at 50 µs / 32 until that is measured.
 - **Not covered by Phase 2:** other kernels, a real NIC, multi-flow traffic and several handles at once (one lock-serialised producer side is assumed to be uncontended in a single-flow rig; it is the first suspect if multi-flow throughput disappoints), GSO super-packets, and IPv6.
 
-**Risk note.** The module is unreviewed kernel code. It has now run through the checks above without incident, but that is a few minutes of traffic on one kernel; keep running it in a VM or on a machine where a panic is acceptable. It only sniffs (always `NF_ACCEPT`), so a logic bug should not break forwarding, but a memory-safety bug can.
+**Risk note.** The module is unreviewed kernel code. It has now run through the checks above without incident, but that is a few minutes of traffic on one kernel; keep running it in a VM or on a machine where a panic is acceptable. Phase 3 steals and re-injects real packets, which is riskier than sniffing: `scripts/test_kmod_hold_vm.sh` exists so that it never has to be tried on a host first. It only sniffs (always `NF_ACCEPT`), so a logic bug should not break forwarding, but a memory-safety bug can.
 
 ## 13. Test plan
 
@@ -412,10 +489,10 @@ What these say, and do not say:
 
 ## 14. Risks and open questions
 
-1. **Resuming a stolen skb without being the nf_queue handler.** The design uses `nf_hook_slow()` from a recorded index. Needs a spike to prove it is correct on `LOCAL_OUT` (where the hook is `NF_INET_LOCAL_OUT` and `okfn` is `dst_output`) and `FORWARD`, including when hook entries change between divert and resume. If it is not robust, the fallback is `CONSUME` + `INJECT` only (WinDivert's own model), at the cost of metadata and TCP small-queue behaviour.
+1. **Resuming a stolen skb without being the nf_queue handler. Answered for FORWARD by Phase 3** (resume from the position after the handle's own hook, with a priority-based fallback; works with GSO segments, NAT and TCP, and holds up under timeout/verdict/kill races). Still open for the other hooks, in particular `LOCAL_OUT` (original text follows). The design uses `nf_hook_slow()` from a recorded index. Needs a spike to prove it is correct on `LOCAL_OUT` (where the hook is `NF_INET_LOCAL_OUT` and `okfn` is `dst_output`) and `FORWARD`, including when hook entries change between divert and resume. If it is not robust, the fallback is `CONSUME` + `INJECT` only (WinDivert's own model), at the cost of metadata and TCP small-queue behaviour.
 2. **Hook priority vs conntrack/NAT.** Seeing the packet before or after NAT changes what addresses the engine filters on (the same issue as §7.5 of the eBPF PoC). Decide `early` vs `late` per hook after a spike with a masquerading gateway.
 3. **Filter VM vs reusing BPF.** `bpf_prog_get_type()` + `bpf_prog_run` would give a JIT and a verifier for free, but the exported-symbol surface differs by kernel and config. The VM is chosen for independence; revisit if the VM is the bottleneck.
-4. **TCP small queues and held skbs.** Holding an outbound skb keeps its socket's `sk_wmem_alloc`; long holds can stall the sender, which is the point for some verbs and surprising for others. `CONSUME` frees early and changes that behaviour. Needs measurement with the actual game flows (see the research notes) before choosing defaults.
+4. **TCP small queues and held skbs (not reached: Phase 3 holds forwarded packets only, which have no owning socket).** Holding an outbound skb keeps its socket's `sk_wmem_alloc`; long holds can stall the sender, which is the point for some verbs and surprising for others. `CONSUME` frees early and changes that behaviour. Needs measurement with the actual game flows (see the research notes) before choosing defaults.
 5. **Lazy hook registration.** Registering netfilter hooks has a cost for *all* traffic (static key enabled). Register only while at least one handle for that layer exists; measure the idle overhead claim.
 6. **Secure Boot and distribution** may make the module unusable for the likely end users (§10). Decide whether the module is only for gateway/lab deployments.
 7. **Maintenance cost.** Netfilter internals change between kernel versions. The module should be small (target < 4 kLoC), have an explicit supported-kernel list, and CI against each.
@@ -435,4 +512,4 @@ What these say, and do not say:
 
 ## 16. Decision
 
-Phase 1 is complete; proceed with Spikes A–C (Phases 2–4, §12) on the dev kernel and record numbers back into this document. The module is justified only if it clearly beats the batched NFQUEUE backend on divert-and-resume latency and CPU while meeting §9's fail-open guarantee; otherwise the project keeps NFQUEUE plus the eBPF/EDT tier and this PoC is closed as "not worth the out-of-tree cost".
+Phases 1–3 are complete (Phase 3 verified in a VM and benchmarked once on bare metal); proceed with Spike C (Phase 4: modify and inject) and record numbers back into this document. The module is justified only if it clearly beats the batched NFQUEUE backend on divert-and-resume latency and CPU while meeting §9's fail-open guarantee; otherwise the project keeps NFQUEUE plus the eBPF/EDT tier and this PoC is closed as "not worth the out-of-tree cost".

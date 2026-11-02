@@ -50,7 +50,7 @@ static bool swdiv_match(const struct swdiv_tuple *tuple, const struct sk_buff *s
 	return true;
 }
 
-static unsigned int swdiv_hook(void *priv, struct sk_buff *skb, const struct nf_hook_state *state)
+unsigned int swdiv_hook(void *priv, struct sk_buff *skb, const struct nf_hook_state *state)
 {
 	struct swdiv_handle *handle = priv;
 	struct swdiv_cpu_stats *stats = this_cpu_ptr(handle->stats);
@@ -61,7 +61,10 @@ static unsigned int swdiv_hook(void *priv, struct sk_buff *skb, const struct nf_
 		return NF_ACCEPT;
 	stats->matched++;
 
-	if (swdiv_ring_push(&handle->ring, skb, state, &truncated)) {
+	if (handle->hold_mode)
+		return swdiv_hold_packet(handle, skb, state);
+
+	if (swdiv_ring_push(&handle->ring, skb, state, &truncated, 0, NULL)) {
 		stats->dropped_full++;
 		return NF_ACCEPT;
 	}
@@ -83,7 +86,14 @@ module_param(wake_batch, uint, 0644);
 MODULE_PARM_DESC(wake_batch, "wake the reader after this many published packets (default 32)");
 static unsigned int wake_us = 50;
 module_param(wake_us, uint, 0644);
-MODULE_PARM_DESC(wake_us, "wake the reader at most this many microseconds after the first unannounced packet; 0 = wake per packet (default 50)");
+MODULE_PARM_DESC(wake_us, "sniffing handles: wake the reader at most this many microseconds after the first unannounced packet; 0 = wake per packet (default 50)");
+/*
+ * A held packet is waiting for a verdict, so batching its wake-up adds to its delay one for one. Measured (pocs/linux_kernel_module_backend.md):
+ * waking per packet costs the reader little more CPU than batching and a fraction of NFQUEUE's, so held handles do not batch by default.
+ */
+static unsigned int hold_wake_us;
+module_param(hold_wake_us, uint, 0644);
+MODULE_PARM_DESC(hold_wake_us, "holding handles: the same as wake_us (default 0: wake per packet, the lowest added latency)");
 
 static void swdiv_wake(struct swdiv_handle *handle)
 {
@@ -118,7 +128,7 @@ void swdiv_wake_timer_cancel(struct swdiv_handle *handle)
 
 void swdiv_notify(struct swdiv_handle *handle)
 {
-	const unsigned int delay_us = READ_ONCE(wake_us);
+	const unsigned int delay_us = handle->hold_mode ? READ_ONCE(hold_wake_us) : READ_ONCE(wake_us);
 	const unsigned int batch = READ_ONCE(wake_batch);
 
 	/* A reader that is not asleep finds the packet by itself; wq_has_sleeper() is the barrier that pairs with poll_wait() */

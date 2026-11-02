@@ -51,7 +51,8 @@ void swdiv_ring_free(struct swdiv_ring *ring)
 	memset(ring, 0, sizeof(*ring));
 }
 
-int swdiv_ring_push(struct swdiv_ring *ring, const struct sk_buff *skb, const struct nf_hook_state *state, bool *truncated)
+int swdiv_ring_push(struct swdiv_ring *ring, const struct sk_buff *skb, const struct nf_hook_state *state, bool *truncated,
+		     u64 id, struct swdiv_held *entry)
 {
 	const u32 capacity = ring->slot_bytes - SWDIVERT_SLOT_HDR_BYTES;
 	/* Packets are copied from the IP header on, as WinDivert's network layer presents them */
@@ -79,8 +80,16 @@ int swdiv_ring_push(struct swdiv_ring *ring, const struct sk_buff *skb, const st
 	slot->caplen = caplen;
 	slot->ifindex_in = state->in ? state->in->ifindex : 0;
 	slot->ifindex_out = state->out ? state->out->ifindex : 0;
-	slot->flags = caplen < len ? SWDIV_SLOT_F_TRUNCATED : 0;
+	slot->flags = (caplen < len ? SWDIV_SLOT_F_TRUNCATED : 0) | (entry ? SWDIV_SLOT_F_HELD : 0);
 	slot->hook = state->hook;
+	slot->id = id;
+	slot->reserved0 = 0;
+	slot->reserved1 = 0;
+	slot->reserved2 = 0;
+
+	/* From here the entry may be taken by another CPU: after this the hook must not touch it or the skb again */
+	if (entry)
+		smp_store_release(&entry->ready, true);
 
 	ring->prod++;
 	/* Orders the slot writes before the new producer count the reader acquires */

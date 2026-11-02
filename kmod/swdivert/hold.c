@@ -1,0 +1,461 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Held packets: stealing a packet in the hook, parking it until user space gives a verdict, and resuming or dropping it.
+ *
+ * A held packet is an skb the hook returned NF_STOLEN for. Resuming it means running the hooks that sort after ours and then the
+ * okfn the original caller passed (ip_forward_finish for FORWARD), exactly what nf_hook() would have done had our hook accepted.
+ * nf_reinject() cannot be used: it needs the packet to have gone through nf_queue(), and the one nf_queue handler of the system
+ * belongs to nfnetlink_queue (the shipped NFQUEUE backend).
+ *
+ * Every way a held packet can leave goes through swdiv_take()/swdiv_take_id(), which remove it from the table under its lock, so
+ * a packet is resumed or dropped exactly once. Nothing that holds packets may ever lose one: stop, close (including SIGKILL of
+ * the reader) and a reader that stops answering all resume the packets (the "fail open" requirement of the design).
+ */
+#include <linux/jiffies.h>
+#include <linux/moduleparam.h>
+#include <linux/netdevice.h>
+#include <linux/netdev_features.h>
+#include <linux/netfilter.h>
+#include <linux/sched.h>
+#include <linux/skbuff.h>
+#include <linux/slab.h>
+#include <linux/uaccess.h>
+#include <net/dst.h>
+#include <net/gso.h>
+#include <net/net_namespace.h>
+
+#include "swdivert.h"
+
+#if BITS_PER_LONG != 64
+#error "swdivert keys the held packets by a 64-bit id in an xarray: 64-bit kernels only"
+#endif
+
+unsigned int swdiv_hold_ms = 2000;
+module_param_named(hold_ms, swdiv_hold_ms, uint, 0644);
+MODULE_PARM_DESC(hold_ms, "resume a held packet nobody gave a verdict for after this many milliseconds (default 2000)");
+
+unsigned int swdiv_max_held = 4096;
+module_param_named(max_held, swdiv_max_held, uint, 0644);
+MODULE_PARM_DESC(max_held, "most packets one handle holds at a time; further packets pass unheld (default 4096)");
+
+static struct kmem_cache *swdiv_held_cache;
+static LIST_HEAD(swdiv_handles);
+static DEFINE_MUTEX(swdiv_handles_lock);
+
+static void swdiv_entry_free(struct swdiv_held *e)
+{
+	if (e->state.in)
+		dev_put(e->state.in);
+	if (e->state.out)
+		dev_put(e->state.out);
+	kmem_cache_free(swdiv_held_cache, e);
+}
+
+static void swdiv_entry_drop(struct swdiv_held *e)
+{
+	kfree_skb(e->skb);
+	swdiv_entry_free(e);
+}
+
+/* Where to continue in the hook chain: right after this handle's hook */
+static unsigned int swdiv_resume_index(const struct nf_hook_entries *hooks, const struct swdiv_handle *h)
+{
+	struct nf_hook_ops **ops;
+	unsigned int i;
+
+	for (i = 0; i < hooks->num_hook_entries; i++)
+		if (hooks->hooks[i].hook == swdiv_hook && hooks->hooks[i].priv == h)
+			return i + 1;
+
+	/* The hook is already unregistered (only after a stop raced with a resume): continue after everything that sorts before it */
+	ops = nf_hook_entries_get_hook_ops(hooks);
+	for (i = 0; i < hooks->num_hook_entries; i++)
+		if (ops[i]->priority > h->ops.priority)
+			return i;
+	return hooks->num_hook_entries;
+}
+
+/*
+ * Runs the hooks after this handle's and then the okfn: what nf_hook() would have done had our hook accepted the packet. Process
+ * context or the hook itself.
+ */
+static void swdiv_continue(struct swdiv_handle *h, struct sk_buff *skb, struct nf_hook_state *state)
+{
+	struct net *net = state->net;
+	const struct nf_hook_entries *hooks;
+	int ret = 1;
+
+	/* The packet path expects softirq conditions: BH off and inside an RCU read-side section, as nf_hook() runs it */
+	local_bh_disable();
+	rcu_read_lock();
+	hooks = rcu_dereference(net->nf.hooks_ipv4[state->hook]);
+	if (hooks)
+		ret = nf_hook_slow(skb, state, hooks, swdiv_resume_index(hooks, h));
+	if (ret == 1)
+		state->okfn(net, state->sk, skb);
+	rcu_read_unlock();
+	local_bh_enable();
+}
+
+/* Gives a held packet back to the stack and frees the entry. */
+static void swdiv_entry_resume(struct swdiv_handle *h, struct swdiv_held *e)
+{
+	swdiv_continue(h, e->skb, &e->state);
+	swdiv_entry_free(e);
+}
+
+typedef bool (*swdiv_pred)(const struct swdiv_held *e, const void *arg);
+
+/*
+ * Removes one entry that satisfies `pred` (any when NULL) and returns it, or NULL when there is none. Entries that are still
+ * being set up by the hook are waited for, never skipped, so that "NULL" means "nothing left": the hook finishes within
+ * microseconds and either makes the entry ready or removes it itself.
+ */
+static struct swdiv_held *swdiv_take(struct swdiv_handle *h, swdiv_pred pred, const void *arg)
+{
+	struct swdiv_held *e;
+	unsigned long id;
+	bool busy;
+
+	for (;;) {
+		busy = false;
+		xa_lock_bh(&h->held);
+		xa_for_each(&h->held, id, e) {
+			if (pred && !pred(e, arg))
+				continue;
+			if (!smp_load_acquire(&e->ready)) {
+				busy = true;
+				continue;
+			}
+			__xa_erase(&h->held, id);
+			atomic_dec(&h->held_count);
+			xa_unlock_bh(&h->held);
+			return e;
+		}
+		xa_unlock_bh(&h->held);
+		if (!busy)
+			return NULL;
+		cond_resched();
+	}
+}
+
+/* Removes the entry with this id. An id that is unknown, gone, or not yet published (guessed by a misbehaving reader) is NULL. */
+static struct swdiv_held *swdiv_take_id(struct swdiv_handle *h, u64 id)
+{
+	struct swdiv_held *e;
+
+	xa_lock_bh(&h->held);
+	e = xa_load(&h->held, id);
+	if (e && smp_load_acquire(&e->ready)) {
+		__xa_erase(&h->held, id);
+		atomic_dec(&h->held_count);
+	} else {
+		e = NULL;
+	}
+	xa_unlock_bh(&h->held);
+	return e;
+}
+
+static bool swdiv_pred_expired(const struct swdiv_held *e, const void *arg)
+{
+	return time_after_eq(jiffies, e->expires);
+}
+
+static bool swdiv_pred_dev(const struct swdiv_held *e, const void *arg)
+{
+	const struct net_device *dev = arg;
+
+	return e->state.in == dev || e->state.out == dev || e->skb->dev == dev;
+}
+
+/* ---- the hook side ---- */
+
+/*
+ * Holds one ordinary packet. Returns NF_STOLEN, or NF_ACCEPT when the packet was not taken: it then still belongs to the caller.
+ * Not held: packets owned by a socket (the reference would have to be kept and released) and packets without a refcounted route.
+ */
+static unsigned int swdiv_hold_one(struct swdiv_handle *h, struct sk_buff *skb, const struct nf_hook_state *state)
+{
+	struct swdiv_cpu_stats *stats = this_cpu_ptr(h->stats);
+	struct swdiv_held *e;
+	bool truncated = false;
+	bool unsupported = false;
+	int err;
+	u64 id;
+
+	if (state->sk || !state->okfn) {
+		stats->pass_unsupported++;
+		return NF_ACCEPT;
+	}
+	if (atomic_read(&h->held_count) >= READ_ONCE(swdiv_max_held)) {
+		stats->pass_limit++;
+		return NF_ACCEPT;
+	}
+	e = kmem_cache_zalloc(swdiv_held_cache, GFP_ATOMIC);
+	if (!e) {
+		stats->pass_limit++;
+		return NF_ACCEPT;
+	}
+	/* A route that is only valid inside this RCU section cannot be parked */
+	if (!skb_dst_force(skb)) {
+		kmem_cache_free(swdiv_held_cache, e);
+		stats->pass_unsupported++;
+		return NF_ACCEPT;
+	}
+
+	e->skb = skb;
+	e->state = *state;
+	e->expires = jiffies + msecs_to_jiffies(READ_ONCE(swdiv_hold_ms));
+	id = atomic64_inc_return(&h->next_id);
+	e->id = id;
+	if (state->in)
+		dev_hold(state->in);
+	if (state->out)
+		dev_hold(state->out);
+
+	xa_lock_bh(&h->held);
+	if (h->closing) {
+		err = -EBUSY;
+		unsupported = true;
+	} else {
+		err = __xa_insert(&h->held, id, e, GFP_ATOMIC);
+		if (!err)
+			atomic_inc(&h->held_count);
+	}
+	xa_unlock_bh(&h->held);
+	if (err) {
+		swdiv_entry_free(e);
+		if (unsupported)
+			stats->pass_unsupported++;
+		else
+			stats->pass_limit++;
+		return NF_ACCEPT;
+	}
+
+	if (swdiv_ring_push(&h->ring, skb, state, &truncated, id, e)) {
+		/*
+		 * The ring is full: take the packet back and let it through. The id was never published and entries that are not
+		 * ready are never taken by anyone else, so the entry is still ours.
+		 */
+		xa_lock_bh(&h->held);
+		__xa_erase(&h->held, id);
+		atomic_dec(&h->held_count);
+		xa_unlock_bh(&h->held);
+		swdiv_entry_free(e);
+		stats->dropped_full++;
+		return NF_ACCEPT;
+	}
+
+	/*
+	 * From here on the entry and the skb belong to whoever takes them: only the handle is touched. A verdict may already be
+	 * resuming the packet on another CPU while this hook is still returning, which is fine because nf_hook_slow() does not look
+	 * at a stolen skb again.
+	 */
+	stats->copied++;
+	stats->held++;
+	if (truncated)
+		stats->truncated++;
+	if (!delayed_work_pending(&h->expiry))
+		schedule_delayed_work(&h->expiry, msecs_to_jiffies(clamp(READ_ONCE(swdiv_hold_ms) / 8, 5U, 250U)));
+	swdiv_notify(h);
+	return NF_STOLEN;
+}
+
+/*
+ * A GSO super-packet (a TCP segment train that veth or a NIC coalesced) is segmented first and every segment is held on its own,
+ * as nf_queue does: the copy in the ring and a later resume then deal with ordinary packets, and a delay really delays every
+ * segment. A segment that cannot be held (the limit was reached, the ring is full) continues at once, which can reorder segments
+ * of one connection but loses nothing.
+ */
+static unsigned int swdiv_hold_gso(struct swdiv_handle *h, struct sk_buff *skb, const struct nf_hook_state *state)
+{
+	struct sk_buff *segs, *next;
+
+	segs = skb_gso_segment(skb, 0);
+	if (IS_ERR_OR_NULL(segs)) {
+		this_cpu_inc(h->stats->pass_unsupported);
+		return NF_ACCEPT;
+	}
+	consume_skb(skb);
+
+	for (; segs; segs = next) {
+		next = segs->next;
+		skb_mark_not_on_list(segs);
+		if (swdiv_hold_one(h, segs, state) != NF_STOLEN) {
+			struct nf_hook_state st = *state;
+
+			swdiv_continue(h, segs, &st);
+		}
+	}
+	return NF_STOLEN;
+}
+
+unsigned int swdiv_hold_packet(struct swdiv_handle *h, struct sk_buff *skb, const struct nf_hook_state *state)
+{
+	if (skb_is_gso(skb))
+		return swdiv_hold_gso(h, skb, state);
+	return swdiv_hold_one(h, skb, state);
+}
+
+/* ---- timeout ---- */
+
+static void swdiv_expiry_fn(struct work_struct *work)
+{
+	struct swdiv_handle *h = container_of(to_delayed_work(work), struct swdiv_handle, expiry);
+	struct swdiv_held *e;
+
+	while ((e = swdiv_take(h, swdiv_pred_expired, NULL))) {
+		this_cpu_inc(h->stats->expired);
+		swdiv_entry_resume(h, e);
+	}
+	if (atomic_read(&h->held_count) > 0)
+		schedule_delayed_work(&h->expiry, msecs_to_jiffies(clamp(READ_ONCE(swdiv_hold_ms) / 8, 5U, 250U)));
+}
+
+/* ---- control side ---- */
+
+void swdiv_hold_init(struct swdiv_handle *h)
+{
+	xa_init_flags(&h->held, XA_FLAGS_LOCK_BH);
+	atomic64_set(&h->next_id, 0);
+	atomic_set(&h->held_count, 0);
+	h->closing = false;
+	INIT_DELAYED_WORK(&h->expiry, swdiv_expiry_fn);
+}
+
+void swdiv_hold_destroy(struct swdiv_handle *h)
+{
+	cancel_delayed_work_sync(&h->expiry);
+	WARN_ON(!xa_empty(&h->held));
+	xa_destroy(&h->held);
+}
+
+void swdiv_hold_flush(struct swdiv_handle *h)
+{
+	struct swdiv_held *e;
+
+	/* Under the table's lock, so that after this no hook can add an entry the loop below would miss */
+	xa_lock_bh(&h->held);
+	h->closing = true;
+	xa_unlock_bh(&h->held);
+
+	while ((e = swdiv_take(h, NULL, NULL))) {
+		this_cpu_inc(h->stats->flushed);
+		swdiv_entry_resume(h, e);
+	}
+}
+
+void swdiv_hold_reopen(struct swdiv_handle *h)
+{
+	xa_lock_bh(&h->held);
+	h->closing = false;
+	xa_unlock_bh(&h->held);
+}
+
+int swdiv_hold_verdicts(struct swdiv_handle *h, void __user *argp)
+{
+	struct swdiv_verdict_args args;
+	struct swdiv_verdict __user *items;
+	u32 i;
+
+	if (!h->hold_mode)
+		return -EINVAL;
+	if (copy_from_user(&args, argp, sizeof(args)))
+		return -EFAULT;
+	if (args.reserved || !args.count || args.count > SWDIV_MAX_VERDICTS)
+		return -EINVAL;
+	items = u64_to_user_ptr(args.items);
+
+	for (i = 0; i < args.count; i++) {
+		struct swdiv_verdict v;
+		struct swdiv_held *e;
+		u32 status = 0;
+
+		if (copy_from_user(&v, &items[i], sizeof(v)))
+			return -EFAULT;
+		if (v.verdict != SWDIV_V_RESUME && v.verdict != SWDIV_V_DROP) {
+			status = EINVAL;
+		} else {
+			e = swdiv_take_id(h, v.id);
+			if (!e) {
+				status = ENOENT;
+			} else if (v.verdict == SWDIV_V_RESUME) {
+				this_cpu_inc(h->stats->resumed);
+				swdiv_entry_resume(h, e);
+			} else {
+				this_cpu_inc(h->stats->verdict_dropped);
+				swdiv_entry_drop(e);
+			}
+		}
+		if (put_user(status, &items[i].status))
+			return -EFAULT;
+		if (!(i & 63))
+			cond_resched();
+	}
+	return 0;
+}
+
+/* ---- network devices ---- */
+
+/* A held packet pins its devices, which would stall the unregistration of a device that goes away while packets are held */
+static int swdiv_netdev_event(struct notifier_block *nb, unsigned long event, void *ptr)
+{
+	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
+	struct swdiv_handle *h;
+	struct swdiv_held *e;
+
+	if (event != NETDEV_UNREGISTER)
+		return NOTIFY_DONE;
+
+	mutex_lock(&swdiv_handles_lock);
+	list_for_each_entry(h, &swdiv_handles, node) {
+		if (!net_eq(h->net, dev_net(dev)))
+			continue;
+		while ((e = swdiv_take(h, swdiv_pred_dev, dev))) {
+			this_cpu_inc(h->stats->dev_dropped);
+			swdiv_entry_drop(e);
+		}
+	}
+	mutex_unlock(&swdiv_handles_lock);
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block swdiv_netdev_nb = {
+	.notifier_call = swdiv_netdev_event,
+};
+
+void swdiv_hold_register(struct swdiv_handle *h)
+{
+	mutex_lock(&swdiv_handles_lock);
+	list_add(&h->node, &swdiv_handles);
+	mutex_unlock(&swdiv_handles_lock);
+}
+
+void swdiv_hold_unregister(struct swdiv_handle *h)
+{
+	mutex_lock(&swdiv_handles_lock);
+	list_del_init(&h->node);
+	mutex_unlock(&swdiv_handles_lock);
+}
+
+int swdiv_hold_module_init(void)
+{
+	int ret;
+
+	swdiv_held_cache = kmem_cache_create("swdivert_held", sizeof(struct swdiv_held), 0, 0, NULL);
+	if (!swdiv_held_cache)
+		return -ENOMEM;
+	ret = register_netdevice_notifier(&swdiv_netdev_nb);
+	if (ret) {
+		kmem_cache_destroy(swdiv_held_cache);
+		return ret;
+	}
+	return 0;
+}
+
+void swdiv_hold_module_exit(void)
+{
+	unregister_netdevice_notifier(&swdiv_netdev_nb);
+	/* Warns if an entry leaked */
+	kmem_cache_destroy(swdiv_held_cache);
+}

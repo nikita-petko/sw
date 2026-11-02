@@ -44,19 +44,38 @@ static int swdiv_open(struct inode *inode, struct file *file)
 	mutex_init(&handle->lock);
 	init_waitqueue_head(&handle->wq);
 	swdiv_wake_timer_init(handle);
+	swdiv_hold_init(handle);
 	handle->net = get_net(net);
+	swdiv_hold_register(handle);
 	file->private_data = handle;
 	return 0;
+}
+
+/*
+ * Stops the hook. Held packets are resumed first, while the hook is still registered: they continue after its position in the
+ * hook chain, which is found by looking for it, and no new packet can be held once the flush has started.
+ */
+static void swdiv_stop(struct swdiv_handle *handle)
+{
+	if (!handle->started)
+		return;
+	if (handle->hold_mode)
+		swdiv_hold_flush(handle);
+	swdiv_hook_stop(handle);
+	if (handle->hold_mode)
+		swdiv_hold_reopen(handle);
+	handle->started = false;
 }
 
 static int swdiv_release(struct inode *inode, struct file *file)
 {
 	struct swdiv_handle *handle = file->private_data;
 
-	if (handle->started)
-		swdiv_hook_stop(handle);
+	swdiv_stop(handle);
 	/* The hook is gone, so nothing can arm the timer any more; a callback that is already running finishes first */
 	swdiv_wake_timer_cancel(handle);
+	swdiv_hold_unregister(handle);
+	swdiv_hold_destroy(handle);
 	if (handle->ring_ready)
 		swdiv_ring_free(&handle->ring);
 	put_net(handle->net);
@@ -72,11 +91,11 @@ static int swdiv_do_open(struct swdiv_handle *handle, void __user *argp)
 
 	if (copy_from_user(&args, argp, sizeof(args)))
 		return -EFAULT;
-	if (args.flags || args.reserved || args.reserved2)
+	if ((args.flags & ~SWDIV_OPEN_HOLD) || args.reserved || args.reserved2)
 		return -EINVAL;
 	if (args.slots < SWDIV_MIN_SLOTS || args.slots > SWDIV_MAX_SLOTS || !is_power_of_2(args.slots))
 		return -EINVAL;
-	if (args.slot_bytes < SWDIV_MIN_SLOT_BYTES || args.slot_bytes > SWDIV_MAX_SLOT_BYTES || args.slot_bytes % 64)
+	if (args.slot_bytes < SWDIV_MIN_SLOT_BYTES || args.slot_bytes > SWDIV_MAX_SLOT_BYTES || args.slot_bytes % 16)
 		return -EINVAL;
 	if ((unsigned long)args.slots * args.slot_bytes > SWDIV_MAX_RING_BYTES)
 		return -EINVAL;
@@ -86,6 +105,7 @@ static int swdiv_do_open(struct swdiv_handle *handle, void __user *argp)
 	ret = swdiv_ring_alloc(&handle->ring, args.slots, args.slot_bytes);
 	if (ret)
 		return ret;
+	handle->hold_mode = args.flags & SWDIV_OPEN_HOLD;
 	/* Pairs with the acquire in swdiv_poll(), which does not take the lock */
 	smp_store_release(&handle->ring_ready, true);
 
@@ -133,10 +153,10 @@ static long swdiv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			handle->started = true;
 		break;
 	case SWDIVERT_IOC_STOP:
-		if (handle->started) {
-			swdiv_hook_stop(handle);
-			handle->started = false;
-		}
+		swdiv_stop(handle);
+		break;
+	case SWDIVERT_IOC_VERDICT:
+		ret = swdiv_hold_verdicts(handle, argp);
 		break;
 	case SWDIVERT_IOC_STATS: {
 		struct swdiv_stats stats = {};
@@ -151,7 +171,17 @@ static long swdiv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			stats.dropped_full += cs->dropped_full;
 			stats.truncated += cs->truncated;
 			stats.wakeups += cs->wakeups;
+			stats.held += cs->held;
+			stats.resumed += cs->resumed;
+			stats.verdict_dropped += cs->verdict_dropped;
+			stats.expired += cs->expired;
+			stats.flushed += cs->flushed;
+			stats.dev_dropped += cs->dev_dropped;
+			stats.resume_lost += cs->resume_lost;
+			stats.pass_unsupported += cs->pass_unsupported;
+			stats.pass_limit += cs->pass_limit;
 		}
+		stats.held_now = atomic_read(&handle->held_count);
 		if (copy_to_user(argp, &stats, sizeof(stats)))
 			ret = -EFAULT;
 		break;
@@ -227,10 +257,15 @@ static struct miscdevice swdiv_device = {
 
 static int __init swdiv_init(void)
 {
-	int ret = misc_register(&swdiv_device);
+	int ret = swdiv_hold_module_init();
 
 	if (ret)
 		return ret;
+	ret = misc_register(&swdiv_device);
+	if (ret) {
+		swdiv_hold_module_exit();
+		return ret;
+	}
 	pr_info("swdivert: /dev/%s ready (abi %d, spike)\n", SWDIVERT_DEVICE_NAME, SWDIVERT_ABI_VERSION);
 	return 0;
 }
@@ -238,6 +273,7 @@ static int __init swdiv_init(void)
 static void __exit swdiv_exit(void)
 {
 	misc_deregister(&swdiv_device);
+	swdiv_hold_module_exit();
 	pr_info("swdivert: unloaded\n");
 }
 
@@ -245,5 +281,5 @@ module_init(swdiv_init);
 module_exit(swdiv_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("swdivert Phase 2 spike: capture-only FORWARD sniffer with an mmap ring");
+MODULE_DESCRIPTION("swdivert Phase 3 spike: FORWARD sniffer / holder with an mmap ring");
 MODULE_VERSION("0");
