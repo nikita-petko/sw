@@ -1273,6 +1273,7 @@ void NetMonitor::render_loop()
 		refresh_servers();
 		const int columns = platform::console_width();
 		const int rows	  = platform::console_height();
+		const int frame_rows = rows - logging::pinned_status_rows(rows);
 		std::string frame;
 		{
 			std::lock_guard<std::mutex> lock(mutex_);
@@ -1283,15 +1284,14 @@ void NetMonitor::render_loop()
 				tick();
 				last_tick_ += kTickInterval;
 			}
-			frame = view_ == View::flows ? render_flow_view(columns, rows) : render_frame(columns, rows);
+			frame = view_ == View::flows ? render_flow_view(columns, frame_rows) : render_frame(columns, frame_rows);
 		}
 		// A resized console reflows what is on it, so the screen is wiped instead of repainted over the old layout.
 		if (columns != last_columns || rows != last_rows)
 			frame.insert(0, "\033[2J");
 		last_columns = columns;
 		last_rows	 = rows;
-		std::fwrite(frame.data(), 1, frame.size(), stdout);
-		std::fflush(stdout);
+		logging::write_frame(frame, rows);
 		std::this_thread::sleep_for(kFrameInterval);
 	}
 }

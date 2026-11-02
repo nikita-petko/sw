@@ -29,8 +29,10 @@ the log file are further keys of the same block, see the README.
   10 minutes is kept for wide terminals); table columns scale with the width. A console resize wipes the screen before
   the next frame, so the old layout never lingers.
 - A capture thread feeds `record()`; a render thread ticks the one-second buckets and redraws about 5 times a second.
-  The view uses the terminal's alternate screen. `logging::set_suspended()` holds log lines and the status line back
-  while it is shown and replays them afterwards.
+  The view uses the terminal's alternate screen. `logging::set_suspended()` holds log lines back while it is shown and
+  replays them afterwards. The status lines (main and extra) stay visible: the view is drawn into the rows above them and
+  `logging::write_frame()` repaints them over the bottom rows after every frame (on consoles too short to share, they are
+  hidden until the view closes).
 - While paused, packets are still read (so nothing queues up in the kernel) but ignored; on resume, in-flight RTT
   state is dropped so a pause is never counted as latency.
 - The header shows the capture backend and what it covers (for example `WinDivert (network + forward layers)`), how many

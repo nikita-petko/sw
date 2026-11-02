@@ -45,9 +45,15 @@ void set_show_groups(bool show);
 void set_status(const std::string& status);
 /// Displays a persistent status line with optional right-aligned text.
 void set_status(const std::string& status, const std::string& right_status);
-/// While suspended nothing is written to the console: messages are kept and printed, followed by the status line,
-/// when logging is resumed. Used by full-screen views.
+/// While suspended nothing is scrolled onto the console: messages are kept and printed, followed by the status line,
+/// when logging is resumed. Used by full-screen views, which keep the status lines visible at the bottom through
+/// write_frame().
 void set_suspended(bool suspend);
+/// Rows the status lines take at the bottom of a full-screen view of `console_rows` rows; 0 when there are none or
+/// the console is too short to share.
+int pinned_status_rows(int console_rows);
+/// Writes a full-screen view frame, then redraws the status lines over the bottom rows of the console.
+void write_frame(const std::string& frame, int console_rows);
 /// Sets the lines shown below the persistent status line; an empty list removes them. Takes effect on the next set_status().
 void set_extra_status(const std::vector<std::string>& lines);
 /// Clears the persistent status line.

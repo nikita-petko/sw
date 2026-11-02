@@ -63,17 +63,29 @@ int console_width()
 	return platform::console_width();
 }
 
-void print_status_line(const std::string& status, const std::string& right_status = {})
+std::string format_status_line(const std::string& status, const std::string& right_status)
 {
 	const int width = console_width();
 	if (width > 0 && !right_status.empty() && status.size() + right_status.size() <= static_cast<size_t>(width))
 	{
 		const size_t padding = static_cast<size_t>(width) - status.size() - right_status.size();
-		std::printf("\r\033[30;47m%s%*s%s\033[0m", status.c_str(), static_cast<int>(padding), "", right_status.c_str());
-		return;
+		return "\033[30;47m" + status + std::string(padding, ' ') + right_status + "\033[0m";
 	}
 	const size_t padding = width > 0 && status.size() < static_cast<size_t>(width) ? static_cast<size_t>(width) - status.size() : 0;
-	std::printf("\r\033[30;47m%s%*s\033[0m", status.c_str(), static_cast<int>(padding), "");
+	return "\033[30;47m" + status + std::string(padding, ' ') + "\033[0m";
+}
+
+std::string format_extra_line(const std::string& line)
+{
+	const int		  width = console_width();
+	const std::string shown = width > 0 && line.size() > static_cast<size_t>(width) ? line.substr(0, static_cast<size_t>(width)) : line;
+	const size_t	  pad	= width > 0 && shown.size() < static_cast<size_t>(width) ? static_cast<size_t>(width) - shown.size() : 0;
+	return "\033[30;47m" + shown + std::string(pad, ' ') + "\033[0m";
+}
+
+void print_status_line(const std::string& status, const std::string& right_status = {})
+{
+	std::printf("\r%s", format_status_line(status, right_status).c_str());
 }
 
 void print_status_block(const std::string& status, const std::string& right_status)
@@ -81,14 +93,31 @@ void print_status_block(const std::string& status, const std::string& right_stat
 	print_status_line(status, right_status);
 	if (extra_status_lines.empty())
 		return;
-	const int width = console_width();
 	for (const std::string& line : extra_status_lines)
-	{
-		const std::string shown = width > 0 && line.size() > static_cast<size_t>(width) ? line.substr(0, static_cast<size_t>(width)) : line;
-		const size_t	  pad	= width > 0 && shown.size() < static_cast<size_t>(width) ? static_cast<size_t>(width) - shown.size() : 0;
-		std::printf("\n\r\033[30;47m%s%*s\033[0m", shown.c_str(), static_cast<int>(pad), "");
-	}
+		std::printf("\n\r%s", format_extra_line(line).c_str());
 	std::printf("\033[%zuA\r", extra_status_lines.size());
+}
+
+// Rows the status block takes at the bottom of a full-screen view; none when the console is too short to share.
+int pinned_rows(int console_rows)
+{
+	if (status_line.empty() || console_rows <= 0)
+		return 0;
+	const int rows = 1 + static_cast<int>(extra_status_lines.size());
+	return console_rows >= rows + 8 ? rows : 0;
+}
+
+std::string pinned_status_block(int console_rows)
+{
+	const int rows = pinned_rows(console_rows);
+	if (rows == 0)
+		return {};
+	std::string out;
+	int			row = console_rows - rows + 1;
+	out += "\033[" + std::to_string(row++) + ";1H" + format_status_line(status_line, status_right_line);
+	for (const std::string& line : extra_status_lines)
+		out += "\033[" + std::to_string(row++) + ";1H" + format_extra_line(line);
+	return out;
 }
 
 const char* level_name(logging::level message_level)
@@ -400,10 +429,12 @@ void set_status(const std::string& status)
 void set_status(const std::string& status, const std::string& right_status)
 {
 	std::lock_guard lock(log_mutex);
-	if (!suspended)
-		print_status_block(status, right_status);
 	status_line		  = status;
 	status_right_line = right_status;
+	if (suspended)
+		std::fputs(pinned_status_block(platform::console_height()).c_str(), stdout);
+	else
+		print_status_block(status, right_status);
 	std::fflush(stdout);
 }
 
@@ -434,6 +465,20 @@ void set_suspended(bool suspend)
 	if (!status_line.empty())
 		print_status_block(status_line, status_right_line);
 	std::fflush(stdout);
+}
+
+void write_frame(const std::string& frame, int console_rows)
+{
+	std::lock_guard lock(log_mutex);
+	std::fwrite(frame.data(), 1, frame.size(), stdout);
+	std::fputs(pinned_status_block(console_rows).c_str(), stdout);
+	std::fflush(stdout);
+}
+
+int pinned_status_rows(int console_rows)
+{
+	std::lock_guard lock(log_mutex);
+	return pinned_rows(console_rows);
 }
 
 void clear_status()
