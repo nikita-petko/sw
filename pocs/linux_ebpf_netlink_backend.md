@@ -2,7 +2,7 @@
 
 ## 0. Implementation status
 
-- Proposal only. Nothing here has been built or run. Every kernel-behaviour claim marked **(verify)** must be confirmed in the network-namespace harness (§12) before code is written.
+- No production code has been built. Phase 1 shell spikes have been run on the current kernel; results and remaining cross-kernel checks are recorded in §13. No behavior is certified across the proposed support range yet.
 - This **evolves** [`linux_nfqueue_backend.md`](linux_nfqueue_backend.md) and builds on [`linux_tc_netem_backend.md`](linux_tc_netem_backend.md), replacing netem's fixed parameters with per-packet logic. It keeps the shipped NFQUEUE backend as the stateful fallback and changes how it is installed and when it is used.
 - The three changes (§1) are independent. Change A is useful on its own and is the recommended first phase (§13).
 
@@ -128,7 +128,7 @@ if sniff: bpf_ringbuf_output(events, header + snaplen)
 return TC_ACT_OK
 ```
 
-`fq` releases each packet at its `tstamp` and orders equal timestamps by arrival. This is what the engine already promises for `from_timestamp` ("Packets retain their receive order when release times match", README Delay modes). **(verify: ordering of equal and out-of-order timestamps within and across fq flows.)**
+`fq` releases each packet at its `tstamp`. In the phase-1 tests, packets assigned equal timestamps arrived in receive order both within one flow and across two flows; packets in one flow with deliberately reversed timestamps arrived out of order. This matches the engine's `from_timestamp` promise ("Packets retain their receive order when release times match", README Delay modes), but is evidence from one kernel and a small set of probes, not a cross-kernel guarantee (§13).
 
 ### 7.3 Why this closes the netem gaps
 
@@ -145,8 +145,8 @@ return TC_ACT_OK
 ### 7.4 Inbound traffic
 
 - **Gateway (forward):** classify on the egress of the interface the traffic *leaves* (`-o lan0` for server→client, `-o wan0` for client→server). No ifb, same as netem PoC §6.3, and the primary use case in the NFQUEUE PoC §14.
-- **Local host inbound:** tc ingress runs before netfilter, and delaying delivery to the stack needs a queue. The proposed path is tc ingress BPF → `bpf_redirect` to an `ifb` device with `fq` as its root qdisc. **(verify: that `fq` on an ifb honours a delivery time set at ingress; kernels differ in how `skb->tstamp` is treated when ingress sets it as monotonic.)** If it does not, fall back to `netem` on the ifb for local inbound (the netem PoC's exact mechanism), with the §9 mode limits, or keep local-inbound profiles on NFQUEUE.
-- **Forwarded packets across namespaces or interfaces:** the delivery time is cleared on forward on old kernels. The `bpf_skb_set_tstamp` / `tstamp_type` support that preserves it is from Linux 5.18; below that the program must stamp at the final egress device. **(verify.)**
+- **Local host inbound:** tc ingress runs before netfilter, and delaying delivery to the stack needs a queue. In an isolated namespace on Linux 7.2.11, tc ingress BPF set a 500 ms monotonic delivery time, redirected the packet to an `ifb` with root `fq`, and the ping RTT increased by approximately 500 ms. This confirms the proposed path on that kernel only; the minimum supported kernel remains to be tested (§13).
+- **Forwarded packets across namespaces or interfaces:** in a three-namespace test on Linux 7.2.11, a 500 ms ingress timestamp survived IPv4 forwarding and was honored by `fq` on the router's egress interface. Older kernels and the claimed Linux 5.18 boundary remain unverified; stamp at final egress or use the NFQUEUE tier until tested on those kernels.
 
 ### 7.5 NAT and address visibility
 
@@ -225,7 +225,7 @@ With A in place there is no spawned helper, so `check_privileges` reduces to "ef
 
 ## 11. Capacity limits to document
 
-- **fq horizon.** `fq` drops or clamps packets whose delivery time is further than its `horizon` away (default 10 s **(verify)**). Profiles allow delays up to 600000 ms ([passive_latency.md](passive_latency.md)). The attach step raises `horizon` to at least `max_delay_ms` plus margin, or rejects the profile on the BPF tier with a clear message.
+- **fq horizon.** On Linux 7.2.11, `fq` reported a default `horizon` of 10 s and accepted a configured horizon of 600 s. A packet stamped 500 ms into the future was dropped with a 100 ms horizon (the qdisc reported `horizon_drops`, even with `horizon_drop off`); clamping was not observed. Profiles allow delays up to 600000 ms ([passive_latency.md](passive_latency.md)), so configure a horizon at least as large as the maximum assigned delay, or reject the BPF tier with a clear message. Confirm the behavior on the minimum supported kernel before relying on these values.
 - **fq limits.** `limit` (total packets, default 10000) and `flow_limit` (per flow, default 100) must be raised to cover *delay × packet rate*; overflow drops, as NFQUEUE's queue length does today. Exposed in `stats` and in the status line (where `nfqueue` health is shown now).
 - **Clock.** The program uses the monotonic clock (`bpf_ktime_get_ns`); `from_timestamp` uses the packet's receive time only where the kernel provides it in monotonic form, otherwise "now".
 
@@ -257,7 +257,19 @@ Reuse the privileged-container / network-namespace pattern of `scripts/test_nfqu
 
 ## 13. Phases
 
-1. **Spikes (shell + `bpftool`/`tc`, no C++):** answer every **(verify)** item: fq horizon and ordering, ifb + fq inbound, `tstamp` preservation on forward, `owner` table on target kernels, tcx versus `cls_bpf` cleanup. This decides whether B proceeds.
+### Phase 1 spike results (2026-11-02)
+
+The probes ran in privileged Docker containers with isolated network namespaces, on Linux `7.2.11-arch1-1` x86_64 (`nftables 1.1.7`, `iproute2 7.2.0`). They did not alter the host network configuration. These results apply only to this kernel:
+
+- **Owner table:** an interactive `nft` process kept the table alive and a second client displayed `flags owner`; killing the owner with `SIGKILL` removed the table. A one-shot `nft` client also lost its table when it exited, confirming that the owner socket must stay open.
+- **`fq`:** default horizon was 10 s; 600 s was accepted. A 500 ms timestamp was honored with the default horizon. With a 100 ms horizon, it was dropped and counted as a horizon drop rather than clamped.
+- **Ordering:** a same-flow probe with reversed timestamps delivered sequence 2 before sequence 1. Equal-deadline packets arrived in submission order in a same-flow probe and a two-flow UDP probe. The equal-time result is a smoke test, not a stress or cross-kernel guarantee.
+- **Ingress and forwarding:** redirecting an ingress-stamped packet to `ifb` + `fq` produced an approximately 500 ms RTT. In a separate client/router/server namespace topology, a 500 ms ingress timestamp survived forwarding and was honored by router egress `fq`.
+- **Cleanup:** a tcx ingress link was present while its owner process ran and absent after `SIGKILL`; a `cls_bpf` filter installed through tc remained attached after the tc command exited.
+
+The current-kernel spikes support proceeding with the design, with the strict horizon requirement above. They do not establish the proposed minimum kernel versions or settle behavior on older kernels.
+
+1. **Spikes (shell + `bpftool`/`tc`, no C++):** current-kernel probes are recorded above. Before fixing the support matrix, repeat the owner-table, horizon/order, ingress/forwarding, and tcx/`cls_bpf` lifecycle tests on the minimum supported kernels; older-kernel behavior remains open.
 2. **Change A:** libmnl/libnftnl client behind the existing `nft_table.h` interface, set-based renderer, owner flag, privilege-check simplification, `setcap` docs. Delivers value even if B is abandoned.
 3. **Change C:** on-demand queue rules, pre-filter, batched verdicts, verdict mark.
 4. **Change B (egress, gateway first):** BPF program, maps, tcx attach, `fq`, mode routing and fallback, `stats` in the status line.
