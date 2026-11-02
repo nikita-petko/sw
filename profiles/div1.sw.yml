@@ -1,3 +1,5 @@
+default_view: net_monitor
+
 servers:
   addresses:
     # Matchmaking and voice servers (EU West - Brussels)
