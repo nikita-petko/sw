@@ -210,6 +210,40 @@ std::vector<std::string> value_choices(const OutlineEntry& entry)
 	return {};
 }
 
+std::vector<std::string> list_item_template(const std::string& list_key)
+{
+	if (list_key != "profiles")
+		return {};
+	return {"- name: \"New profile\"",
+			"  key: x",
+			"  mode: toggle",
+			"  delay_mode: from_timestamp",
+			"  delay_ms: 100",
+			"  retransmission_mode: none",
+			"  capture_options:",
+			"    outbound: true",
+			"    inbound: true"};
+}
+
+std::string yaml_scalar(const std::string& text)
+{
+	if (text.empty())
+		return "\"\"";
+	const char first = text.front();
+	if (first == '"' || first == '\'' || first == '[' || first == '{')
+		return text;
+	if (text.find_first_of(":#") == std::string::npos && text.front() != ' ' && text.back() != ' ')
+		return text;
+	std::string quoted = "\"";
+	for (const char c : text)
+	{
+		if (c == '"' || c == '\\')
+			quoted += '\\';
+		quoted += c;
+	}
+	return quoted + "\"";
+}
+
 const char* new_profile_template()
 {
 	return "# New lagsw profile file. Hold a profile's key to activate it; every setting is described in README.md.\n"

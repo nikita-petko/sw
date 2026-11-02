@@ -83,6 +83,11 @@ struct OutlineEntry
 std::vector<OutlineEntry> build_outline(const std::vector<std::string>& lines);
 /// Returns `line` with the value of `entry` replaced; the key, indentation and trailing comment are kept.
 std::string replace_value(const std::string& line, const OutlineEntry& entry, const std::string& value);
+/// The lines of a new entry for the list called `list_key` (first line `- ...` at column 0); empty when the list has no
+/// template (plain lists, or lists whose entries are copied from an existing entry).
+std::vector<std::string> list_item_template(const std::string& list_key);
+/// `text` as a YAML scalar for a list entry: quoted when plain text would be ambiguous (colons, `#`, edge spaces).
+std::string yaml_scalar(const std::string& text);
 /// The values the setting accepts when it is a boolean or has a fixed set of values; empty otherwise.
 std::vector<std::string> value_choices(const OutlineEntry& entry);
 
@@ -161,6 +166,8 @@ private:
 			open_path,
 			new_path,
 			edit_value,
+			add_value,
+			confirm_remove,
 			confirm_discard,
 			confirm_save_invalid,
 			confirm_missing,
@@ -174,6 +181,10 @@ private:
 	void   key_editor(int key);
 	void   key_form(int key);
 	void   menu_up();
+	bool   is_list_menu(const std::vector<OutlineEntry>& outline, const std::vector<size_t>& items) const;
+	void   start_add(const std::vector<OutlineEntry>& outline, const std::vector<size_t>& items);
+	void   add_item(const std::string& scalar);
+	void   remove_item();
 	void   menu_reset();
 	/// Outline indexes of the entries in the open menu; falls back to the top menu when it no longer exists.
 	std::vector<size_t> menu_items(const std::vector<OutlineEntry>& outline);

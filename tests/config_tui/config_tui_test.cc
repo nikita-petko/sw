@@ -410,6 +410,64 @@ void test_reserved_key_is_rejected()
 	write(directory.file("lower.yml"), "profiles:\n  - name: \"A\"\n    key: i\n    mode: toggle\n");
 	CHECK(validate(directory.file("lower.yml")).find("reserved") != std::string::npos);
 }
+void test_list_entries_can_be_added_and_removed()
+{
+	TempDirectory directory;
+	const std::string path = directory.file("p.yml");
+	write(path, new_profile_template());
+	App app(services_in(directory), path);
+	const size_t original = app.lines().size();
+	const auto	 count_of = [&](const std::string& needle) {
+		size_t count = 0;
+		for (const std::string& line : app.lines())
+			count += line.find(needle) != std::string::npos;
+		return count;
+	};
+
+	// the menu is a bordered box
+	const std::string frame = app.render(100, 24);
+	CHECK(frame.find("\u250c") != std::string::npos && frame.find("\u2514") != std::string::npos);
+
+	// servers > addresses is a plain list: an add row ends it, and `a` asks for the value
+	app.handle_key(key::down);
+	app.handle_key(key::enter);
+	app.handle_key(key::enter);
+	CHECK(app.render(100, 24).find("+ Add item") != std::string::npos);
+	app.handle_key('a');
+	CHECK(app.prompting());
+	type(app, "10.0.0.2:two");
+	app.handle_key(key::enter);
+	CHECK(count_of("    - \"10.0.0.2:two\"") == 1 && app.dirty() && app.lines().size() == original + 1);
+
+	// Delete removes the selected entry after a confirmation
+	app.handle_key(key::del);
+	CHECK(app.prompting());
+	app.handle_key('n');
+	CHECK(count_of("10.0.0.2:two") == 1);
+	app.handle_key(key::del);
+	app.handle_key('y');
+	CHECK(count_of("10.0.0.2:two") == 0 && app.lines().size() == original);
+
+	// the add row works too
+	app.handle_key(key::down);
+	app.handle_key(key::enter);
+	type(app, "10.0.0.3");
+	app.handle_key(key::enter);
+	CHECK(count_of("- 10.0.0.3") == 1);
+	app.handle_key(key::left);
+	app.handle_key(key::left);
+
+	// profiles is a list of sections: adding one inserts a whole entry, removing one removes all its lines
+	app.handle_key(key::down);
+	app.handle_key(key::enter);
+	app.handle_key('a');
+	CHECK(!app.prompting() && count_of("- name:") == 2 && count_of("capture_options:") == 2);
+	app.handle_key(key::del);
+	app.handle_key('y');
+	CHECK(count_of("- name:") == 1 && count_of("capture_options:") == 1);
+	app.handle_key(key::up);
+	CHECK(app.render(100, 24).find("[0]") != std::string::npos);
+}
 }  // namespace
 
 int main(int argc, char** argv)
@@ -429,6 +487,7 @@ int main(int argc, char** argv)
 		{"raw_editing", test_raw_editing},
 		{"render_fits_the_screen", test_render_fits_the_screen},
 		{"reserved_key_is_rejected", test_reserved_key_is_rejected},
+		{"list_entries_can_be_added_and_removed", test_list_entries_can_be_added_and_removed},
 	};
 	return test::run_tests("config_tui", cases, argc, argv);
 }
