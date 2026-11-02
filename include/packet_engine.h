@@ -323,6 +323,12 @@ struct NetfilterMonitorOptions
 #endif
 
 #ifdef LAGSW_FEATURE_NET_MONITOR
+/// Upper-cases a letter key so configured and pressed keys compare equal.
+constexpr int normalize_key(int key)
+{
+	return key >= 'a' && key <= 'z' ? key - 'a' + 'A' : key;
+}
+
 /// Settings for the full-screen network statistics view, see pocs/net_monitor.md.
 struct NetMonitorOptions
 {
@@ -330,6 +336,16 @@ struct NetMonitorOptions
 	bool enabled = false;
 	/// Virtual key that opens and closes the view (upper-case letter, digit or other platform::key code).
 	int key = 'N';
+	/// Key that pauses and resumes the measurement while the view is open.
+	int pause_key = 0x20;
+	/// Key that resets the statistics while the view is open.
+	int reset_key = 'R';
+	/// Key that switches between the overview and the per-flow view.
+	int flows_key = 'F';
+	/// Key that switches between the overview and the per-profile view.
+	int profiles_key = 'P';
+	/// Key that exports the measured window.
+	int export_key = 'E';
 	/// Latency (ms) above which a server raises an alert; 0 disables the alert.
 	uint32_t alert_rtt_ms = 150;
 	/// Smoothed RTT jitter (ms) above which a server raises an alert; 0 disables the alert.

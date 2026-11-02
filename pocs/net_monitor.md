@@ -5,13 +5,15 @@ captured or drawn until the view is opened; closing it stops both. While the vie
 
 | Key | Action |
 |---|---|
-| `Space` | pause/resume the measurement |
-| `r` | reset the statistics |
-| `f` | switch between the overview and the per-flow view |
-| `p` | switch between the overview and the per-profile view |
+| `Space` (`pause_key`) | pause/resume the measurement |
+| `r` (`reset_key`) | reset the statistics |
+| `f` (`flows_key`) | switch between the overview and the per-flow view |
+| `p` (`profiles_key`) | switch between the overview and the per-profile view |
 | `Up` / `Down` | select a flow (flow view) |
-| `e` | export the measured window as CSV and JSON |
+| `e` (`export_key`) | export the measured window as CSV and JSON |
 | the configured key | close the view |
+
+The keys in parentheses are the defaults' setting names; all of them can be changed in `features.net_monitor`.
 
 Enable it in the profile file with `features: net_monitor: {enabled: true, key: N}`; the code is compiled in by the
 `net_monitor` build feature (`xmake f --net_monitor=y|n`, default `y`). The alert thresholds, the export directory and
@@ -77,9 +79,9 @@ the log file are further keys of the same block, see the README.
   two inbound packets, so it is reported when traffic resumes, and an idle server can trip it.
 - The flow view keeps at most 256 flows per server (closed ones are dropped first) and the history of the selected flow
   only. UDP flows are keyed by the client and server port; they have no RTT or state beyond active/idle.
-- The key must differ from `q`, `r`, `f`, `p`, `e`, Space, the navigation keys, the passive latency pause key and every
-  profile key (checked at startup). `r`, `f`, `p` and `e` are not checked against profile keys, so a profile bound to one of
-  them also triggers the view action while it is open.
+- Every view key (`key`, `pause_key`, `reset_key`, `flows_key`, `profiles_key`, `export_key`) must be distinct, must differ
+  from `q`, Backspace, Tab, Page Up/Down and the arrow keys, from the passive latency pause key (when that feature is enabled) and from every profile
+  activation key and `send_key`; the configuration fails to load otherwise (checked at startup).
 
 ### Alerts, events, flows and export
 

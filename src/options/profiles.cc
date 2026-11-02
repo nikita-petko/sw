@@ -628,12 +628,20 @@ private:
 		NetMonitorOptions& monitor = options_.features.net_monitor;
 		if (key == "enabled")
 			return to_status(assign_bool(context_, value, monitor.enabled));
-		if (key == "key")
+		const std::pair<const char*, int*> key_settings[] = {{"key", &monitor.key},
+															 {"pause_key", &monitor.pause_key},
+															 {"reset_key", &monitor.reset_key},
+															 {"flows_key", &monitor.flows_key},
+															 {"profiles_key", &monitor.profiles_key},
+															 {"export_key", &monitor.export_key}};
+		for (const auto& setting : key_settings)
 		{
+			if (key != setting.first)
+				continue;
 			const auto parsed = parse_key(value);
 			if (!parsed)
-				return to_status(invalid(context_, "net_monitor key"));
-			monitor.key = *parsed;
+				return to_status(invalid(context_, std::string("net_monitor ") + setting.first));
+			*setting.second = *parsed;
 			return Status::ok;
 		}
 		if (key == "alert_rtt")

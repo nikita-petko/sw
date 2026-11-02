@@ -57,6 +57,7 @@ features:
   net_monitor:
     enabled: true
     key: N
+    pause_key: B
     alert_stall: 20000
 
   forwarded_address_discovery:

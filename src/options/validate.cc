@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "internal.h"
@@ -266,28 +268,51 @@ bool validate_net_monitor(const char* path, const PacketEngineOptions& options)
 	const NetMonitorOptions& monitor = options.features.net_monitor;
 	if (!monitor.enabled)
 		return true;
-	const int key = monitor.key >= 'a' && monitor.key <= 'z' ? monitor.key - 'a' + 'A' : monitor.key;
-	// Space, R, F, P and E are used inside the view itself.
-	if (key == 'Q' || key == 'R' || key == 'F' || key == 'P' || key == 'E' || key == platform::key::space || key == platform::key::backspace ||
-		key == platform::key::tab || key == platform::key::page_up || key == platform::key::page_down || key == platform::key::left ||
-		key == platform::key::right || key == platform::key::up || key == platform::key::down)
+	const std::pair<const char*, int> keys[] = {{"key", monitor.key},
+												{"pause_key", monitor.pause_key},
+												{"reset_key", monitor.reset_key},
+												{"flows_key", monitor.flows_key},
+												{"profiles_key", monitor.profiles_key},
+												{"export_key", monitor.export_key}};
+	for (size_t i = 0; i < std::size(keys); ++i)
 	{
-		LOG_ERROR("Feature net_monitor key conflicts with a command key in %s", path);
-		return false;
-	}
-#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
-	if (options.features.passive_latency.pause_key && *options.features.passive_latency.pause_key == key)
-	{
-		LOG_ERROR("Feature net_monitor key conflicts with the passive_latency pause_key in %s", path);
-		return false;
-	}
-#endif
-	for (const ProfileOptions& profile : options.profiles)
-		if (std::find(profile.keys.begin(), profile.keys.end(), key) != profile.keys.end())
+		const char* name = keys[i].first;
+		const int	key	 = normalize_key(keys[i].second);
+		if (key == 'Q' || key == platform::key::backspace || key == platform::key::tab || key == platform::key::page_up || key == platform::key::page_down ||
+			key == platform::key::left || key == platform::key::right || key == platform::key::up || key == platform::key::down)
 		{
-			LOG_ERROR("Feature net_monitor key conflicts with an activation key of profile '%s' in %s", profile.name.c_str(), path);
+			LOG_ERROR("Feature net_monitor %s conflicts with a command key in %s", name, path);
 			return false;
 		}
+		for (size_t j = i + 1; j < std::size(keys); ++j)
+			if (normalize_key(keys[j].second) == key)
+			{
+				LOG_ERROR("Feature net_monitor %s conflicts with net_monitor %s in %s", keys[j].first, name, path);
+				return false;
+			}
+#ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+		if (options.features.passive_latency.enabled && options.features.passive_latency.pause_key &&
+			normalize_key(*options.features.passive_latency.pause_key) == key)
+		{
+			LOG_ERROR("Feature net_monitor %s conflicts with the passive_latency pause_key in %s", name, path);
+			return false;
+		}
+#endif
+		for (const ProfileOptions& profile : options.profiles)
+		{
+			const auto same = [key](int candidate) { return normalize_key(candidate) == key; };
+			if (std::any_of(profile.keys.begin(), profile.keys.end(), same))
+			{
+				LOG_ERROR("Feature net_monitor %s conflicts with an activation key of profile '%s' in %s", name, profile.name.c_str(), path);
+				return false;
+			}
+			if (profile.send_key && same(*profile.send_key))
+			{
+				LOG_ERROR("Feature net_monitor %s conflicts with the send_key of profile '%s' in %s", name, profile.name.c_str(), path);
+				return false;
+			}
+		}
+	}
 	return true;
 }
 #endif

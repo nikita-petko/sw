@@ -326,7 +326,32 @@
             "key": {
               "type": ["string", "integer"],
               "default": "N",
-              "description": "Key that opens and closes the view. Must not be a command key (q, r, f, e, Space, Backspace, Tab, Page Up/Down, Left, Right, Up, Down) or another configured key."
+              "description": "Key that opens and closes the view. Must not be a command key (q, Backspace, Tab, Page Up/Down, arrows), another net_monitor key, the passive latency pause_key or a profile activation key or send_key."
+            },
+            "pause_key": {
+              "type": ["string", "integer"],
+              "default": "space",
+              "description": "Key that pauses and resumes the measurement. Same restrictions as key."
+            },
+            "reset_key": {
+              "type": ["string", "integer"],
+              "default": "R",
+              "description": "Key that resets the statistics. Same restrictions as key."
+            },
+            "flows_key": {
+              "type": ["string", "integer"],
+              "default": "F",
+              "description": "Key that switches between the overview and the per-flow view. Same restrictions as key."
+            },
+            "profiles_key": {
+              "type": ["string", "integer"],
+              "default": "P",
+              "description": "Key that switches between the overview and the per-profile view. Same restrictions as key."
+            },
+            "export_key": {
+              "type": ["string", "integer"],
+              "default": "E",
+              "description": "Key that exports the measured window. Same restrictions as key."
             },
             "alert_rtt": {
               "type": "integer",

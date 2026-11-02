@@ -209,6 +209,29 @@ void test_pause_ignores_packets_and_reset_clears_them()
 	monitor.stop();
 }
 
+void test_view_keys_follow_the_configuration()
+{
+	fakes::reset();
+	PacketEngineOptions options = options_with_server();
+	options.features.net_monitor.pause_key	 = 'G';
+	options.features.net_monitor.reset_key	 = 'H';
+	options.features.net_monitor.flows_key	 = 'J';
+	PacketEngine engine(options);
+	NetMonitor	 monitor(engine, options);
+	monitor.toggle();
+
+	CHECK(monitor.handle_key('g'));
+	CHECK(monitor.paused_);
+	CHECK(monitor.handle_key('G'));
+	CHECK(!monitor.paused_);
+	CHECK(!monitor.handle_key(platform::key::space));
+	CHECK(!monitor.handle_key('r'));
+	CHECK(!monitor.handle_key('f'));
+	CHECK(monitor.handle_key('h'));
+	CHECK(monitor.handle_key('j'));
+	monitor.stop();
+}
+
 void test_charts_and_frame_render()
 {
 	fakes::reset();
@@ -804,6 +827,7 @@ int main(int argc, char** argv)
 		{"direction_comes_from_the_server_address_not_the_backend_flag", test_direction_comes_from_the_server_address_not_the_backend_flag},
 		{"retransmissions_are_counted_and_not_sampled", test_retransmissions_are_counted_and_not_sampled},
 		{"pause_ignores_packets_and_reset_clears_them", test_pause_ignores_packets_and_reset_clears_them},
+		{"view_keys_follow_the_configuration", test_view_keys_follow_the_configuration},
 		{"charts_and_frame_render", test_charts_and_frame_render},
 		{"ports_sizes_and_handshakes", test_ports_sizes_and_handshakes},
 		{"tcp_health_flows_and_path", test_tcp_health_flows_and_path},

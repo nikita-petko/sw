@@ -364,9 +364,7 @@ NetMonitor::~NetMonitor()
 
 bool NetMonitor::is_toggle_key(int key) const
 {
-	const int configured = options_.features.net_monitor.key;
-	const int upper		 = key >= 'a' && key <= 'z' ? key - 'a' + 'A' : key;
-	return options_.features.net_monitor.enabled && upper == configured;
+	return options_.features.net_monitor.enabled && normalize_key(key) == normalize_key(options_.features.net_monitor.key);
 }
 
 void NetMonitor::toggle()
@@ -518,8 +516,10 @@ void NetMonitor::refresh_servers()
 
 bool NetMonitor::handle_key(int key)
 {
-	const int upper = key >= 'a' && key <= 'z' ? key - 'a' + 'A' : key;
-	if (key == platform::key::space)
+	const int				 upper	 = normalize_key(key);
+	const NetMonitorOptions& monitor = options_.features.net_monitor;
+	const auto				 matches = [upper](int configured) { return upper == normalize_key(configured); };
+	if (matches(monitor.pause_key))
 	{
 		if (paused_)
 		{
@@ -538,12 +538,12 @@ bool NetMonitor::handle_key(int key)
 		}
 		return true;
 	}
-	if (upper == 'R')
+	if (matches(monitor.reset_key))
 	{
 		reset_requested_ = true;
 		return true;
 	}
-	if (upper == 'F')
+	if (matches(monitor.flows_key))
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
 		view_ = view_ == View::flows ? View::overview : View::flows;
@@ -551,13 +551,13 @@ bool NetMonitor::handle_key(int key)
 			move_flow_selection_locked(0);
 		return true;
 	}
-	if (upper == 'P')
+	if (matches(monitor.profiles_key))
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
 		view_ = view_ == View::profiles ? View::overview : View::profiles;
 		return true;
 	}
-	if (upper == 'E')
+	if (matches(monitor.export_key))
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
 		status_message_ = export_snapshot_locked();
@@ -1346,7 +1346,8 @@ std::string NetMonitor::render_header(size_t width, std::vector<std::string>& wa
 {
 	(void)width;
 	const bool		  paused	= paused_;
-	const std::string close_key = format_key(options_.features.net_monitor.key);
+	const NetMonitorOptions& monitor = options_.features.net_monitor;
+	const std::string		 close_key = format_key(monitor.key);
 	std::string		  out;
 	const auto		  line = [&out](const std::string& text) { out += text + "\033[K\n"; };
 
@@ -1355,8 +1356,9 @@ std::string NetMonitor::render_header(size_t width, std::vector<std::string>& wa
 		status = std::string("  ") + kYellow + status_message_ + kReset;
 	line(std::string(kBold) + " NETMONITOR " + kReset + (paused ? std::string(kYellow) + "[PAUSED]" : std::string(kGreen) + "[MEASURING]") + kReset +
 		 "  " + (view_ == View::flows ? "flows" : view_ == View::profiles ? "profiles" : "overview") + "  measured " + format_clock(elapsed_ticks_) + status);
-	line(std::string(kDim) + " space pause | r reset | f " + (view_ == View::flows ? "overview" : "flows") + " | p " +
-		 (view_ == View::profiles ? "overview" : "profiles") + " | e export | " + close_key + " close | q quit" + kReset);
+	line(std::string(kDim) + " " + format_key(monitor.pause_key) + " pause | " + format_key(monitor.reset_key) + " reset | " + format_key(monitor.flows_key) +
+		 " " + (view_ == View::flows ? "overview" : "flows") + " | " + format_key(monitor.profiles_key) + " " +
+		 (view_ == View::profiles ? "overview" : "profiles") + " | " + format_key(monitor.export_key) + " export | " + close_key + " close | q quit" + kReset);
 
 	uint64_t packets_up = 0, packets_down = 0;
 	for (const auto& entry : servers_)

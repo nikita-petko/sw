@@ -40,9 +40,10 @@ public:
 	bool is_toggle_key(int key) const;
 	/// Whether the view is currently shown.
 	bool active() const { return active_; }
-	/// Handles a key while the view is shown: space pauses/resumes the measurement, 'r' resets the statistics, 'f' switches
-	/// between the overview and the per-flow view, 'p' between the overview and the per-profile view, Up/Down select a
-	/// flow and 'e' exports the measured window. Returns whether the key was used by the view.
+	/// Handles a key while the view is shown: the configured pause key pauses/resumes the measurement, the reset key resets the
+	/// statistics, the flows key switches between the overview and the per-flow view, the profiles key between the overview
+	/// and the per-profile view, Up/Down select a flow and the export key exports the measured window (defaults: space, r,
+	/// f, p, e). Returns whether the key was used by the view.
 	bool handle_key(int key);
 
 #ifdef LAGSW_NET_MONITOR_TESTING

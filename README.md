@@ -491,13 +491,20 @@ features:
 | Field | Required | Description |
 | --- | --- | --- |
 | `enabled` | No | Makes the view available. Defaults to `false`. |
-| `key` | No | Key that opens and closes the view. Defaults to `N`. Must not be `q`, `r`, `f`, `p`, `e`, Space, Backspace, Tab, Page Up/Down, the arrow keys, the passive latency `pause_key` or a profile activation key. |
+| `key` | No | Key that opens and closes the view. Defaults to `N`. |
+| `pause_key` | No | Key that pauses/resumes the measurement. Defaults to Space. |
+| `reset_key` | No | Key that resets the statistics. Defaults to `R`. |
+| `flows_key` | No | Key that switches between the overview and the per-flow view. Defaults to `F`. |
+| `profiles_key` | No | Key that switches between the overview and the per-profile view. Defaults to `P`. |
+| `export_key` | No | Key that exports the measured window. Defaults to `E`. |
 | `alert_rtt` | No | Latency in milliseconds above which a server raises an alert. Defaults to `150`; `0` disables it. |
 | `alert_jitter` | No | Smoothed RTT jitter in milliseconds above which a server raises an alert. Defaults to `30`; `0` disables it. |
 | `alert_retransmit` | No | Percentage of retransmitted TCP data packets over the last 10 seconds above which a server raises an alert. Defaults to `2`; `0` disables it. |
 | `alert_stall` | No | Inbound silence in milliseconds from a server at or above which an alert is raised. Defaults to `1000`; `0` disables it. |
 | `export_directory` | No | Directory for the CSV and JSON files written by the `e` key. Defaults to a `netmonitor` folder in the per-user data directory. |
 | `log_file` | No | JSON Lines file that receives one record per server and second, plus the events, while the view is open. Disabled when empty. |
+
+All six keys (`key`, `pause_key`, `reset_key`, `flows_key`, `profiles_key`, `export_key`) must be different from each other and must not be `q`, Backspace, Tab, Page Up/Down, an arrow key, the passive latency `pause_key` (when that feature is enabled), or a profile activation key or `send_key`; otherwise the configuration fails to load.
 
 While the view is open, `f` switches to a per-flow view (`Up`/`Down` select a flow and show its history), `p` switches to
 a per-profile view (activations, active time and the latency, retransmits and throughput measured while each profile was
