@@ -99,7 +99,7 @@ namespace {
 		/// Packets this channel accepts are marked with `bit`, which the channel's own rules test to avoid queueing them again.
 		void set_release_bit(uint32_t bit) { release_bit_ = bit; }
 
-		bool start(uint16_t queue_number, int priority, const std::vector<nfq::CompiledRule>& rules, std::string& error)
+		bool start(uint16_t queue_number, int priority, const std::vector<linux_shared::CompiledRule>& rules, std::string& error)
 		{
 			LOG_DEBUG("channel %u: starting on queue %u (sniff = %d, priority = %d, %zu rule(s))",
 					  channel_id_,
@@ -485,14 +485,14 @@ bool initialize()
 
 bool check_privileges(std::string& error)
 {
-	return nfq::check_privileges(error);
+	return linux_shared::check_privileges(error);
 }
 
 std::unique_ptr<PacketChannel> open(const OpenOptions& options, std::string& error)
 {
-	std::vector<nfq::CompiledRule> rules;
+	std::vector<linux_shared::CompiledRule> rules;
 	uint32_t					   position = 0;
-	if (!nfq::compile_filter(options.filter, options.forward, rules, error, position, options.include_forward))
+	if (!linux_shared::compile_filter(options.filter, options.forward, rules, error, position, options.include_forward))
 	{
 		error += " (at position " + std::to_string(position) + ")";
 		LOG_ERROR_GROUP(logging::group::nfq_filter, "could not compile filter '%s': %s", options.filter.c_str(), error.c_str());
@@ -504,7 +504,7 @@ std::unique_ptr<PacketChannel> open(const OpenOptions& options, std::string& err
 					options.forward ? 1 : 0,
 					options.include_forward ? 1 : 0,
 					rules.size());
-	for ([[maybe_unused]] const nfq::CompiledRule& rule : rules)
+	for ([[maybe_unused]] const linux_shared::CompiledRule& rule : rules)
 		LOG_DEBUG_GROUP(logging::group::nfq_filter, "  %s", rule.match.c_str());
 	if (!nfq::ensure_table(error))
 	{
@@ -552,8 +552,8 @@ std::unique_ptr<ShapeStage> open_shape_stage(const ShapeSpec& spec, std::string&
 
 bool validate_filter(const std::string& filter, bool forward, std::string& error, uint32_t& position)
 {
-	std::vector<nfq::CompiledRule> rules;
-	return nfq::compile_filter(filter, forward, rules, error, position);
+	std::vector<linux_shared::CompiledRule> rules;
+	return linux_shared::compile_filter(filter, forward, rules, error, position);
 }
 
 #ifdef LAGSW_FEATURE_NETFILTER_MONITOR

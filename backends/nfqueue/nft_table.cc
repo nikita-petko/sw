@@ -313,7 +313,7 @@ void remove_table()
 bool add_channel_rules(uint32_t							channel_id,
 					   uint16_t							queue_number,
 					   int								priority,
-					   const std::vector<CompiledRule>& rules,
+					   const std::vector<linux_shared::CompiledRule>& rules,
 					   ChannelChains&					chains,
 					   std::string&						error,
 					   uint32_t							release_bit)
@@ -329,11 +329,11 @@ bool add_channel_rules(uint32_t							channel_id,
 	batch.add_channel(channel_id, queue_number, priority, rules, created, release_bit);
 	if (created.names.empty() && batch.ok())
 		return true;
-	for ([[maybe_unused]] const CompiledRule& rule : rules)
+	for ([[maybe_unused]] const linux_shared::CompiledRule& rule : rules)
 		LOG_DEBUG_GROUP(logging::group::nft_script,
 						"nft: ch%u %s: %s queue flags bypass to %u",
 						channel_id,
-						hook_name(rule.hook),
+						linux_shared::hook_name(rule.hook),
 						rule.match.c_str(),
 						static_cast<unsigned>(queue_number));
 	const SendResult result = run_batch(batch);

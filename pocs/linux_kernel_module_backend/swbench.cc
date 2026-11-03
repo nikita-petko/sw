@@ -392,7 +392,7 @@ int run_vmcheck(const Args& args)
 			return 1;
 		}
 		++compiled;
-		const nfq::Node tree = nfq::parse_filter(text);
+		const linux_shared::Node tree = linux_shared::parse_filter(text);
 		for (long i = 0; i < per_filter; ++i)
 		{
 			const vmtest::Bytes packet = forwardable_packet(rng);

@@ -15,7 +15,7 @@
 /* The normal quantile table stores the standard score multiplied by this factor. */
 #define LAGSW_NORMAL_SCALE 1000000
 
-/* Match kinds; they mirror nfq::MatchKind without the implicit "IPv4" match. */
+/* Match kinds; they mirror linux_shared::MatchKind without the implicit "IPv4" match. */
 enum lagsw_match_kind
 {
 	LAGSW_MATCH_PROTOCOL = 1,

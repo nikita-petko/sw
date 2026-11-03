@@ -1,5 +1,5 @@
-#ifndef NFQUEUE_FILTER_COMPILER_H_
-#define NFQUEUE_FILTER_COMPILER_H_
+#ifndef LINUX_SHARED_FILTER_COMPILER_H_
+#define LINUX_SHARED_FILTER_COMPILER_H_
 
 #include <cstdint>
 #include <string>
@@ -19,7 +19,7 @@
 ///   tcp|udp.SrcPort|DstPort (==|!=) <port>
 ///   ifIdx (==|!=) <interface index>
 /// Fields of an absent protocol never match, so negated TCP flag and port tests also require TCP.
-namespace nfq {
+namespace linux_shared {
 
 /// Netfilter hook a rule is attached to.
 enum class Hook
@@ -93,6 +93,6 @@ bool compile_filter(const std::string&		   filter,
 					uint32_t&				   position,
 					bool					   include_forward = false);
 
-}  // namespace nfq
+}  // namespace linux_shared
 
 #endif

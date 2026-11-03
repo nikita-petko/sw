@@ -237,10 +237,10 @@ namespace {
 		}
 
 		// Decide on the stage before touching the kernel, so a profile that cannot use the tier does not install anything.
-		std::vector<CompiledRule> rules;
+		std::vector<linux_shared::CompiledRule> rules;
 		std::string				  error;
 		uint32_t				  position = 0;
-		if (!compile_filter(spec.filter, spec.forward, rules, error, position, spec.include_forward))
+		if (!linux_shared::compile_filter(spec.filter, spec.forward, rules, error, position, spec.include_forward))
 		{
 			reason = "the filter could not be compiled: " + error;
 			return nullptr;

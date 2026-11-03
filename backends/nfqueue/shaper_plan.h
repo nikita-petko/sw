@@ -31,7 +31,7 @@ enum class Model
 
 struct StageSpec
 {
-	std::vector<CompiledRule> rules;
+	std::vector<linux_shared::CompiledRule> rules;
 	Behaviour				  behaviour		 = Behaviour::fixed_delay;
 	Model					  model			 = Model::fixed;
 	uint32_t				  delay_ms		 = 0;

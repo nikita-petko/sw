@@ -197,12 +197,12 @@ Lines decode(const std::vector<uint8_t>& bytes)
 	return lines;
 }
 
-std::vector<nfq::CompiledRule> compile(const std::string& filter, bool forward = false, bool include_forward = false)
+std::vector<linux_shared::CompiledRule> compile(const std::string& filter, bool forward = false, bool include_forward = false)
 {
-	std::vector<nfq::CompiledRule> rules;
+	std::vector<linux_shared::CompiledRule> rules;
 	std::string					   error;
 	uint32_t					   position = 0;
-	CHECK(nfq::compile_filter(filter, forward, rules, error, position, include_forward));
+	CHECK(linux_shared::compile_filter(filter, forward, rules, error, position, include_forward));
 	return rules;
 }
 
@@ -331,9 +331,9 @@ void test_negated_lists_invert_the_lookup()
 	CHECK(chains.sets.size() == 1);
 	CHECK(lines[4].find("lookup set=ch0_a0;") != std::string::npos);
 
-	std::vector<nfq::CompiledRule> rules = compile("outbound");
-	nfq::Match					   match;
-	match.kind	  = nfq::MatchKind::ip_addr;
+	std::vector<linux_shared::CompiledRule> rules = compile("outbound");
+	linux_shared::Match					   match;
+	match.kind	  = linux_shared::MatchKind::ip_addr;
 	match.negated = true;
 	match.addrs	  = {0x01010101, 0x02020202};
 	rules[0].matches.push_back(match);
@@ -426,7 +426,7 @@ void test_long_address_lists_are_split_across_messages()
 void test_oversized_batches_are_rejected()
 {
 	// One rule is a few hundred bytes, so a few thousand copies exceed what a single sendto may carry.
-	std::vector<nfq::CompiledRule> rules = compile("tcp.DstPort == 80 and outbound");
+	std::vector<linux_shared::CompiledRule> rules = compile("tcp.DstPort == 80 and outbound");
 	CHECK(rules.size() == 1);
 	rules.assign(6000, rules.front());
 	nfq::NftBatch	   batch(1);

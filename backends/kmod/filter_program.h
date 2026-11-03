@@ -10,8 +10,8 @@
 
 /// Compiles a WinDivert-style filter string into a program for the swdivert filter VM (kmod/include/swdivert_abi.h).
 ///
-/// The lexer, parser and DNF conversion are the ones of the NFQUEUE backend (backends/nfqueue/filter_*.cc), so both backends accept exactly
-/// the same filters and read them the same way; this file only turns each DNF clause (a `nfq::CompiledRule` of typed matches) into a run of
+/// The lexer, parser and DNF conversion are the ones of the NFQUEUE backend (backends/linux_shared/filter_*.cc), so both backends accept exactly
+/// the same filters and read them the same way; this file only turns each DNF clause (a `linux_shared::CompiledRule` of typed matches) into a run of
 /// tests that ends in ACCEPT. A test that fails jumps to the next clause. Address lists become sorted sets (one search, not one test per
 /// address); identical sets of different clauses are shared.
 namespace kmodf {

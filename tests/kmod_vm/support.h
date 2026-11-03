@@ -296,9 +296,9 @@ inline Facts facts_of(const Bytes& packet, const Meta& meta)
 	return f;
 }
 
-inline bool literal(const nfq::Leaf& leaf, bool negated, const Facts& f)
+inline bool literal(const linux_shared::Leaf& leaf, bool negated, const Facts& f)
 {
-	using nfq::LeafKind;
+	using linux_shared::LeafKind;
 	// Without a usable IP header none of its fields exist: a test of one fails, negated or not
 	if (!f.ipv4 && (leaf.kind == LeafKind::proto_tcp || leaf.kind == LeafKind::proto_udp || leaf.kind == LeafKind::addr))
 		return false;
@@ -336,7 +336,7 @@ inline bool literal(const nfq::Leaf& leaf, bool negated, const Facts& f)
 			{
 				const bool src_in = std::find(leaf.addrs.begin(), leaf.addrs.end(), f.src) != leaf.addrs.end();
 				const bool dst_in = std::find(leaf.addrs.begin(), leaf.addrs.end(), f.dst) != leaf.addrs.end();
-				const bool hit	  = leaf.side == nfq::Side::src ? src_in : leaf.side == nfq::Side::dst ? dst_in : (src_in || dst_in);
+				const bool hit	  = leaf.side == linux_shared::Side::src ? src_in : leaf.side == linux_shared::Side::dst ? dst_in : (src_in || dst_in);
 				return hit != negated;
 			}
 		case LeafKind::port:
@@ -344,7 +344,7 @@ inline bool literal(const nfq::Leaf& leaf, bool negated, const Facts& f)
 				const uint32_t want_proto = leaf.tcp_port ? 6 : 17;
 				if (f.proto != want_proto || !f.has_ports)
 					return false;
-				const uint32_t port = leaf.side == nfq::Side::src ? f.sport : f.dport;
+				const uint32_t port = leaf.side == linux_shared::Side::src ? f.sport : f.dport;
 				return (port == leaf.number) != negated;
 			}
 		case LeafKind::if_index:
@@ -355,21 +355,21 @@ inline bool literal(const nfq::Leaf& leaf, bool negated, const Facts& f)
 
 // Negations are pushed down to the literals the way the compiler does it (De Morgan), because a negated test of an absent field is not
 // the opposite of the test: it is false as well.
-inline bool reference(const nfq::Node& node, bool negated, const Facts& f)
+inline bool reference(const linux_shared::Node& node, bool negated, const Facts& f)
 {
 	switch (node.type)
 	{
-		case nfq::Node::Type::constant:
+		case linux_shared::Node::Type::constant:
 			return node.value != negated;
-		case nfq::Node::Type::negation:
+		case linux_shared::Node::Type::negation:
 			return reference(node.kids.front(), !negated, f);
-		case nfq::Node::Type::leaf:
+		case linux_shared::Node::Type::leaf:
 			return literal(node.leaf, negated, f);
-		case nfq::Node::Type::conjunction:
-		case nfq::Node::Type::disjunction:
+		case linux_shared::Node::Type::conjunction:
+		case linux_shared::Node::Type::disjunction:
 			{
-				const bool as_and = (node.type == nfq::Node::Type::conjunction) != negated;
-				for (const nfq::Node& kid : node.kids)
+				const bool as_and = (node.type == linux_shared::Node::Type::conjunction) != negated;
+				for (const linux_shared::Node& kid : node.kids)
 				{
 					const bool value = reference(kid, negated, f);
 					if (as_and && !value)

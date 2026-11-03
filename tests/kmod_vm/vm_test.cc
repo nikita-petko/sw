@@ -429,7 +429,7 @@ void test_compiled_programs_agree_with_the_reference_on_random_filters_and_packe
 			continue;  // too complex or a combination the compiler refuses: nothing to compare
 		++compiled;
 		CHECK(kmodf::verify_program(program).empty());
-		const nfq::Node tree = nfq::parse_filter(filter);
+		const linux_shared::Node tree = linux_shared::parse_filter(filter);
 		int				hits = 0, misses = 0;
 		for (int p = 0; p < 120; ++p)
 		{

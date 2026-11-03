@@ -6,9 +6,9 @@
 if is_plat("linux") then
     local sources = {
         "../../backends/kmod/filter_program.cc",
-        "../../backends/nfqueue/filter_lexer.cc",
-        "../../backends/nfqueue/filter_parser.cc",
-        "../../backends/nfqueue/filter_compiler.cc",
+        "../../backends/linux_shared/filter_lexer.cc",
+        "../../backends/linux_shared/filter_parser.cc",
+        "../../backends/linux_shared/filter_compiler.cc",
     }
 
     target("kmod_vm_test")
@@ -16,7 +16,7 @@ if is_plat("linux") then
         set_default(false)
         add_files("vm_test.cc")
         add_files(sources)
-        add_includedirs("../../kmod/include", "../../backends/kmod", "../../backends/nfqueue", "..")
+        add_includedirs("../../kmod/include", "../../backends/kmod", "../../backends/linux_shared", "..")
         add_tests("default")
     target_end()
 
@@ -25,7 +25,7 @@ if is_plat("linux") then
         set_default(false)
         add_files("vm_fuzz.cc")
         add_files(sources)
-        add_includedirs("../../kmod/include", "../../backends/kmod", "../../backends/nfqueue", "..")
+        add_includedirs("../../kmod/include", "../../backends/kmod", "../../backends/linux_shared", "..")
         add_tests("default", {runargs = {"20000"}})
     target_end()
 end

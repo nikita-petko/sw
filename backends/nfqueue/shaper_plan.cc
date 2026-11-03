@@ -16,9 +16,9 @@ namespace {
 		return plan;
 	}
 
-	uint8_t protocol_number(Transport transport)
+	uint8_t protocol_number(linux_shared::Transport transport)
 	{
-		return transport == Transport::tcp ? IPPROTO_TCP : IPPROTO_UDP;
+		return transport == linux_shared::Transport::tcp ? IPPROTO_TCP : IPPROTO_UDP;
 	}
 
 	std::vector<uint32_t> normalized(std::vector<uint32_t> addrs)
@@ -116,9 +116,9 @@ Plan plan_stage(const StageSpec& spec, uint32_t set_base)
 	std::map<std::vector<uint32_t>, uint32_t> set_ids;
 	uint32_t								  rule_count  = 0;
 	bool									  saw_inbound = false;
-	for (const CompiledRule& compiled : spec.rules)
+	for (const linux_shared::CompiledRule& compiled : spec.rules)
 	{
-		if (compiled.hook == Hook::input)
+		if (compiled.hook == linux_shared::Hook::input)
 		{
 			saw_inbound = true;
 			if (spec.ignore_inbound)
@@ -129,10 +129,10 @@ Plan plan_stage(const StageSpec& spec, uint32_t set_base)
 		if (rule_count == LAGSW_MAX_RULES)
 			return failed("the filter expands to more than " + std::to_string(LAGSW_MAX_RULES) + " rules");
 		lagsw_rule& rule = stage.rules[rule_count];
-		rule.hooks		 = compiled.hook == Hook::forward ? LAGSW_HOOK_FORWARD : LAGSW_HOOK_LOCAL;
-		for (const Match& match : compiled.matches)
+		rule.hooks		 = compiled.hook == linux_shared::Hook::forward ? LAGSW_HOOK_FORWARD : LAGSW_HOOK_LOCAL;
+		for (const linux_shared::Match& match : compiled.matches)
 		{
-			if (match.kind == MatchKind::nfproto_ipv4)
+			if (match.kind == linux_shared::MatchKind::nfproto_ipv4)
 				continue;
 			if (rule.count == LAGSW_MAX_MATCHES)
 				return failed("a filter clause has more than " + std::to_string(LAGSW_MAX_MATCHES) + " conditions");
@@ -140,20 +140,20 @@ Plan plan_stage(const StageSpec& spec, uint32_t set_base)
 			out.negated		 = match.negated ? 1 : 0;
 			switch (match.kind)
 			{
-				case MatchKind::nfproto_ipv4:
+				case linux_shared::MatchKind::nfproto_ipv4:
 					break;
-				case MatchKind::ip_protocol:
+				case linux_shared::MatchKind::ip_protocol:
 					out.kind  = LAGSW_MATCH_PROTOCOL;
 					out.proto = protocol_number(match.transport);
 					break;
-				case MatchKind::tcp_flag:
+				case linux_shared::MatchKind::tcp_flag:
 					out.kind = LAGSW_MATCH_TCP_FLAG;
 					out.flag = match.tcp_flag;
 					break;
-				case MatchKind::ip_addr:
+				case linux_shared::MatchKind::ip_addr:
 					{
 						out.kind						  = LAGSW_MATCH_ADDRESS;
-						out.endpoint					  = match.endpoint == Endpoint::destination ? 1 : 0;
+						out.endpoint					  = match.endpoint == linux_shared::Endpoint::destination ? 1 : 0;
 						const std::vector<uint32_t> addrs = normalized(match.addrs);
 						if (addrs.size() == 1)
 						{
@@ -172,13 +172,13 @@ Plan plan_stage(const StageSpec& spec, uint32_t set_base)
 						out.value  = found->second;
 						break;
 					}
-				case MatchKind::port:
+				case linux_shared::MatchKind::port:
 					out.kind	 = LAGSW_MATCH_PORT;
 					out.proto	 = protocol_number(match.transport);
-					out.endpoint = match.endpoint == Endpoint::destination ? 1 : 0;
+					out.endpoint = match.endpoint == linux_shared::Endpoint::destination ? 1 : 0;
 					out.port	 = match.port;
 					break;
-				case MatchKind::interface:
+				case linux_shared::MatchKind::interface:
 					out.kind  = match.output ? LAGSW_MATCH_OIF : LAGSW_MATCH_IIF;
 					out.value = match.index;
 					break;

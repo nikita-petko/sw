@@ -52,15 +52,15 @@ namespace {
 	using SetPtr   = std::unique_ptr<nftnl_set, Deleter<nftnl_set, free_set>>;
 	using RulePtr  = std::unique_ptr<nftnl_rule, Deleter<nftnl_rule, free_rule>>;
 
-	uint32_t hook_number(Hook hook)
+	uint32_t hook_number(linux_shared::Hook hook)
 	{
 		switch (hook)
 		{
-			case Hook::input:
+			case linux_shared::Hook::input:
 				return NF_INET_LOCAL_IN;
-			case Hook::output:
+			case linux_shared::Hook::output:
 				return NF_INET_LOCAL_OUT;
-			case Hook::forward:
+			case linux_shared::Hook::forward:
 				return NF_INET_FORWARD;
 		}
 		return NF_INET_LOCAL_IN;
@@ -162,9 +162,9 @@ namespace {
 		return addrs;
 	}
 
-	uint8_t transport_protocol(Transport transport)
+	uint8_t transport_protocol(linux_shared::Transport transport)
 	{
-		return transport == Transport::tcp ? IPPROTO_TCP : IPPROTO_UDP;
+		return transport == linux_shared::Transport::tcp ? IPPROTO_TCP : IPPROTO_UDP;
 	}
 }  // namespace
 
@@ -265,7 +265,7 @@ void NftBatch::add_set(const std::string& name, uint32_t id, const std::vector<u
 	}
 }
 
-void NftBatch::add_chain(const std::string& name, Hook hook, int priority)
+void NftBatch::add_chain(const std::string& name, linux_shared::Hook hook, int priority)
 {
 	ChainPtr chain(nftnl_chain_alloc());
 	if (!chain)
@@ -299,7 +299,7 @@ void NftBatch::add_release_guard(const std::string& chain, uint32_t release_bit)
 	commit(message);
 }
 
-void NftBatch::add_queue_rule(const std::string& chain, const CompiledRule& compiled, uint16_t queue_number, const AddressSets& sets)
+void NftBatch::add_queue_rule(const std::string& chain, const linux_shared::CompiledRule& compiled, uint16_t queue_number, const AddressSets& sets)
 {
 	RulePtr rule(nftnl_rule_alloc());
 	if (!rule)
@@ -307,25 +307,25 @@ void NftBatch::add_queue_rule(const std::string& chain, const CompiledRule& comp
 	nftnl_rule_set_u32(rule.get(), NFTNL_RULE_FAMILY, kFamily);
 	nftnl_rule_set_str(rule.get(), NFTNL_RULE_TABLE, kTableName);
 	nftnl_rule_set_str(rule.get(), NFTNL_RULE_CHAIN, chain.c_str());
-	for (const Match& match : compiled.matches)
+	for (const linux_shared::Match& match : compiled.matches)
 	{
 		switch (match.kind)
 		{
-			case MatchKind::nfproto_ipv4:
+			case linux_shared::MatchKind::nfproto_ipv4:
 				{
 					const uint8_t family = NFPROTO_IPV4;
 					add_meta_load(rule.get(), NFT_META_NFPROTO);
 					add_compare(rule.get(), false, &family, sizeof(family));
 					break;
 				}
-			case MatchKind::ip_protocol:
+			case linux_shared::MatchKind::ip_protocol:
 				{
 					const uint8_t protocol = transport_protocol(match.transport);
 					add_payload_load(rule.get(), NFT_PAYLOAD_NETWORK_HEADER, 9, 1);
 					add_compare(rule.get(), match.negated, &protocol, sizeof(protocol));
 					break;
 				}
-			case MatchKind::tcp_flag:
+			case linux_shared::MatchKind::tcp_flag:
 				{
 					const uint8_t expected = match.negated ? 0 : match.tcp_flag;
 					add_payload_load(rule.get(), NFT_PAYLOAD_TRANSPORT_HEADER, 13, 1);
@@ -333,9 +333,9 @@ void NftBatch::add_queue_rule(const std::string& chain, const CompiledRule& comp
 					add_compare(rule.get(), false, &expected, sizeof(expected));
 					break;
 				}
-			case MatchKind::ip_addr:
+			case linux_shared::MatchKind::ip_addr:
 				{
-					add_payload_load(rule.get(), NFT_PAYLOAD_NETWORK_HEADER, match.endpoint == Endpoint::source ? 12 : 16, 4);
+					add_payload_load(rule.get(), NFT_PAYLOAD_NETWORK_HEADER, match.endpoint == linux_shared::Endpoint::source ? 12 : 16, 4);
 					const std::vector<uint32_t> addrs = normalized(match.addrs);
 					if (addrs.size() == 1)
 					{
@@ -351,14 +351,14 @@ void NftBatch::add_queue_rule(const std::string& chain, const CompiledRule& comp
 					}
 					break;
 				}
-			case MatchKind::port:
+			case linux_shared::MatchKind::port:
 				{
 					const uint16_t port = htons(match.port);
-					add_payload_load(rule.get(), NFT_PAYLOAD_TRANSPORT_HEADER, match.endpoint == Endpoint::source ? 0 : 2, 2);
+					add_payload_load(rule.get(), NFT_PAYLOAD_TRANSPORT_HEADER, match.endpoint == linux_shared::Endpoint::source ? 0 : 2, 2);
 					add_compare(rule.get(), match.negated, &port, sizeof(port));
 					break;
 				}
-			case MatchKind::interface:
+			case linux_shared::MatchKind::interface:
 				{
 					const uint32_t index = match.index;
 					add_meta_load(rule.get(), match.output ? NFT_META_OIF : NFT_META_IIF);
@@ -376,18 +376,18 @@ void NftBatch::add_queue_rule(const std::string& chain, const CompiledRule& comp
 void NftBatch::add_channel(uint32_t							channel_id,
 						   uint16_t							queue_number,
 						   int								priority,
-						   const std::vector<CompiledRule>& rules,
+						   const std::vector<linux_shared::CompiledRule>& rules,
 						   ChannelChains&					chains,
 						   uint32_t							release_bit)
 {
 	try
 	{
 		AddressSets sets;
-		for (const CompiledRule& rule : rules)
+		for (const linux_shared::CompiledRule& rule : rules)
 		{
-			for (const Match& match : rule.matches)
+			for (const linux_shared::Match& match : rule.matches)
 			{
-				if (match.kind != MatchKind::ip_addr)
+				if (match.kind != linux_shared::MatchKind::ip_addr)
 					continue;
 				std::vector<uint32_t> addrs = normalized(match.addrs);
 				if (addrs.size() < 2 || sets.count(addrs) != 0)
@@ -398,18 +398,18 @@ void NftBatch::add_channel(uint32_t							channel_id,
 				sets.emplace(std::move(addrs), std::move(ref));
 			}
 		}
-		for (const Hook hook : {Hook::input, Hook::output, Hook::forward})
+		for (const linux_shared::Hook hook : {linux_shared::Hook::input, linux_shared::Hook::output, linux_shared::Hook::forward})
 		{
 			bool used = false;
-			for (const CompiledRule& rule : rules)
+			for (const linux_shared::CompiledRule& rule : rules)
 				used = used || rule.hook == hook;
 			if (!used)
 				continue;
-			const std::string chain = "ch" + std::to_string(channel_id) + "_" + hook_name(hook);
+			const std::string chain = "ch" + std::to_string(channel_id) + "_" + linux_shared::hook_name(hook);
 			add_chain(chain, hook, priority);
 			if (release_bit != 0)
 				add_release_guard(chain, release_bit);
-			for (const CompiledRule& rule : rules)
+			for (const linux_shared::CompiledRule& rule : rules)
 				if (rule.hook == hook)
 					add_queue_rule(chain, rule, queue_number, sets);
 			chains.names.push_back(chain);

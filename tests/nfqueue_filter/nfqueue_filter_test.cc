@@ -22,10 +22,10 @@ struct Compiled
 Compiled compile(const std::string& filter, bool forward = false, bool include_forward = false)
 {
 	Compiled					   result;
-	std::vector<nfq::CompiledRule> rules;
-	result.ok = nfq::compile_filter(filter, forward, rules, result.error, result.position, include_forward);
-	for (const nfq::CompiledRule& rule : rules)
-		result.rules.push_back(std::string(nfq::hook_name(rule.hook)) + ": " + rule.match);
+	std::vector<linux_shared::CompiledRule> rules;
+	result.ok = linux_shared::compile_filter(filter, forward, rules, result.error, result.position, include_forward);
+	for (const linux_shared::CompiledRule& rule : rules)
+		result.rules.push_back(std::string(linux_shared::hook_name(rule.hook)) + ": " + rule.match);
 	return result;
 }
 
@@ -40,9 +40,9 @@ const std::string kIp = "meta nfproto ipv4";
 
 void test_hook_names()
 {
-	CHECK(std::string(nfq::hook_name(nfq::Hook::input)) == "input");
-	CHECK(std::string(nfq::hook_name(nfq::Hook::output)) == "output");
-	CHECK(std::string(nfq::hook_name(nfq::Hook::forward)) == "forward");
+	CHECK(std::string(linux_shared::hook_name(linux_shared::Hook::input)) == "input");
+	CHECK(std::string(linux_shared::hook_name(linux_shared::Hook::output)) == "output");
+	CHECK(std::string(linux_shared::hook_name(linux_shared::Hook::forward)) == "forward");
 }
 
 void test_empty_and_constant_filters()
@@ -243,37 +243,37 @@ void test_syntax_errors_report_message_and_position()
 
 void test_typed_matches_mirror_the_text()
 {
-	std::vector<nfq::CompiledRule> rules;
+	std::vector<linux_shared::CompiledRule> rules;
 	std::string					   error;
 	uint32_t					   position = 0;
-	CHECK(nfq::compile_filter("(tcp.Syn and not tcp.Ack and tcp.DstPort == 443 or udp.SrcPort != 53) and ip.Addr == 1.1.1.1 and ifIdx != 3",
+	CHECK(linux_shared::compile_filter("(tcp.Syn and not tcp.Ack and tcp.DstPort == 443 or udp.SrcPort != 53) and ip.Addr == 1.1.1.1 and ifIdx != 3",
 							  false,
 							  rules,
 							  error,
 							  position,
 							  true));
 	CHECK(!rules.empty());
-	for (const nfq::CompiledRule& rule : rules)
+	for (const linux_shared::CompiledRule& rule : rules)
 	{
 		CHECK(!rule.matches.empty());
-		CHECK(rule.matches.front().kind == nfq::MatchKind::nfproto_ipv4);
+		CHECK(rule.matches.front().kind == linux_shared::MatchKind::nfproto_ipv4);
 		std::string text;
-		for (const nfq::Match& match : rule.matches)
-			text += (text.empty() ? "" : " ") + nfq::render_match(match);
+		for (const linux_shared::Match& match : rule.matches)
+			text += (text.empty() ? "" : " ") + linux_shared::render_match(match);
 		CHECK(text == rule.match);
 	}
-	CHECK(std::string(nfq::tcp_flag_name(0x02)) == "syn");
-	CHECK(std::string(nfq::tcp_flag_name(0x03)).empty());
+	CHECK(std::string(linux_shared::tcp_flag_name(0x02)) == "syn");
+	CHECK(std::string(linux_shared::tcp_flag_name(0x03)).empty());
 }
 
 void test_failure_discards_previous_rules()
 {
-	std::vector<nfq::CompiledRule> rules = {{nfq::Hook::input, "stale", {}}};
+	std::vector<linux_shared::CompiledRule> rules = {{linux_shared::Hook::input, "stale", {}}};
 	std::string					   error;
 	uint32_t					   position = 0;
-	CHECK(!nfq::compile_filter("nonsense", false, rules, error, position));
+	CHECK(!linux_shared::compile_filter("nonsense", false, rules, error, position));
 	CHECK(rules.empty());
-	CHECK(nfq::compile_filter("false", false, rules, error, position));
+	CHECK(linux_shared::compile_filter("false", false, rules, error, position));
 	CHECK(rules.empty());
 }
 
@@ -332,8 +332,8 @@ void test_oversized_expansions_are_rejected()
 
 void test_tokenizer()
 {
-	using nfq::TokenKind;
-	const std::vector<nfq::Token> tokens	 = nfq::tokenize("a&&b || !c==d!=(e) not and or");
+	using linux_shared::TokenKind;
+	const std::vector<linux_shared::Token> tokens	 = linux_shared::tokenize("a&&b || !c==d!=(e) not and or");
 	const TokenKind				  expected[] = {TokenKind::word,
 												TokenKind::op_and,
 												TokenKind::word,
@@ -357,17 +357,17 @@ void test_tokenizer()
 	CHECK(tokens[0].text == "a" && tokens[3].text == "||");
 
 	// Dots and digits belong to a word so `ip.SrcAddr` and `1.2.3.4` stay single tokens.
-	const std::vector<nfq::Token> dotted = nfq::tokenize("ip.SrcAddr == 1.2.3.4");
+	const std::vector<linux_shared::Token> dotted = linux_shared::tokenize("ip.SrcAddr == 1.2.3.4");
 	CHECK(dotted.size() == 4 && dotted[0].text == "ip.SrcAddr" && dotted[2].text == "1.2.3.4");
 
-	CHECK(nfq::tokenize("").size() == 1 && nfq::tokenize("   ").front().kind == TokenKind::end);
+	CHECK(linux_shared::tokenize("").size() == 1 && linux_shared::tokenize("   ").front().kind == TokenKind::end);
 
 	bool threw = false;
 	try
 	{
-		nfq::tokenize("tcp @");
+		linux_shared::tokenize("tcp @");
 	}
-	catch (const nfq::ParseError& error)
+	catch (const linux_shared::ParseError& error)
 	{
 		threw = true;
 		CHECK(error.position == 4);

@@ -1,12 +1,12 @@
-#ifndef NFQUEUE_FILTER_AST_H_
-#define NFQUEUE_FILTER_AST_H_
+#ifndef LINUX_SHARED_FILTER_AST_H_
+#define LINUX_SHARED_FILTER_AST_H_
 
 #include <cstdint>
 #include <string>
 #include <vector>
 
 /// Internal syntax tree shared by the filter lexer, parser and compiler (see filter_compiler.h for the public API).
-namespace nfq {
+namespace linux_shared {
 
 /// Thrown while lexing, parsing or compiling a filter; compile_filter() turns it into an error message and position.
 struct ParseError
@@ -92,6 +92,6 @@ std::vector<Token> tokenize(const std::string& text);
 /// Parses filter text into a syntax tree. Throws ParseError.
 Node parse_filter(const std::string& text);
 
-}  // namespace nfq
+}  // namespace linux_shared
 
 #endif

@@ -11,6 +11,7 @@ option("linux_bpf")
 option_end()
 
 rule("backend.nfqueue")
+    add_deps("backend.linux_shared")
     on_load(function (target)
         if not target:is_plat("linux") then
             raise("the nfqueue backend is only available on Linux")

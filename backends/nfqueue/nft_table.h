@@ -34,7 +34,7 @@ void remove_table();
 bool add_channel_rules(uint32_t							channel_id,
 					   uint16_t							queue_number,
 					   int								priority,
-					   const std::vector<CompiledRule>& rules,
+					   const std::vector<linux_shared::CompiledRule>& rules,
 					   ChannelChains&					chains,
 					   std::string&						error,
 					   uint32_t							release_bit = 0);

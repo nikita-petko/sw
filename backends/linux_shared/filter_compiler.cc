@@ -6,7 +6,7 @@
 
 #include "filter_ast.h"
 
-namespace nfq {
+namespace linux_shared {
 namespace {
 	constexpr size_t kMaxClauses = 512;
 	constexpr size_t kMaxRules	 = 1024;
@@ -424,4 +424,4 @@ bool compile_filter(const std::string&		   filter,
 		return false;
 	}
 }
-}  // namespace nfq
+}  // namespace linux_shared

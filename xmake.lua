@@ -73,6 +73,7 @@ end
 
 includes("backends/windivert")
 includes("backends/stub")
+includes("backends/linux_shared")
 includes("backends/nfqueue")
 includes("backends/kmod")
 includes("kmod")

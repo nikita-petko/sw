@@ -6,7 +6,7 @@
 
 #include "filter_ast.h"
 
-namespace nfq {
+namespace linux_shared {
 namespace {
 	uint32_t parse_number(const Token& token, uint32_t maximum, const char* what)
 	{
@@ -237,4 +237,4 @@ Node parse_filter(const std::string& text)
 	return Parser(tokenize(text)).parse();
 }
 
-}  // namespace nfq
+}  // namespace linux_shared

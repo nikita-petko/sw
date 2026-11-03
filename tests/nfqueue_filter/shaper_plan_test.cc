@@ -19,7 +19,7 @@ StageSpec spec_for(const std::string& filter, bool forward = false, bool include
 	StageSpec	spec;
 	std::string error;
 	uint32_t	position = 0;
-	CHECK(nfq::compile_filter(filter, forward, spec.rules, error, position, include_forward));
+	CHECK(linux_shared::compile_filter(filter, forward, spec.rules, error, position, include_forward));
 	spec.delay_ms = 100;
 	return spec;
 }

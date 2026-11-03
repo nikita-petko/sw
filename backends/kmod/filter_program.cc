@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <map>
 
-#include "../nfqueue/filter_compiler.h"
+#include "../linux_shared/filter_compiler.h"
 
 namespace kmodf {
 namespace {
@@ -19,37 +19,37 @@ namespace {
 		return insn;
 	}
 
-	uint16_t port_source(const nfq::Match& match)
+	uint16_t port_source(const linux_shared::Match& match)
 	{
-		const bool tcp = match.transport == nfq::Transport::tcp;
-		const bool src = match.endpoint == nfq::Endpoint::source;
+		const bool tcp = match.transport == linux_shared::Transport::tcp;
+		const bool src = match.endpoint == linux_shared::Endpoint::source;
 		return tcp ? (src ? SWDIV_SRC_TCP_SPORT : SWDIV_SRC_TCP_DPORT) : (src ? SWDIV_SRC_UDP_SPORT : SWDIV_SRC_UDP_DPORT);
 	}
 
-	uint32_t layer_of(nfq::Hook hook)
+	uint32_t layer_of(linux_shared::Hook hook)
 	{
 		switch (hook)
 		{
-			case nfq::Hook::input:
+			case linux_shared::Hook::input:
 				return SWDIV_OPEN_LOCAL_IN;
-			case nfq::Hook::output:
+			case linux_shared::Hook::output:
 				return SWDIV_OPEN_LOCAL_OUT;
-			case nfq::Hook::forward:
+			case linux_shared::Hook::forward:
 				return SWDIV_OPEN_FORWARD;
 		}
 		return 0;
 	}
 
 	// The netfilter hook numbers (NF_INET_*) that the kernel puts in the program's context
-	uint32_t hook_number(nfq::Hook hook)
+	uint32_t hook_number(linux_shared::Hook hook)
 	{
 		switch (hook)
 		{
-			case nfq::Hook::input:
+			case linux_shared::Hook::input:
 				return 1;
-			case nfq::Hook::forward:
+			case linux_shared::Hook::forward:
 				return 2;
-			case nfq::Hook::output:
+			case linux_shared::Hook::output:
 				return 3;
 		}
 		return 0;
@@ -58,12 +58,12 @@ namespace {
 
 bool compile_program(const std::string& filter, Program& out, std::string& error, uint32_t& position, bool forward, bool include_forward)
 {
-	std::vector<nfq::CompiledRule> rules;
-	if (!nfq::compile_filter(filter, forward, rules, error, position, include_forward))
+	std::vector<linux_shared::CompiledRule> rules;
+	if (!linux_shared::compile_filter(filter, forward, rules, error, position, include_forward))
 		return false;
 
 	uint32_t layers = 0;
-	for (const nfq::CompiledRule& rule : rules)
+	for (const linux_shared::CompiledRule& rule : rules)
 		layers |= layer_of(rule.hook);
 	// A program that serves one hook needs no test for it
 	const bool tag_hooks = __builtin_popcount(layers) > 1;
@@ -71,29 +71,29 @@ bool compile_program(const std::string& filter, Program& out, std::string& error
 	Program program;
 	program.layers = layers;
 	std::map<std::vector<uint32_t>, uint32_t> address_sets;
-	for (const nfq::CompiledRule& rule : rules)
+	for (const linux_shared::CompiledRule& rule : rules)
 	{
 		const size_t first = program.insns.size();
 		if (tag_hooks)
 			program.insns.push_back(test(SWDIV_OP_EQ, SWDIV_SRC_HOOK, hook_number(rule.hook)));
-		for (const nfq::Match& match : rule.matches)
+		for (const linux_shared::Match& match : rule.matches)
 		{
 			switch (match.kind)
 			{
-				case nfq::MatchKind::nfproto_ipv4:
+				case linux_shared::MatchKind::nfproto_ipv4:
 					break;	// every packet of the IPv4 hook is IPv4; the VM fails every field test of anything else
-				case nfq::MatchKind::ip_protocol:
+				case linux_shared::MatchKind::ip_protocol:
 					program.insns.push_back(test(match.negated ? SWDIV_OP_NE : SWDIV_OP_EQ,
 												 SWDIV_SRC_IP_PROTO,
-												 match.transport == nfq::Transport::tcp ? 6 : 17));
+												 match.transport == linux_shared::Transport::tcp ? 6 : 17));
 					break;
-				case nfq::MatchKind::tcp_flag:
+				case linux_shared::MatchKind::tcp_flag:
 					program.insns.push_back(
 						test(SWDIV_OP_MASK_EQ, SWDIV_SRC_TCP_FLAGS, match.tcp_flag, match.negated ? 0 : match.tcp_flag));
 					break;
-				case nfq::MatchKind::ip_addr:
+				case linux_shared::MatchKind::ip_addr:
 					{
-						const uint16_t		  src	= match.endpoint == nfq::Endpoint::source ? SWDIV_SRC_IP_SRC : SWDIV_SRC_IP_DST;
+						const uint16_t		  src	= match.endpoint == linux_shared::Endpoint::source ? SWDIV_SRC_IP_SRC : SWDIV_SRC_IP_DST;
 						std::vector<uint32_t> addrs = match.addrs;
 						std::sort(addrs.begin(), addrs.end());
 						addrs.erase(std::unique(addrs.begin(), addrs.end()), addrs.end());
@@ -125,10 +125,10 @@ bool compile_program(const std::string& filter, Program& out, std::string& error
 						program.insns.push_back(test(match.negated ? SWDIV_OP_NOT_IN_SET : SWDIV_OP_IN_SET, src, found->second));
 						break;
 					}
-				case nfq::MatchKind::port:
+				case linux_shared::MatchKind::port:
 					program.insns.push_back(test(match.negated ? SWDIV_OP_NE : SWDIV_OP_EQ, port_source(match), match.port));
 					break;
-				case nfq::MatchKind::interface:
+				case linux_shared::MatchKind::interface:
 					program.insns.push_back(test(match.negated ? SWDIV_OP_NE : SWDIV_OP_EQ,
 												 match.output ? SWDIV_SRC_OUT_IFINDEX : SWDIV_SRC_IN_IFINDEX,
 												 match.index));

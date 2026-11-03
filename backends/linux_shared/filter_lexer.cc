@@ -3,7 +3,7 @@
 #include <cctype>
 #include <utility>
 
-namespace nfq {
+namespace linux_shared {
 
 std::vector<Token> tokenize(const std::string& text)
 {
@@ -59,4 +59,4 @@ std::vector<Token> tokenize(const std::string& text)
 	return tokens;
 }
 
-}  // namespace nfq
+}  // namespace linux_shared

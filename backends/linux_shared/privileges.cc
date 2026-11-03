@@ -11,7 +11,7 @@
 
 LOG_DEFAULT_GROUP(logging::group::nfq)
 
-namespace nfq {
+namespace linux_shared {
 namespace {
 	bool has_effective_capability(int capability)
 	{
@@ -63,4 +63,4 @@ bool check_privileges(std::string& error)
 	warn_if_keyboards_unreadable();
 	return true;
 }
-}  // namespace nfq
+}  // namespace linux_shared

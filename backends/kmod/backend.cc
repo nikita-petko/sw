@@ -24,7 +24,7 @@
 #include "swdivert_abi.h"
 #include "swdivert_ring.h"
 
-#include "../nfqueue/privileges.h"
+#include "../linux_shared/privileges.h"
 
 LOG_DEFAULT_GROUP(logging::group::kmod)
 
@@ -428,7 +428,7 @@ bool initialize()
 
 bool check_privileges(std::string& error)
 {
-	if (!nfq::check_privileges(error))
+	if (!linux_shared::check_privileges(error))
 		return false;
 	if (!kmodb::ensure_module(error))
 		return false;
