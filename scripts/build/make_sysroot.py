@@ -204,6 +204,10 @@ def decompress_zstd(data):
 
 
 def can_symlink(directory):
+    # Symbolic links made on Windows are not reliably followed by every tool (clang does not resolve targets written with
+    # forward slashes, and directory links need a flag), so Windows gets copies
+    if os.name == "nt":
+        return False
     probe = os.path.join(directory, ".symlink_probe")
     try:
         os.symlink("target", probe)

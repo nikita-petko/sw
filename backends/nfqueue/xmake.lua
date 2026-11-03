@@ -81,9 +81,15 @@ rule("backend.nfqueue")
         end
         os.mkdir(gendir)
         local args = {"-target", "bpf", "-mcpu=v3", "-O2", "-g", "-I", path.join(scriptdir, "shaper")}
-        -- Debian-style multiarch layouts keep <asm/*.h> outside /usr/include
+        -- Debian-style multiarch layouts keep <asm/*.h> outside /usr/include. A sysroot may carry the headers of every
+        -- architecture, so it only contributes the one of the target.
+        local triplets = {"x86_64-linux-gnu", "aarch64-linux-gnu", "arm-linux-gnueabihf"}
+        if get_config("sysroot") then
+            local by_arch = {x86_64 = "x86_64-linux-gnu", x64 = "x86_64-linux-gnu", arm64 = "aarch64-linux-gnu"}
+            triplets = {by_arch[get_config("arch") or ""]}
+        end
         for _, dir in ipairs(target:data("lagsw_bpf_include_dirs")) do
-            for _, triplet in ipairs({"x86_64-linux-gnu", "aarch64-linux-gnu", "arm-linux-gnueabihf"}) do
+            for _, triplet in ipairs(triplets) do
                 if os.isdir(path.join(dir, triplet)) then
                     table.insert(args, "-I")
                     table.insert(args, path.join(dir, triplet))

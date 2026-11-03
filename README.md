@@ -217,8 +217,8 @@ sysroot. [`scripts/build/make_sysroot.py`](scripts/build/make_sysroot.py) create
 bookworm) or Ubuntu packages with only the Python standard library: no root, no WSL, nothing is installed on the host. It
 downloads the C/C++ runtime and headers and the libraries lagsw links against (`libnetfilter_queue`, `libmnl`, `libnftnl`,
 `libnfnetlink`, `libcurl`, `zlib`, `libbpf`) over HTTPS and checks every download against the SHA-256 sums of the release
-file (the release file's GPG signature is not checked). Where symbolic links cannot be created (Windows without Developer
-Mode) their targets are copied instead.
+file (the release file's GPG signature is not checked). On Windows the targets of symbolic links are copied instead of
+linking them (rerun with `--refresh` to recreate a sysroot made by an older version of the script).
 
 ```powershell
 python scripts/build/make_sysroot.py --arch x86_64 --dest build/sysroot/x86_64     # or --arch arm64; --distro ubuntu
@@ -226,6 +226,12 @@ xmake f -p linux -a x86_64 --toolchain=clang --sysroot=build/sysroot/x86_64 -m r
 xmake build lagsw
 xmake package lagsw          # dist/lagsw-v*-x86_64-release.tar.gz
 ```
+
+To package every platform at once, `xmake package-all` builds Windows x86_64 (`.zip`), Linux x86_64 and Linux arm64
+(`.tar.gz`) into `dist/`. It uses its own configuration directory (your `xmake f` settings stay untouched), Visual Studio
+for Windows on a Windows host and MinGW-w64 elsewhere (`--mingw=<dir>`), the native toolchain for a Linux target of the
+host's own architecture, and clang with an automatically created `build/sysroot/<arch>` otherwise. Options: `--targets=`
+(`windows-x86_64,linux-x86_64,linux-arm64`), `-m debug`, `-o <dir>`.
 
 Requirements: clang 16+ with lld and the target (`clang --print-targets` lists `x86-64` / `aarch64`), **found on `PATH`**
 (`clang --version` must work in the shell that runs `xmake f`; `--sdk`/`--bin` are not enough). For example install LLVM
