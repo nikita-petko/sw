@@ -10,8 +10,10 @@ if is_plat("windows") then
         add_links("WinDivert", "ws2_32", "winmm")
         -- WinDivert.dll loads WinDivert64.sys from its own directory
         after_build(function (target)
-            os.cp(path.join(os.scriptdir(), "..", "..", "win_divert", "x64", "WinDivert.dll"), target:targetdir())
-            os.cp(path.join(os.scriptdir(), "..", "..", "win_divert", "x64", "WinDivert64.sys"), target:targetdir())
+            -- the driver file is locked while WinDivert is loaded from here; a stale copy is the same version
+            for _, file in ipairs({"WinDivert.dll", "WinDivert64.sys"}) do
+                try { function () os.cp(path.join(os.scriptdir(), "..", "..", "win_divert", "x64", file), target:targetdir()) end }
+            end
         end)
     target_end()
 end

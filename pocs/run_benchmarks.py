@@ -141,6 +141,7 @@ def main():
     parser.add_argument("--seconds", type=int, default=5)
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--quick", action="store_true", help="20000 pps, 64 B, 1 run, 3 s")
+    parser.add_argument("--egress", action="store_true", help="also probe the latency of every egress interface (pocs/egress_benchmark/egress.py), with the diverter when elevated")
     parser.add_argument("--no-build", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--out", help="log file (default build/benchmarks/<host>-<os>-<time>.log)")
@@ -163,6 +164,12 @@ def main():
     log.line(f"parameters: pps={args.pps} sizes={args.sizes} seconds={args.seconds} runs={args.runs}")
 
     failed = windows_suite(log, args) if IS_WINDOWS else linux_suite(log, args)
+    if args.egress:
+        log.line("\n=== Egress latency per interface ===")
+        egress = [sys.executable, os.path.join(HERE, "egress_benchmark", "egress.py"), "probe", "--count", "50" if args.quick else "200"]
+        if is_elevated():
+            egress += ["--hold", "0", "--hold", "2"]
+        failed += run(log, egress, args.dry_run) != 0
     log.line(f"\nlog: {out}")
     log.line("all benchmarks finished" if not failed else f"{failed} step(s) failed, see above")
     return 1 if failed else 0

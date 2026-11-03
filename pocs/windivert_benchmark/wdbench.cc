@@ -314,7 +314,7 @@ bool stamp_of(uint8_t* packet, UINT length, uint64_t& stamp)
 
 int run_hold(const Args& args)
 {
-	const long		  port		 = args.num("--port");
+	const long		  port		 = args.num("--port", "0");
 	const bool		  forward	 = args.get("--layer", "network") == "forward";
 	const long		  delay_ms	 = args.num("--delay-ms", "0");
 	const long		  drop_every = args.num("--drop-every", "0");

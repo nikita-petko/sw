@@ -99,5 +99,7 @@ $rows = foreach ($pps in $Pps) {
         Run-Scenario $entry.Key $entry.Value $pps
     }
 }
-$rows | Format-Table -AutoSize | Out-String -Width 250 | Write-Host
+$rows | Format-Table scenario, pps, sent, received, lost, reordered, lat_p50, lat_p99, lat_max -AutoSize | Out-String -Width 250 | Write-Host
+Write-Host 'hold reader (us): cap = sender stamp -> WinDivertRecv, over = verdict due -> WinDivertSend called, send = WinDivertSend duration'
+$rows | Format-Table scenario, pps, cap_p99, over_p99, send_p99, hold_cpu_ms -AutoSize | Out-String -Width 250 | Write-Host
 Write-Host 'latencies in microseconds (hold2ms adds 2000 us by design). Loopback is captured at the network layer; pass -Dst a local interface IP to exercise the NIC path.'

@@ -46,7 +46,31 @@ These are anecdotal and have not been measured with the same setup on both platf
 python pocs/run_benchmarks.py             # Windows: elevated shell
 sudo python3 pocs/run_benchmarks.py       # Linux: root adds the swdivert rows when swdivert.ko is loaded
 python3 pocs/run_benchmarks.py --quick    # short check of the whole chain
+python3 pocs/run_benchmarks.py --egress   # also probe every egress interface (below)
 ```
+
+### Latency per egress (ethernet, wlan, ProtonVPN), with and without the diverter
+
+`pocs/egress_benchmark/egress.py` (Windows and Linux) sends UDP DNS queries out of each interface and reports round-trip
+p50/p95/p99/max, jitter and loss per egress. The egress is forced per socket (`IP_UNICAST_IF` on Windows,
+`SO_BINDTODEVICE` on Linux). With `--hold MS` and an elevated shell it repeats each egress with the diverter in the path
+(`wdbench hold` on Windows, `swbench backend` on Linux) and reports how many packets the diverter captured.
+
+```
+python pocs/egress_benchmark/egress.py list
+python pocs/egress_benchmark/egress.py probe --egress wlan="WiFi 2" --egress proton=ProtonVPN --egress eth=Ethernet --hold 0 --hold 2
+```
+
+Forwarded traffic (a client behind the host): on the host run `egress.py hold --egress ProtonVPN --seconds 60`
+(forward layer; on Windows the filter selects the egress with `ifIdx`, on Linux the filter has no interface field and
+matches the client's address instead), and at the same time on the client `egress.py probe --default via-proton --count 400`.
+Repeat after switching the host's egress; `egress.py compare FILE...` prints saved results from several machines together.
+`hold` reports a capture count: 0 means the client's traffic did not take the forward path.
+
+Smoke test on the Windows host (no diverter): the default route (ProtonVPN) to 1.1.1.1 gave p50 about 10 ms, forcing the
+ProtonVPN interface gave p50 9.95 ms and p99 11 ms with no loss. Forcing the WiFi interface lost every query, probably the
+ProtonVPN kill switch or the network dropping UDP/53 (not established), and the ethernet interface is an internet-sharing
+network with no gateway. The forwarded-path `hold` and the `--hold` variants were not run (they need an elevated shell).
 
 ### Windows: `pocs/windivert_benchmark`
 
