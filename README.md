@@ -6,7 +6,7 @@
 
 ### Windows (WinDivert)
 
-![](https://share.cdn.vmminfra.dev/petko-new/2026/11/WindowsTerminal_vOGiisF8U3.png)
+![](https://share.cdn.vmminfra.dev/petko-new/2026/11/WindowsTerminal_yHf9JumhnV.png)
 
 ### Linux (nftables + NFQUEUE)
 
