@@ -85,8 +85,11 @@ struct swdiv_handle {
 	bool			hold_mode;
 	struct swdiv_prog __rcu	*prog;		/* the filter; replaced atomically (RCU), never NULL while the handle is open */
 	s32			priority;	/* as given by the user: higher is served first */
-	bool			claimed;	/* holds its priority among the started handles of the namespace (swdiv_handles_lock) */
-	struct nf_hook_ops	ops;
+	struct nf_hook_ops	ops[3];		/* one per layer the handle is attached to */
+	unsigned int		n_ops;
+	u32			layers;		/* SWDIV_OPEN_LOCAL_IN | _LOCAL_OUT | _FORWARD */
+	int			nf_priority;	/* netfilter priority of every hook of the handle: lower runs earlier */
+	u32			release_bit;	/* HOLD handles: the skb->mark bit set on a packet the handle resumed; the handle's hooks leave such a packet alone */
 	wait_queue_head_t	wq;
 	/* Batched reader wake-up (see swdiv_notify) */
 	struct hrtimer		wake_timer;
@@ -95,11 +98,18 @@ struct swdiv_handle {
 	/* Held packets (HOLD handles) */
 	struct xarray		held;		/* id -> struct swdiv_held; its lock also protects `closing` */
 	bool			closing;	/* no new packets are held (stop/close in progress) */
+	unsigned int		hold_ms;	/* this handle's fail-open horizon (never 0 once the handle is open) */
+	unsigned int		max_held;
 	atomic64_t		next_id;
 	atomic_t		held_count;
 	struct delayed_work	expiry;
 	struct swdiv_cpu_stats __percpu *stats;
 };
+
+/* The skb->mark bits handles may claim as their release bit (module parameter release_marks) */
+extern unsigned int swdiv_release_marks;
+u32  swdiv_release_bit_get(void);
+void swdiv_release_bit_put(u32 bit);
 
 extern unsigned int swdiv_hold_ms;
 extern unsigned int swdiv_max_held;
@@ -144,9 +154,6 @@ void swdiv_hold_reopen(struct swdiv_handle *handle);
 /* Hook registration: lets the network device notifier find the handles of a namespace */
 void swdiv_hold_destroy(struct swdiv_handle *handle);
 int  swdiv_hold_verdicts(struct swdiv_handle *handle, void __user *argp);
-/* A priority is used by one started handle per namespace: claim it before the hook is registered, release it after it is gone. */
-int  swdiv_priority_claim(struct swdiv_handle *handle);
-void swdiv_priority_release(struct swdiv_handle *handle);
 
 /* prog.c: filter programs */
 struct swdiv_prog *swdiv_prog_from_user(const struct swdiv_program_args *args);

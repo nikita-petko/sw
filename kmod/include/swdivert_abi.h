@@ -1,7 +1,7 @@
 /*
  * ABI of /dev/swdivert, shared by the kernel module and user space (only <linux/...> uapi headers are used).
  *
- * SPIKE STATUS (Phases 2-5 of pocs/linux_kernel_module_backend.md): FORWARD hook, a filter program per handle (SET_PROGRAM, or the
+ * SPIKE STATUS (Phases 2-6 of pocs/linux_kernel_module_backend.md): the LOCAL_IN, LOCAL_OUT and FORWARD hooks (per handle), a filter program per handle (SET_PROGRAM, or the
  * 5-tuple of SET_FILTER, which is turned into a program). A handle either
  * sniffs (copies matching packets into the ring and lets them go) or holds (copies them into the ring and steals the original
  * until user space gives a verdict: resume, resume with new bytes, or drop). Handles have a priority and form a chain; a handle
@@ -29,6 +29,10 @@ struct swdiv_tuple {
 
 /* swdiv_open_args.flags */
 #define SWDIV_OPEN_HOLD		0x1	/* steal matching packets until a verdict (default: copy and let them go) */
+/* The hooks the handle is attached to when it is started (default: FORWARD only). Programs tell the hooks apart by SWDIV_SRC_HOOK. */
+#define SWDIV_OPEN_LOCAL_IN	0x2	/* packets for this host: NF_INET_LOCAL_IN */
+#define SWDIV_OPEN_LOCAL_OUT	0x4	/* packets from this host: NF_INET_LOCAL_OUT */
+#define SWDIV_OPEN_FORWARD	0x8	/* packets routed through this host: NF_INET_FORWARD */
 
 /* SWDIVERT_IOC_OPEN: sizes the ring. `slots` is a power of two, `slot_bytes` a multiple of 16. */
 struct swdiv_open_args {
@@ -36,12 +40,18 @@ struct swdiv_open_args {
 	__u32	slot_bytes;	/* in:  128 .. 65536, includes the 48-byte slot header */
 	__u32	flags;		/* in:  SWDIV_OPEN_* */
 	__s32	priority;	/* in:  -30000 .. 30000, higher is served first (as in WinDivert); handles of a namespace form a chain in
-				 *      this order and no two started handles may share a priority */
+				 *      this order; handles of equal priority are served in the order they were started */
 	__u64	data_bytes;	/* out: length of the read-only data mapping (offset 0) */
 	__u64	cons_offset;	/* out: mmap offset of the consumer page (writable, one page) */
 	__u32	hdr_bytes;	/* out: size of the header area in front of the slots (a page) */
-	__u32	reserved2;
+	__u32	hold_ms;	/* in:  HOLD handles: resume a held packet nobody gave a verdict for after this long (the fail-open horizon);
+				 *      0 = the module parameter hold_ms, at most SWDIV_MAX_HOLD_MS */
+	__u32	max_held;	/* in:  HOLD handles: most packets held at once, further ones pass unheld; 0 = the module parameter max_held,
+				 *      at most SWDIV_MAX_HELD */
+	__u32	reserved3;	/* in:  must be 0 */
 };
+#define SWDIV_MAX_HOLD_MS	600000
+#define SWDIV_MAX_HELD		65536
 
 struct swdiv_stats {
 	__u64	seen;		/* packets that reached the hook */
@@ -100,7 +110,7 @@ struct swdiv_verdict_args {
 /*
  * SWDIVERT_IOC_INJECT: delivers a packet that never went through the stack as if it had been received on `ifindex`: it goes
  * through PREROUTING, routing and, when it is forwarded, the FORWARD hooks. The injecting handle's own hook and every handle of
- * a higher priority skip it; handles of a lower priority see it (WinDivert's "injected packets are diverted to the next priority
+ * a higher or equal priority skip it; handles of a lower priority see it (WinDivert's "injected packets are diverted to the next priority
  * handle"). The handle must be started. The skip is by CPU and covers the synchronous part of the call, so it does not hold when
  * receive packet steering moves the packet to another CPU.
  */
@@ -169,9 +179,10 @@ struct swdiv_insn {
 #define SWDIV_SRC_IN_IFINDEX	30
 #define SWDIV_SRC_OUT_IFINDEX	31
 #define SWDIV_SRC_MARK		32
-#define SWDIV_SRC_OUTBOUND	33	/* 1 on the FORWARD hook, where every packet counts as outbound */
+#define SWDIV_SRC_OUTBOUND	33	/* 1 on the FORWARD and LOCAL_OUT hooks, where a packet counts as outbound */
 #define SWDIV_SRC_LOOPBACK	34
 #define SWDIV_SRC_PKT_LEN	35	/* the whole packet's length, not only the prefix */
+#define SWDIV_SRC_HOOK		36	/* the netfilter hook the packet is at: 1 LOCAL_IN, 2 FORWARD, 3 LOCAL_OUT */
 
 #define SWDIV_SET_IPV4		1	/* n addresses, sorted ascending without duplicates */
 #define SWDIV_SET_PORTS		2	/* n ranges as (lo, hi) pairs of u32, ascending, not overlapping, hi <= 65535 */

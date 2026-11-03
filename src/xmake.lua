@@ -58,7 +58,7 @@ target("lagsw")
         -- Link iphlpapi for the per-interface error and drop counters of the net monitor
         add_links("iphlpapi")
     elseif is_plat("linux") then
-        add_rules("backend.nfqueue")
+        add_rules(get_config("linux_backend") == "kmod" and "backend.kmod" or "backend.nfqueue")
     else
         add_rules("backend.stub")
     end

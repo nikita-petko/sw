@@ -95,6 +95,7 @@ struct Meta
 	uint32_t in_ifindex	 = 2;
 	uint32_t out_ifindex = 3;
 	uint32_t mark		 = 0;
+	uint8_t	 hook		 = 2;  // NF_INET_*: 1 LOCAL_IN, 2 FORWARD, 3 LOCAL_OUT
 };
 
 // What the hook hands the VM: the first 256 bytes and the real length
@@ -107,7 +108,8 @@ inline swdiv_vm_ctx context(const Bytes& packet, const Meta& meta)
 	ctx.in_ifindex	 = meta.in_ifindex;
 	ctx.out_ifindex	 = meta.out_ifindex;
 	ctx.mark		 = meta.mark;
-	ctx.outbound	 = 1;
+	ctx.hook		 = meta.hook;
+	ctx.outbound	 = meta.hook != 1;
 	return ctx;
 }
 

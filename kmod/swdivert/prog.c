@@ -210,9 +210,10 @@ bool swdiv_prog_match(const struct swdiv_handle *h, const struct sk_buff *skb, c
 	ctx.total_len = avail;
 	ctx.in_ifindex = state->in ? state->in->ifindex : 0;
 	ctx.out_ifindex = state->out ? state->out->ifindex : 0;
-	ctx.mark = skb->mark;
-	/* On the FORWARD hook every packet counts as outbound, as the NFQUEUE backend's compiler treats it */
-	ctx.outbound = 1;
+	ctx.mark = skb->mark & ~swdiv_release_marks;
+	/* Forwarded and locally generated packets count as outbound, as the NFQUEUE backend's compiler treats them */
+	ctx.hook = state->hook;
+	ctx.outbound = state->hook != NF_INET_LOCAL_IN;
 	ctx.loopback = (state->in && (state->in->flags & IFF_LOOPBACK)) || (state->out && (state->out->flags & IFF_LOOPBACK));
 	return swdiv_vm_run(prog->insns, prog->n_insns, prog->sets, prog->n_sets, &ctx);
 }

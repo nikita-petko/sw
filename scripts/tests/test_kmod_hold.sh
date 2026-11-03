@@ -472,14 +472,21 @@ t_chain_order() {
 	chain_case "B served first (100) then A (50): B never sees the rewritten packets" 50 100 0
 }
 
-t_priority_unique() {
+# Handles of equal priority coexist and are served in the order they were started (the engine opens several handles at its default priority)
+t_priority_equal() {
 	rig_up || return
+	start_bg sink server "$swbench" sink --port $PORT --verify yes
 	start_bg readerA "$swbench" sniff --mode swdiv-hold --port $PORT --delay-ms 0 --prio 7
-	timeout 5 "$swbench" sniff --mode swdiv-hold --port 9005 --prio 7 > "$tmp/dupe.out" 2> "$tmp/dupe.err"
-	check "a second started handle with the same priority is refused (EEXIST)" grep -q 'File exists' "$tmp/dupe.err"
-	timeout 1 "$swbench" sniff --mode swdiv-hold --port 9005 --prio 8 > "$tmp/other.out" 2> "$tmp/other.err"
-	check "a different priority is accepted" grep -q '^ready' "$tmp/other.out"
-	stop_bg readerA
+	start_bg readerB "$swbench" sniff --mode swdiv --port $PORT --prio 7
+	start_bg readerC "$swbench" sniff --mode swdiv --port $PORT --prio 7
+	flood 2000 1 200
+	sleep 0.4
+	stop_bg readerA; stop_bg readerB; stop_bg readerC; stop_bg sink
+	local sent recv; sent="$(kv "$tmp/flood.out" sent)"; recv="$(kv "$tmp/sink.out" received)"
+	check "equal priority: three handles are started side by side" test -z "$(cat "$tmp/readerA.err" "$tmp/readerB.err" "$tmp/readerC.err")"
+	check "equal priority: the holding handle held every packet ($(kv "$tmp/readerA.out" held) of $sent)" eq "$(kv "$tmp/readerA.out" held)" "$sent"
+	check "equal priority: the handles started after it saw every packet once it resumed them ($(kv "$tmp/readerB.out" captured), $(kv "$tmp/readerC.out" captured))" eq "$(kv "$tmp/readerB.out" captured)/$(kv "$tmp/readerC.out" captured)" "$sent/$sent"
+	check "equal priority: everything arrived ($recv of $sent)" eq "$recv" "$sent"
 	rig_down
 }
 
@@ -714,6 +721,263 @@ t_progcheck() {
 	rig_down
 }
 
+# ---- Phase 6: the lagsw backend (backends/kmod) ----
+# `swbench backend` is the real backend::open()/recv()/send() driven like the engine drives it. This script is the gateway: traffic it
+# sends is LOCAL_OUT, traffic sent to its addresses is LOCAL_IN, traffic between client and server is FORWARD.
+
+backend_reader() { # backend_reader NAME ARGS...: starts `swbench backend` in the gateway namespace
+	local name="$1"; shift
+	start_bg "$name" "$swbench" backend "$@"
+}
+
+flood_gw() { # flood_gw PPS SECONDS SIZE DST PORT: sent by this host
+	"$swbench" flood --dst "$4" --port "$5" --pps "$1" --seconds "$2" --size "$3" > "$tmp/flood.out" 2>&1
+}
+
+t_backend_api() {
+	rig_up || return
+	"$swbench" backend-api > "$tmp/api.out" 2> "$tmp/api.err"
+	local rc=$?
+	check "the backend contract without traffic: $(kv "$tmp/api.out" backend_api_cases) cases, $(kv "$tmp/api.out" backend_api_failed) failed" eq "$rc/$(kv "$tmp/api.out" backend_api_failed)" "0/0"
+	[ "$rc" != 0 ] && cat "$tmp/api.err"
+	rig_down
+}
+
+# check_privileges() loads the module when the device is missing: by modprobe when the module is installed, else by insmod of the .ko
+# named in LAGSW_KMOD_PATH; it unloads it again on exit when asked to, and only when it loaded it.
+t_backend_load() {
+	local release extra
+	release="$(uname -r)"
+	rmmod swdivert 2> /dev/null
+	check "the module is not loaded (precondition)" test ! -e /dev/swdivert
+
+	LAGSW_KMOD_PATH="$ko" LAGSW_KMOD_UNLOAD_ON_EXIT=1 "$swbench" backend-load > "$tmp/load.out" 2> "$tmp/load.err"
+	check "insmod path: check_privileges loaded the module and a channel opened ($(cat "$tmp/load.out") $(head -c 120 "$tmp/load.err"))" eq "$?/$(kv "$tmp/load.out" backend_opened)" "0/1"
+	check "unload on exit: the module this process loaded is gone again" test -z "$(lsmod | awk '$1 == "swdivert"')"
+
+	LAGSW_KMOD_PATH="$ko" "$swbench" backend-load > "$tmp/load.out" 2> "$tmp/load.err"
+	check "without the unload request the module stays loaded" test -n "$(lsmod | awk '$1 == "swdivert"')"
+	LAGSW_KMOD_UNLOAD_ON_EXIT=1 "$swbench" backend-load > "$tmp/load.out" 2> "$tmp/load.err"
+	check "a module somebody else loaded is never unloaded, even when asked to" test -n "$(lsmod | awk '$1 == "swdivert"')"
+	rmmod swdivert 2> /dev/null
+
+	extra="/usr/lib/modules/$release/extra"
+	[ -d "/usr/lib/modules/$release" ] || extra="/lib/modules/$release/extra"
+	mkdir -p "$extra" && cp "$ko" "$extra/swdivert.ko" && depmod "$release" 2> /dev/null
+	"$swbench" backend-load > "$tmp/load.out" 2> "$tmp/load.err"
+	check "modprobe path: an installed module is loaded without any path ($(cat "$tmp/load.out") $(head -c 120 "$tmp/load.err"))" eq "$?/$(kv "$tmp/load.out" backend_opened)" "0/1"
+	rmmod swdivert 2> /dev/null
+	rm -f "$extra/swdivert.ko"; depmod "$release" 2> /dev/null
+
+	LAGSW_KMOD_PATH=/nonexistent/swdivert.ko "$swbench" backend-load > "$tmp/load.out" 2> "$tmp/load.err"
+	local rc=$?
+	check "a module that cannot be loaded is a startup error (exit $rc) that says what to run" eq "$rc" 3
+	check "... and the message names modprobe and insmod ($(kv "$tmp/load.out" backend_privileges): $(grep -o 'backend_error=.*' "$tmp/load.out" | head -c 160))" grep -q 'modprobe swdivert.*insmod' "$tmp/load.out"
+	insmod "$ko" 2> "$tmp/load.err" || bad "could not load the module again: $(cat "$tmp/load.err")"
+}
+
+t_backend_local_out() {
+	rig_up || return
+	start_bg sink server "$swbench" sink --port $PORT --verify yes
+	backend_reader reader --filter "udp.DstPort == $PORT" --delay-ms 20
+	flood_gw 1000 2 200 10.10.2.2 $PORT
+	sleep 0.4
+	stop_bg reader; stop_bg sink
+	local sent recv p50; sent="$(kv "$tmp/flood.out" sent)"; recv="$(kv "$tmp/sink.out" received)"; p50="$(kv "$tmp/sink.out" lat_p50_us)"
+	check "output hook: every packet this host sent was seen by the engine, as outbound ($(kv "$tmp/reader.out" backend_seen) seen, $(kv "$tmp/reader.out" backend_outbound) outbound, $sent sent)" \
+		eq "$(kv "$tmp/reader.out" backend_seen)/$(kv "$tmp/reader.out" backend_outbound)" "$sent/$sent"
+	check "output hook: all of it arrived and was sent back by the engine ($recv received, $(kv "$tmp/reader.out" backend_sent) sent back)" eq "$recv/$(kv "$tmp/reader.out" backend_sent)" "$sent/$sent"
+	check "output hook: the engine's 20 ms delay was applied (median latency $p50 us)" test "$p50" -ge 20000 -a "$p50" -le 40000
+	check "output hook: nothing corrupt, duplicated or reordered" eq "$(kv "$tmp/sink.out" corrupt)/$(kv "$tmp/sink.out" dups)/$(kv "$tmp/sink.out" reordered)" "0/0/0"
+	check "output hook: the channel listened at input and output ($(kv "$tmp/reader.out" backend_layers))" eq "$(kv "$tmp/reader.out" backend_layers)" "input_+_output_hooks"
+	rig_down
+}
+
+t_backend_local_in() {
+	rig_up || return
+	start_bg sink "$swbench" sink --port $PORT --verify yes
+	backend_reader reader --filter "udp.DstPort == $PORT" --delay-ms 20
+	ns client "$swbench" flood --dst 10.10.1.1 --port $PORT --pps 1000 --seconds 2 --size 200 > "$tmp/flood.out" 2>&1
+	sleep 0.4
+	stop_bg reader; stop_bg sink
+	local sent recv p50; sent="$(kv "$tmp/flood.out" sent)"; recv="$(kv "$tmp/sink.out" received)"; p50="$(kv "$tmp/sink.out" lat_p50_us)"
+	check "input hook: every packet for this host was seen by the engine, as inbound ($(kv "$tmp/reader.out" backend_seen) seen, $(kv "$tmp/reader.out" backend_inbound) inbound, $sent sent)" \
+		eq "$(kv "$tmp/reader.out" backend_seen)/$(kv "$tmp/reader.out" backend_inbound)" "$sent/$sent"
+	check "input hook: all of it was delivered to the local socket ($recv of $sent)" eq "$recv" "$sent"
+	check "input hook: the 20 ms delay was applied (median latency $p50 us)" test "$p50" -ge 20000 -a "$p50" -le 40000
+	check "input hook: nothing corrupt, duplicated or reordered" eq "$(kv "$tmp/sink.out" corrupt)/$(kv "$tmp/sink.out" dups)/$(kv "$tmp/sink.out" reordered)" "0/0/0"
+	rig_down
+}
+
+t_backend_forward() {
+	rig_up || return
+	start_bg sink server "$swbench" sink --port $PORT --verify yes
+	# A local filter does not see routed packets ...
+	backend_reader local --filter "udp.DstPort == $PORT" --delay-ms 20
+	flood 1000 1 200
+	sleep 0.3
+	stop_bg local; stop_bg sink
+	check "a local filter does not see forwarded traffic ($(kv "$tmp/local.out" backend_seen) seen)" eq "$(kv "$tmp/local.out" backend_seen)" 0
+	check "... which was not delayed or lost either ($(kv "$tmp/sink.out" received) of $(kv "$tmp/flood.out" sent))" eq "$(kv "$tmp/sink.out" received)" "$(kv "$tmp/flood.out" sent)"
+	# ... a forward filter does
+	start_bg sink server "$swbench" sink --port $PORT --verify yes
+	backend_reader reader --forward yes --filter "udp.DstPort == $PORT" --delay-ms 20
+	flood 1000 2 200
+	sleep 0.4
+	stop_bg reader; stop_bg sink
+	local sent recv p50; sent="$(kv "$tmp/flood.out" sent)"; recv="$(kv "$tmp/sink.out" received)"; p50="$(kv "$tmp/sink.out" lat_p50_us)"
+	check "forward: every routed packet was seen, as outbound ($(kv "$tmp/reader.out" backend_seen) seen, $(kv "$tmp/reader.out" backend_outbound) outbound, $sent sent)" \
+		eq "$(kv "$tmp/reader.out" backend_seen)/$(kv "$tmp/reader.out" backend_outbound)" "$sent/$sent"
+	check "forward: all of it arrived after the 20 ms delay ($recv of $sent, median $p50 us)" test "$recv" = "$sent" -a "$p50" -ge 20000 -a "$p50" -le 40000
+	check "forward: the channel listened at forward only ($(kv "$tmp/reader.out" backend_layers))" eq "$(kv "$tmp/reader.out" backend_layers)" "forward_hook"
+	rig_down
+}
+
+# include_forward: one channel for local and routed traffic, as a gateway's sniffers and profiles open it
+t_backend_all() {
+	rig_up || return
+	start_bg sink_out server "$swbench" sink --port 9000
+	start_bg sink_fwd server "$swbench" sink --port 9001
+	start_bg sink_in "$swbench" sink --port 9002
+	backend_reader reader --include-forward yes --filter "udp.DstPort == 9000 or udp.DstPort == 9001 or udp.DstPort == 9002" --delay-ms 10
+	"$swbench" flood --dst 10.10.2.2 --port 9000 --pps 500 --seconds 2 --size 200 > "$tmp/f_out.out" 2>&1 &
+	local a=$!
+	ns client "$swbench" flood --dst 10.10.2.2 --port 9001 --pps 500 --seconds 2 --size 200 > "$tmp/f_fwd.out" 2>&1 &
+	local b=$!
+	ns client "$swbench" flood --dst 10.10.1.1 --port 9002 --pps 500 --seconds 2 --size 200 > "$tmp/f_in.out" 2>&1 &
+	local c=$!
+	BG_PIDS+=("$a" "$b" "$c")
+	wait "$a" "$b" "$c"
+	sleep 0.4
+	stop_bg reader; stop_bg sink_out; stop_bg sink_fwd; stop_bg sink_in
+	local so sf si; so="$(kv "$tmp/f_out.out" sent)"; sf="$(kv "$tmp/f_fwd.out" sent)"; si="$(kv "$tmp/f_in.out" sent)"
+	check "all three kinds at once: the engine saw each ($(kv "$tmp/reader.out" backend_seen) seen of $((so + sf + si)); $(kv "$tmp/reader.out" backend_outbound) outbound, $(kv "$tmp/reader.out" backend_inbound) inbound)" \
+		eq "$(kv "$tmp/reader.out" backend_seen)/$(kv "$tmp/reader.out" backend_outbound)/$(kv "$tmp/reader.out" backend_inbound)" "$((so + sf + si))/$((so + sf))/$si"
+	check "all three kinds at once: everything arrived ($(kv "$tmp/sink_out.out" received)/$so, $(kv "$tmp/sink_fwd.out" received)/$sf, $(kv "$tmp/sink_in.out" received)/$si)" \
+		eq "$(kv "$tmp/sink_out.out" received)/$(kv "$tmp/sink_fwd.out" received)/$(kv "$tmp/sink_in.out" received)" "$so/$sf/$si"
+	check "all three kinds at once: one channel listened at all three hooks ($(kv "$tmp/reader.out" backend_layers))" eq "$(kv "$tmp/reader.out" backend_layers)" "input_+_output_+_forward_hooks"
+	rig_down
+}
+
+# "outbound" and "inbound" in the filter pick the direction on the host, as the NFQUEUE backend's compiler does
+t_backend_direction() {
+	rig_up || return
+	start_bg sink_out server "$swbench" sink --port 9000
+	start_bg sink_in "$swbench" sink --port 9000
+	backend_reader outbound --filter "outbound and udp.DstPort == 9000" --delay-ms 5
+	backend_reader inbound --filter "inbound and udp.DstPort == 9000" --delay-ms 5
+	"$swbench" flood --dst 10.10.2.2 --port 9000 --pps 500 --seconds 1 --size 200 > "$tmp/f_out.out" 2>&1
+	ns client "$swbench" flood --dst 10.10.1.1 --port 9000 --pps 500 --seconds 1 --size 200 > "$tmp/f_in.out" 2>&1
+	sleep 0.3
+	stop_bg outbound; stop_bg inbound; stop_bg sink_out; stop_bg sink_in
+	check "outbound filter: saw what the host sent and nothing else ($(kv "$tmp/outbound.out" backend_seen) of $(kv "$tmp/f_out.out" sent); layers $(kv "$tmp/outbound.out" backend_layers))" \
+		eq "$(kv "$tmp/outbound.out" backend_seen)/$(kv "$tmp/outbound.out" backend_outbound)/$(kv "$tmp/outbound.out" backend_layers)" "$(kv "$tmp/f_out.out" sent)/$(kv "$tmp/f_out.out" sent)/output_hook"
+	check "inbound filter: saw what the host received and nothing else ($(kv "$tmp/inbound.out" backend_seen) of $(kv "$tmp/f_in.out" sent); layers $(kv "$tmp/inbound.out" backend_layers))" \
+		eq "$(kv "$tmp/inbound.out" backend_seen)/$(kv "$tmp/inbound.out" backend_inbound)/$(kv "$tmp/inbound.out" backend_layers)" "$(kv "$tmp/f_in.out" sent)/$(kv "$tmp/f_in.out" sent)/input_hook"
+	check "direction filters: everything arrived ($(kv "$tmp/sink_out.out" received), $(kv "$tmp/sink_in.out" received))" eq "$(kv "$tmp/sink_out.out" received)/$(kv "$tmp/sink_in.out" received)" "$(kv "$tmp/f_out.out" sent)/$(kv "$tmp/f_in.out" sent)"
+	rig_down
+}
+
+# The engine rewrites a packet and recomputes its checksums with backend::calc_checksums() before it sends it back. At the input hook the
+# stack verifies the checksum itself, so a wrong one would be dropped; at the output hook it is checked on the wire at the receiver.
+t_backend_modify() {
+	rig_up || return
+	start_bg sink_old "$swbench" sink --port $PORT
+	start_bg sink_new "$swbench" sink --port 9005
+	backend_reader reader --filter "udp.DstPort == $PORT" --delay-ms 0 --modify dport --to-port 9005
+	ns client "$swbench" flood --dst 10.10.1.1 --port $PORT --pps 1000 --seconds 1 --size 200 > "$tmp/flood.out" 2>&1
+	sleep 0.3
+	stop_bg reader; stop_bg sink_old; stop_bg sink_new
+	local sent; sent="$(kv "$tmp/flood.out" sent)"
+	check "rewrite at the input hook: the stack accepted the engine's checksums ($(kv "$tmp/sink_new.out" received) arrived on the new port of $sent, $(kv "$tmp/sink_old.out" received) on the old)" \
+		eq "$(kv "$tmp/sink_new.out" received)/$(kv "$tmp/sink_old.out" received)" "$sent/0"
+	rig_down
+
+	rig_up || return
+	start_bg sink_new server "$swbench" sink --port 9005
+	start_bg pk server "$swbench" pktcheck --port 9005 --iface s0
+	backend_reader reader --filter "udp.DstPort == $PORT" --delay-ms 0 --modify dport --to-port 9005
+	flood_gw 1000 1 200 10.10.2.2 $PORT
+	sleep 0.3
+	stop_bg reader; stop_bg pk; stop_bg sink_new
+	sent="$(kv "$tmp/flood.out" sent)"
+	check "rewrite at the output hook: all arrived on the new port ($(kv "$tmp/sink_new.out" received) of $sent)" eq "$(kv "$tmp/sink_new.out" received)" "$sent"
+	check "rewrite at the output hook: the checksums are right on the wire ($(kv "$tmp/pk.out" pk_bad_ip) bad IP, $(kv "$tmp/pk.out" pk_bad_l4) bad UDP of $(kv "$tmp/pk.out" pk_total))" eq "$(kv "$tmp/pk.out" pk_bad_ip)/$(kv "$tmp/pk.out" pk_bad_l4)" "0/0"
+	rig_down
+}
+
+# Traffic of this host to itself crosses the output and the input hook. The engine must see (and delay) each packet once, not once per hook.
+t_backend_loopback() {
+	rig_up || return
+	start_bg sink "$swbench" sink --port $PORT --verify yes
+	backend_reader reader --filter "udp.DstPort == $PORT" --delay-ms 100
+	"$swbench" flood --dst 127.0.0.1 --port $PORT --pps 500 --seconds 2 --size 200 > "$tmp/flood.out" 2>&1
+	sleep 0.5
+	stop_bg reader; stop_bg sink
+	local sent recv p50; sent="$(kv "$tmp/flood.out" sent)"; recv="$(kv "$tmp/sink.out" received)"; p50="$(kv "$tmp/sink.out" lat_p50_us)"
+	check "loopback: every packet was held once, not once per hook ($(kv "$tmp/reader.out" backend_seen) seen for $sent sent)" eq "$(kv "$tmp/reader.out" backend_seen)" "$sent"
+	check "loopback: the delay applied once (median latency $p50 us, not twice 100 ms)" test "$p50" -ge 100000 -a "$p50" -lt 150000
+	check "loopback: everything arrived intact ($recv of $sent)" eq "$recv/$(kv "$tmp/sink.out" corrupt)" "$sent/0"
+	rig_down
+}
+
+# A real TCP connection of this host (socket-owned packets, segmentation offload, TCP small queues) through a held output and input path
+t_backend_tcp() {
+	rig_up || return
+	start_bg sink server "$swbench" tcpsink --port $TCP_PORT
+	backend_reader reader --filter "tcp.DstPort == $TCP_PORT or tcp.SrcPort == $TCP_PORT" --delay-ms 2
+	"$swbench" tcpsend --dst 10.10.2.2 --port $TCP_PORT --bytes 4194304 --seed 777 > "$tmp/send.out" 2>&1
+	sleep 0.3
+	stop_bg reader; stop_bg sink
+	check "tcp from this host (output hook, acks at input): all 4 MiB arrived intact ($(kv "$tmp/sink.out" bytes) bytes, $(kv "$tmp/send.out" elapsed_ms) ms)" \
+		eq "$(kv "$tmp/sink.out" bytes)/$(kv "$tmp/sink.out" hash)" "4194304/$(kv "$tmp/send.out" hash)"
+	check "tcp from this host: the segments in both directions went through the engine ($(kv "$tmp/reader.out" backend_seen) seen, $(kv "$tmp/reader.out" backend_inbound) of them inbound)" test "$(kv "$tmp/reader.out" backend_outbound)" -ge 2500 -a "$(kv "$tmp/reader.out" backend_inbound)" -ge 100
+	check "tcp from this host: every packet the engine saw it sent back ($(kv "$tmp/reader.out" backend_sent) of $(kv "$tmp/reader.out" backend_seen), $(kv "$tmp/reader.out" backend_errors) errors)" eq "$(kv "$tmp/reader.out" backend_sent)/$(kv "$tmp/reader.out" backend_errors)" "$(kv "$tmp/reader.out" backend_seen)/0"
+	stop_bg sink 2> /dev/null
+	rig_down
+
+	# ... and the other way: the data arrives at this host (input hook), the acks leave it
+	rig_up || return
+	start_bg sink "$swbench" tcpsink --port $TCP_PORT
+	backend_reader reader --filter "tcp.DstPort == $TCP_PORT or tcp.SrcPort == $TCP_PORT" --delay-ms 2
+	ns server "$swbench" tcpsend --dst 10.10.2.1 --port $TCP_PORT --bytes 4194304 --seed 778 > "$tmp/send.out" 2>&1
+	sleep 0.3
+	stop_bg reader; stop_bg sink
+	check "tcp to this host (input hook, acks at output): all 4 MiB arrived intact ($(kv "$tmp/sink.out" bytes) bytes)" eq "$(kv "$tmp/sink.out" bytes)/$(kv "$tmp/sink.out" hash)" "4194304/$(kv "$tmp/send.out" hash)"
+	check "tcp to this host: every packet the engine saw it sent back ($(kv "$tmp/reader.out" backend_sent) of $(kv "$tmp/reader.out" backend_seen))" eq "$(kv "$tmp/reader.out" backend_sent)/$(kv "$tmp/reader.out" backend_errors)" "$(kv "$tmp/reader.out" backend_seen)/0"
+	rig_down
+}
+
+# Fail-open with socket-owned packets: the engine dies while it holds what this host sends; the module lets the packets go, and the
+# sockets they belong to (closed meanwhile) are released exactly once
+t_backend_sigkill() {
+	rig_up || return
+	start_bg sink server "$swbench" sink --port $PORT
+	backend_reader reader --filter "udp.DstPort == $PORT" --delay-ms 3000
+	"$swbench" flood --dst 10.10.2.2 --port $PORT --pps 1000 --seconds 2 --size 200 > "$tmp/flood.out" 2>&1 &
+	local f=$!
+	BG_PIDS+=("$f")
+	sleep 1
+	stop_bg reader KILL
+	wait "$f"
+	sleep 0.5
+	stop_bg sink
+	local sent recv; sent="$(kv "$tmp/flood.out" sent)"; recv="$(kv "$tmp/sink.out" received)"
+	check "the engine killed while holding outgoing packets: nothing was lost ($recv of $sent arrived)" eq "$recv" "$sent"
+	rig_down
+
+	# The same for a sender that exits while its packets are still held: the socket is closed, the packets are not
+	rig_up || return
+	start_bg sink server "$swbench" sink --port $PORT
+	backend_reader reader --filter "udp.DstPort == $PORT" --delay-ms 400
+	flood_gw 1000 1 200 10.10.2.2 $PORT
+	sleep 1
+	stop_bg reader; stop_bg sink
+	sent="$(kv "$tmp/flood.out" sent)"; recv="$(kv "$tmp/sink.out" received)"
+	check "packets still held when their sender's socket is closed are delivered ($recv of $sent)" eq "$recv" "$sent"
+	rig_down
+}
+
 # Phase 2 still works after the Phase 3 changes of the slot layout and the statistics: sniff-only handles copy and let packets go
 t_sniff() {
 	rig_up || return
@@ -827,6 +1091,14 @@ RULES
 		done
 		set_param hold_wake_us 0
 
+		# The real lagsw backend (backend::open/recv/send, as the engine drives it) doing the same job. The tool copies every packet into a
+		# heap buffer before it sends it back, as the engine does, so this row includes that.
+		rig_up || return
+		start_bg sink server "$swbench" sink --port $PORT
+		start_bg reader "$swbench" backend --forward yes --filter "udp.DstPort == $PORT" --delay-ms 0
+		bench_row "lagsw backend (swdivert), verdict at once" "$pps"
+		rig_down
+
 		# The same with every packet modified (payload bytes rewritten, checksums fixed): NFQUEUE sends the whole packet back and
 		# the engine recomputes the checksums; the module takes the bytes and a flag. Both read the whole packet.
 		export BENCH_FILL=y
@@ -862,9 +1134,9 @@ insmod "$ko" || { echo "insmod failed"; exit 1; }
 dmesg_before="$(dmesg | wc -l)"
 [ -c /dev/swdivert ] || { echo "/dev/swdivert did not appear"; exit 1; }
 
-default_tests=(sniff filter_string filter_set filter_swap filter_bad vmcheck progcheck mod_payload mod_grow mod_shrink mod_tcp mod_tcp_nat mod_bad mod_dst chain_order priority_unique inject_twin inject_chain race_mod fuzz resume_now delay drop_verdict tcp tcp_nat sigkill_hold graceful_stop hold_timeout max_held device_removal rate race)
+default_tests=(sniff filter_string filter_set filter_swap filter_bad vmcheck progcheck backend_api backend_load backend_local_out backend_local_in backend_forward backend_all backend_direction backend_modify backend_loopback backend_tcp backend_sigkill mod_payload mod_grow mod_shrink mod_tcp mod_tcp_nat mod_bad mod_dst chain_order priority_equal inject_twin inject_chain race_mod fuzz resume_now delay drop_verdict tcp tcp_nat sigkill_hold graceful_stop hold_timeout max_held device_removal rate race)
 [ "${#only[@]}" -eq 0 ] && only=("${default_tests[@]}")
-for t in sniff filter_string filter_set filter_swap filter_bad vmcheck progcheck mod_payload mod_grow mod_shrink mod_tcp mod_tcp_nat mod_bad mod_dst chain_order priority_unique inject_twin inject_chain race_mod fuzz resume_now delay drop_verdict tcp tcp_nat sigkill_hold graceful_stop hold_timeout max_held device_removal rate race bench; do
+for t in sniff filter_string filter_set filter_swap filter_bad vmcheck progcheck backend_api backend_load backend_local_out backend_local_in backend_forward backend_all backend_direction backend_modify backend_loopback backend_tcp backend_sigkill mod_payload mod_grow mod_shrink mod_tcp mod_tcp_nat mod_bad mod_dst chain_order priority_equal inject_twin inject_chain race_mod fuzz resume_now delay drop_verdict tcp tcp_nat sigkill_hold graceful_stop hold_timeout max_held device_removal rate race bench; do
 	want_test "$t" || continue
 	echo "== $t"
 	"t_$t"

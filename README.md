@@ -325,6 +325,37 @@ Requirements and behaviour:
 - With `netfilter_monitor` enabled the extra status line also shows the kernel counters (stages, packets matched, delayed and
   dropped).
 
+### Kernel module backend (experimental)
+
+A third Linux backend replaces nftables + NFQUEUE with an out-of-tree kernel module, `swdivert` (`kmod/`; design, measurements
+and caveats in [`pocs/linux_kernel_module_backend.md`](pocs/linux_kernel_module_backend.md)). The module matches packets with a
+filter program, copies them into a ring shared with `lagsw` and holds the originals until the engine sends or drops them,
+so a held packet costs no netlink round trip. The filter language, the engine and the profiles are the same as with NFQUEUE. It is
+chosen when `lagsw` is built:
+
+```sh
+xmake f -m release --linux_backend=kmod       # the default is nfqueue
+xmake build lagsw swdivert                    # the module needs the kernel headers of the running kernel
+sudo ./build/linux/x86_64/release/lagsw --config profiles/localhost.test.sw.yml
+```
+
+This build needs none of the netfilter libraries. At startup, as root, `lagsw` loads the module when `/dev/swdivert` is missing:
+`modprobe swdivert` for an installed module, else `insmod` of `swdivert.ko` from `$LAGSW_KMOD_PATH` or from next to the
+executable (copy it there, or set the variable, for a development build). It never unloads the module,
+since closing the handles already releases everything it held; `LAGSW_KMOD_UNLOAD_ON_EXIT=1` unloads it on a normal exit
+when this process loaded it. Without root nothing is loaded and the error says which command to run. A module of another ABI
+version is refused.
+
+What is different from the NFQUEUE backend: a packet nobody answered for 60 s is released by the module itself (a stuck or
+killed `lagsw` never blackholes traffic, as with `bypass`), so a delay beyond that is not applied; up to 16384 packets are held
+per channel; packets larger than about 4000 bytes (loopback, jumbo frames) are let through undelayed; IPv4 only; there is no kernel
+shaping tier (profiles run through the channel as usual); no nftables table is created. Loopback traffic is held once, not once
+per hook. The module is GPL, host-wide and needs to be rebuilt for each kernel; a Secure Boot system needs it signed.
+
+Its tests run in a throw-away VM that boots the host's kernel, without root (`/dev/kvm` and QEMU needed):
+`scripts/tests/test_kmod_hold_vm.sh` (module and backend contract) and `scripts/tests/test_kmod_localhost_vm.sh` (the real
+`lagsw` binary against the localhost feature profile).
+
 ### Testing
 
 `scripts/tests/test_nfqueue_localhost.sh`, `scripts/tests/test_nfqueue_gateway.sh` and `scripts/tests/test_bpf_gateway.sh` run end to end in a

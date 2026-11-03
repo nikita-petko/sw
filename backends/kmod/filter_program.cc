@@ -1,5 +1,7 @@
 #include "filter_program.h"
 
+#include <sys/ioctl.h>
+
 #include <algorithm>
 #include <map>
 
@@ -23,19 +25,57 @@ namespace {
 		const bool src = match.endpoint == nfq::Endpoint::source;
 		return tcp ? (src ? SWDIV_SRC_TCP_SPORT : SWDIV_SRC_TCP_DPORT) : (src ? SWDIV_SRC_UDP_SPORT : SWDIV_SRC_UDP_DPORT);
 	}
+
+	uint32_t layer_of(nfq::Hook hook)
+	{
+		switch (hook)
+		{
+			case nfq::Hook::input:
+				return SWDIV_OPEN_LOCAL_IN;
+			case nfq::Hook::output:
+				return SWDIV_OPEN_LOCAL_OUT;
+			case nfq::Hook::forward:
+				return SWDIV_OPEN_FORWARD;
+		}
+		return 0;
+	}
+
+	// The netfilter hook numbers (NF_INET_*) that the kernel puts in the program's context
+	uint32_t hook_number(nfq::Hook hook)
+	{
+		switch (hook)
+		{
+			case nfq::Hook::input:
+				return 1;
+			case nfq::Hook::forward:
+				return 2;
+			case nfq::Hook::output:
+				return 3;
+		}
+		return 0;
+	}
 }  // namespace
 
-bool compile_program(const std::string& filter, Program& out, std::string& error, uint32_t& position)
+bool compile_program(const std::string& filter, Program& out, std::string& error, uint32_t& position, bool forward, bool include_forward)
 {
 	std::vector<nfq::CompiledRule> rules;
-	if (!nfq::compile_filter(filter, true, rules, error, position))
+	if (!nfq::compile_filter(filter, forward, rules, error, position, include_forward))
 		return false;
 
-	Program									  program;
+	uint32_t layers = 0;
+	for (const nfq::CompiledRule& rule : rules)
+		layers |= layer_of(rule.hook);
+	// A program that serves one hook needs no test for it
+	const bool tag_hooks = __builtin_popcount(layers) > 1;
+
+	Program program;
+	program.layers = layers;
 	std::map<std::vector<uint32_t>, uint32_t> address_sets;
 	for (const nfq::CompiledRule& rule : rules)
 	{
 		const size_t first = program.insns.size();
+		if (tag_hooks)
+			program.insns.push_back(test(SWDIV_OP_EQ, SWDIV_SRC_HOOK, hook_number(rule.hook)));
 		for (const nfq::Match& match : rule.matches)
 		{
 			switch (match.kind)
@@ -120,6 +160,25 @@ std::vector<swdiv_vm_set> vm_sets(const Program& program)
 		sets.push_back({set.kind, static_cast<uint32_t>(set.elems.size() / per_element), set.elems.data()});
 	}
 	return sets;
+}
+
+int install_program(int fd, const Program& program)
+{
+	std::vector<swdiv_set_desc> descs;
+	for (const SetData& set : program.sets)
+	{
+		swdiv_set_desc desc = {};
+		desc.kind			= set.kind;
+		desc.n				= static_cast<__u32>(set.elems.size() / (set.kind == SWDIV_SET_PORTS ? 2 : 1));
+		desc.elems			= static_cast<__u64>(reinterpret_cast<uintptr_t>(set.elems.data()));
+		descs.push_back(desc);
+	}
+	swdiv_program_args args = {};
+	args.insns				= static_cast<__u64>(reinterpret_cast<uintptr_t>(program.insns.data()));
+	args.n_insns			= static_cast<__u32>(program.insns.size());
+	args.n_sets				= static_cast<__u32>(descs.size());
+	args.sets				= static_cast<__u64>(reinterpret_cast<uintptr_t>(descs.data()));
+	return ioctl(fd, SWDIVERT_IOC_SET_PROGRAM, &args);
 }
 
 std::string verify_program(const Program& program)

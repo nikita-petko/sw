@@ -8,6 +8,7 @@
 #include <linux/miscdevice.h>
 #include <linux/mm.h>
 #include <linux/module.h>
+#include <linux/netfilter_ipv4.h>
 #include <linux/nsproxy.h>
 #include <linux/poll.h>
 #include <linux/sched.h>
@@ -74,7 +75,6 @@ static void swdiv_stop(struct swdiv_handle *handle)
 	if (handle->hold_mode)
 		swdiv_hold_flush(handle);
 	swdiv_hook_stop(handle);
-	swdiv_priority_release(handle);
 	if (handle->hold_mode)
 		swdiv_hold_reopen(handle);
 	handle->started = false;
@@ -105,7 +105,7 @@ static int swdiv_do_open(struct swdiv_handle *handle, void __user *argp)
 
 	if (copy_from_user(&args, argp, sizeof(args)))
 		return -EFAULT;
-	if ((args.flags & ~SWDIV_OPEN_HOLD) || args.reserved2 || args.priority < -30000 || args.priority > 30000)
+	if ((args.flags & ~(SWDIV_OPEN_HOLD | SWDIV_OPEN_LOCAL_IN | SWDIV_OPEN_LOCAL_OUT | SWDIV_OPEN_FORWARD)) || args.reserved3 || args.hold_ms > SWDIV_MAX_HOLD_MS || args.max_held > SWDIV_MAX_HELD || args.priority < -30000 || args.priority > 30000)
 		return -EINVAL;
 	if (args.slots < SWDIV_MIN_SLOTS || args.slots > SWDIV_MAX_SLOTS || !is_power_of_2(args.slots))
 		return -EINVAL;
@@ -121,6 +121,13 @@ static int swdiv_do_open(struct swdiv_handle *handle, void __user *argp)
 		return ret;
 	handle->hold_mode = args.flags & SWDIV_OPEN_HOLD;
 	handle->priority = args.priority;
+	handle->hold_ms = args.hold_ms ?: READ_ONCE(swdiv_hold_ms);
+	handle->max_held = args.max_held ?: READ_ONCE(swdiv_max_held);
+	handle->layers = args.flags & (SWDIV_OPEN_LOCAL_IN | SWDIV_OPEN_LOCAL_OUT | SWDIV_OPEN_FORWARD);
+	if (!handle->layers)
+		handle->layers = SWDIV_OPEN_FORWARD;
+	/* Higher user priority = lower netfilter priority number = earlier. NF_IP_PRI_FIRST is INT_MIN: the handles run before everything else */
+	handle->nf_priority = NF_IP_PRI_FIRST + 30000 - args.priority;
 	/* Pairs with the acquire in swdiv_poll(), which does not take the lock */
 	smp_store_release(&handle->ring_ready, true);
 
@@ -182,13 +189,8 @@ static long swdiv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			ret = -EINVAL;
 		else if (handle->started)
 			ret = -EBUSY;
-		else if (!(ret = swdiv_priority_claim(handle))) {
-			ret = swdiv_hook_start(handle);
-			if (ret)
-				swdiv_priority_release(handle);
-			else
-				handle->started = true;
-		}
+		else if (!(ret = swdiv_hook_start(handle)))
+			handle->started = true;
 		break;
 	case SWDIVERT_IOC_STOP:
 		swdiv_stop(handle);

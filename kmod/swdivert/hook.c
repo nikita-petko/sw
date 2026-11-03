@@ -18,8 +18,12 @@ unsigned int swdiv_hook(void *priv, struct sk_buff *skb, const struct nf_hook_st
 	const struct swdiv_handle *injector = this_cpu_read(swdiv_injector);
 	bool truncated = false;
 
+	/* A packet this handle resumed is not held again at its next hook */
+	if (READ_ONCE(handle->release_bit) & skb->mark)
+		return NF_ACCEPT;
+
 	/* A packet this handle (or one served before it) injects is not offered to it again: that would loop */
-	if (injector && handle->ops.priority <= injector->ops.priority)
+	if (injector && handle->nf_priority <= injector->nf_priority)
 		return NF_ACCEPT;
 
 	stats->seen++;
@@ -112,17 +116,48 @@ void swdiv_notify(struct swdiv_handle *handle)
 
 int swdiv_hook_start(struct swdiv_handle *handle)
 {
-	handle->ops.hook = swdiv_hook;
-	handle->ops.pf = NFPROTO_IPV4;
-	handle->ops.hooknum = NF_INET_FORWARD;
-	/* Higher user priority = lower netfilter priority number = earlier. NF_IP_PRI_FIRST is INT_MIN: the handles run before everything else */
-	handle->ops.priority = NF_IP_PRI_FIRST + 30000 - handle->priority;
-	handle->ops.priv = handle;
-	return nf_register_net_hook(handle->net, &handle->ops);
+	static const struct {
+		u32 layer;
+		u8 hooknum;
+	} layers[] = {
+		{ SWDIV_OPEN_LOCAL_IN, NF_INET_LOCAL_IN },
+		{ SWDIV_OPEN_FORWARD, NF_INET_FORWARD },
+		{ SWDIV_OPEN_LOCAL_OUT, NF_INET_LOCAL_OUT },
+	};
+	unsigned int i, n = 0;
+	int ret;
+
+	for (i = 0; i < ARRAY_SIZE(layers); i++) {
+		if (!(handle->layers & layers[i].layer))
+			continue;
+		handle->ops[n] = (struct nf_hook_ops){
+			.hook = swdiv_hook,
+			.pf = NFPROTO_IPV4,
+			.hooknum = layers[i].hooknum,
+			.priority = handle->nf_priority,
+			.priv = handle,
+		};
+		n++;
+	}
+	/* Only a handle that can see one packet at two hooks needs the guard */
+	WRITE_ONCE(handle->release_bit, handle->hold_mode && n > 1 ? swdiv_release_bit_get() : 0);
+	ret = nf_register_net_hooks(handle->net, handle->ops, n);
+	if (ret) {
+		swdiv_release_bit_put(handle->release_bit);
+		WRITE_ONCE(handle->release_bit, 0);
+		return ret;
+	}
+	handle->n_ops = n;
+	return 0;
 }
 
 void swdiv_hook_stop(struct swdiv_handle *handle)
 {
 	/* Returns after every running callback has finished, so the ring can be freed afterwards */
-	nf_unregister_net_hook(handle->net, &handle->ops);
+	nf_unregister_net_hooks(handle->net, handle->ops, handle->n_ops);
+	handle->n_ops = 0;
+	if (handle->release_bit) {
+		swdiv_release_bit_put(handle->release_bit);
+		WRITE_ONCE(handle->release_bit, 0);
+	}
 }

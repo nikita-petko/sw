@@ -17,6 +17,7 @@
 #include <linux/netdevice.h>
 #include <linux/netdev_features.h>
 #include <linux/netfilter.h>
+#include <linux/netfilter_ipv4.h>
 #include <linux/sched.h>
 #include <linux/skbuff.h>
 #include <linux/slab.h>
@@ -44,6 +45,17 @@ unsigned int swdiv_max_held = 4096;
 module_param_named(max_held, swdiv_max_held, uint, 0644);
 MODULE_PARM_DESC(max_held, "most packets one handle holds at a time; further packets pass unheld (default 4096)");
 
+/*
+ * A packet this handle resumed carries the handle's release bit in skb->mark, and the handle's hooks leave it alone from then on. Without
+ * it a packet that crosses two of the handle's hooks (loopback traffic: LOCAL_OUT, then LOCAL_IN) would be held at each of them, so a
+ * delay would apply twice. The bits come from a pool the user can move (top byte by default, rarely used by anything else, as in the
+ * NFQUEUE backend); a handle that finds none runs without the guard.
+ */
+unsigned int swdiv_release_marks = 0xFF000000;
+module_param_named(release_marks, swdiv_release_marks, uint, 0444);
+MODULE_PARM_DESC(release_marks, "skb->mark bits that holding handles may use to recognise the packets they resumed (default 0xff000000)");
+static u32 swdiv_release_used;
+
 static struct kmem_cache *swdiv_held_cache;
 static LIST_HEAD(swdiv_handles);
 static DEFINE_MUTEX(swdiv_handles_lock);
@@ -54,6 +66,8 @@ static void swdiv_entry_free(struct swdiv_held *e)
 		dev_put(e->state.in);
 	if (e->state.out)
 		dev_put(e->state.out);
+	if (e->state.sk)
+		sock_put(e->state.sk);
 	kmem_cache_free(swdiv_held_cache, e);
 }
 
@@ -76,7 +90,7 @@ static unsigned int swdiv_resume_index(const struct nf_hook_entries *hooks, cons
 	/* The hook is already unregistered (only after a stop raced with a resume): continue after everything that sorts before it */
 	ops = nf_hook_entries_get_hook_ops(hooks);
 	for (i = 0; i < hooks->num_hook_entries; i++)
-		if (ops[i]->priority > h->ops.priority)
+		if (ops[i]->priority > h->nf_priority)
 			return i;
 	return hooks->num_hook_entries;
 }
@@ -91,6 +105,7 @@ static void swdiv_continue(struct swdiv_handle *h, struct sk_buff *skb, struct n
 	const struct nf_hook_entries *hooks;
 	int ret = 1;
 
+	skb->mark |= READ_ONCE(h->release_bit);
 	/* The packet path expects softirq conditions: BH off and inside an RCU read-side section, as nf_hook() runs it */
 	local_bh_disable();
 	rcu_read_lock();
@@ -157,7 +172,7 @@ static void swdiv_entry_resume_mod(struct swdiv_handle *h, struct swdiv_held *e,
 	local_bh_disable();
 	rcu_read_lock();
 
-	/* At the FORWARD hook the packet starts at the IP header; anything else is not something this knows how to rewrite */
+	/* At the hooks this module serves the packet starts at the IP header; anything else is not something this knows how to rewrite */
 	if (skb_network_offset(skb) != 0)
 		goto fail;
 	swdiv_tuple_of(skb, NULL, &before);
@@ -178,20 +193,30 @@ static void swdiv_entry_resume_mod(struct swdiv_handle *h, struct swdiv_held *e,
 	skb_set_transport_header(skb, iph->ihl * 4);
 
 	swdiv_packet_checksums(skb, flags);
-	/* The receive-side checksum state describes the old bytes */
-	if (skb->ip_summed == CHECKSUM_COMPLETE)
-		skb->ip_summed = CHECKSUM_NONE;
+	/*
+	 * The checksum state of the skb (verified by the device, computed over the old bytes, or left to the device to fill in) describes
+	 * the old bytes. The packet user space wrote is complete, as for nf_queue, so it is treated as an ordinary unverified packet.
+	 */
+	skb->ip_summed = CHECKSUM_NONE;
 
 	swdiv_tuple_of(skb, NULL, &after);
 	if (memcmp(&before, &after, sizeof(before))) {
 		nf_reset_ct(skb);
 		this_cpu_inc(h->stats->ct_detached);
 	}
-	if (before.daddr != after.daddr) {
+	/*
+	 * A changed destination is routed again where the route is still to be decided for the packet: on its way out of this host and
+	 * when it is forwarded. A packet for this host is delivered whatever its destination says.
+	 */
+	if (before.daddr != after.daddr && e->state.hook != NF_INET_LOCAL_IN) {
 		struct net_device *out;
 
 		skb_dst_drop(skb);
-		if (ip_route_input(skb, iph->daddr, iph->saddr, inet_dsfield_to_dscp(iph->tos), e->state.in)) {
+		if (e->state.hook == NF_INET_LOCAL_OUT)
+			err = ip_route_me_harder(e->state.net, e->state.sk, skb, RTN_UNSPEC);
+		else
+			err = ip_route_input(skb, iph->daddr, iph->saddr, inet_dsfield_to_dscp(iph->tos), e->state.in);
+		if (err) {
 			err = -ENETUNREACH;
 			goto fail;
 		}
@@ -287,7 +312,9 @@ static bool swdiv_pred_dev(const struct swdiv_held *e, const void *arg)
 
 /*
  * Holds one ordinary packet. Returns NF_STOLEN, or NF_ACCEPT when the packet was not taken: it then still belongs to the caller.
- * Not held: packets owned by a socket (the reference would have to be kept and released) and packets without a refcounted route.
+ * Not held: packets without a refcounted route or whose socket is going away. The socket of a locally generated packet is kept
+ * alive while the packet is held, as nf_queue does.
+
  */
 static unsigned int swdiv_hold_one(struct swdiv_handle *h, struct sk_buff *skb, const struct nf_hook_state *state)
 {
@@ -298,11 +325,11 @@ static unsigned int swdiv_hold_one(struct swdiv_handle *h, struct sk_buff *skb, 
 	int err;
 	u64 id;
 
-	if (state->sk || !state->okfn) {
+	if (!state->okfn) {
 		stats->pass_unsupported++;
 		return NF_ACCEPT;
 	}
-	if (atomic_read(&h->held_count) >= READ_ONCE(swdiv_max_held)) {
+	if (atomic_read(&h->held_count) >= h->max_held) {
 		stats->pass_limit++;
 		return NF_ACCEPT;
 	}
@@ -318,9 +345,15 @@ static unsigned int swdiv_hold_one(struct swdiv_handle *h, struct sk_buff *skb, 
 		return NF_ACCEPT;
 	}
 
+	if (state->sk && !refcount_inc_not_zero(&state->sk->sk_refcnt)) {
+		kmem_cache_free(swdiv_held_cache, e);
+		stats->pass_unsupported++;
+		return NF_ACCEPT;
+	}
+
 	e->skb = skb;
 	e->state = *state;
-	e->expires = jiffies + msecs_to_jiffies(READ_ONCE(swdiv_hold_ms));
+	e->expires = jiffies + msecs_to_jiffies(h->hold_ms);
 	id = atomic64_inc_return(&h->next_id);
 	e->id = id;
 	if (state->in)
@@ -371,7 +404,7 @@ static unsigned int swdiv_hold_one(struct swdiv_handle *h, struct sk_buff *skb, 
 	if (truncated)
 		stats->truncated++;
 	if (!delayed_work_pending(&h->expiry))
-		schedule_delayed_work(&h->expiry, msecs_to_jiffies(clamp(READ_ONCE(swdiv_hold_ms) / 8, 5U, 250U)));
+		schedule_delayed_work(&h->expiry, msecs_to_jiffies(clamp(h->hold_ms / 8, 5U, 250U)));
 	swdiv_notify(h);
 	return NF_STOLEN;
 }
@@ -424,7 +457,7 @@ static void swdiv_expiry_fn(struct work_struct *work)
 		swdiv_entry_resume(h, e);
 	}
 	if (atomic_read(&h->held_count) > 0)
-		schedule_delayed_work(&h->expiry, msecs_to_jiffies(clamp(READ_ONCE(swdiv_hold_ms) / 8, 5U, 250U)));
+		schedule_delayed_work(&h->expiry, msecs_to_jiffies(clamp(h->hold_ms / 8, 5U, 250U)));
 }
 
 /* ---- control side ---- */
@@ -561,30 +594,24 @@ static struct notifier_block swdiv_netdev_nb = {
 	.notifier_call = swdiv_netdev_event,
 };
 
-/* ---- priorities ---- */
-
-int swdiv_priority_claim(struct swdiv_handle *h)
+u32 swdiv_release_bit_get(void)
 {
-	struct swdiv_handle *o;
-	int ret = 0;
+	u32 avail, bit = 0;
 
 	mutex_lock(&swdiv_handles_lock);
-	list_for_each_entry(o, &swdiv_handles, node) {
-		if (o != h && o->claimed && net_eq(o->net, h->net) && o->priority == h->priority) {
-			ret = -EEXIST;
-			break;
-		}
+	avail = swdiv_release_marks & ~swdiv_release_used;
+	if (avail) {
+		bit = avail & -avail;
+		swdiv_release_used |= bit;
 	}
-	if (!ret)
-		h->claimed = true;
 	mutex_unlock(&swdiv_handles_lock);
-	return ret;
+	return bit;
 }
 
-void swdiv_priority_release(struct swdiv_handle *h)
+void swdiv_release_bit_put(u32 bit)
 {
 	mutex_lock(&swdiv_handles_lock);
-	h->claimed = false;
+	swdiv_release_used &= ~bit;
 	mutex_unlock(&swdiv_handles_lock);
 }
 

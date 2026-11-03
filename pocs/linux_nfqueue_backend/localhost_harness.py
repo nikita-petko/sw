@@ -238,7 +238,7 @@ def behaviour(app):
     for t in threads:
         t.join()
     check("Hold Until Deactivation: every held connection completes", all(b.get("r") is not None for b in boxes), f"{[b.get('r') for b in boxes]}")
-    check("Hold Until Deactivation: held packets released with a batch verdict", re.search(r"batch accept of [2-9]\d* packets", app.log) is not None)
+    check("Hold Until Deactivation: held packets released with a batch verdict", re.search(r"batch (accept|resume) of [2-9]\d* packets", app.log) is not None)
 
     tap("t")  # UDP profile
     r = udp_rtt()

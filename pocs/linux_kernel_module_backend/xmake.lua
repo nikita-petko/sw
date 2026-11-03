@@ -7,7 +7,13 @@ if is_plat("linux") then
         add_files("swbench.cc")
         -- The same lexer, parser and DNF conversion as the NFQUEUE backend, and the compiler that turns its output into filter programs
         add_files("../../backends/kmod/filter_program.cc", "../../backends/nfqueue/filter_lexer.cc", "../../backends/nfqueue/filter_parser.cc", "../../backends/nfqueue/filter_compiler.cc")
+        -- `swbench backend ...` drives the real lagsw backend (backends/kmod) with traffic, so it links it and what it needs
+        add_files("backend_cmd.cc", "../../backends/kmod/backend.cc", "../../backends/kmod/module.cc")
+        add_files("../../backends/nfqueue/filters.cc", "../../backends/nfqueue/checksums.cc", "../../backends/nfqueue/privileges.cc")
+        add_files("../../src/log.cc", "../../tests/support/platform_stub.cc")
+        add_includedirs("../../include", "../../src", "../../tests")
         add_includedirs("../../kmod/include", "../../backends/kmod", "../../backends/nfqueue", "../../tests/kmod_vm")
+        add_syslinks("pthread")
         add_syslinks("netfilter_queue", "nfnetlink", "mnl")
     target_end()
 end

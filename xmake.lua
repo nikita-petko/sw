@@ -74,6 +74,7 @@ end
 includes("backends/windivert")
 includes("backends/stub")
 includes("backends/nfqueue")
+includes("backends/kmod")
 includes("kmod")
 includes("src/")
 includes("tests/options")

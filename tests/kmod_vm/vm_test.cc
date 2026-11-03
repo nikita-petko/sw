@@ -347,6 +347,58 @@ void test_the_compiler_output_has_the_expected_shape()
 	CHECK(!kmodf::compile_program("tcp.Nope == 1", p, error, position));
 }
 
+// The layers of a program and the tests that tell the hooks apart
+void test_programs_for_several_hooks_test_the_hook_they_run_at()
+{
+	auto compile = [](const std::string& filter, bool forward, bool include_forward, kmodf::Program& out) {
+		std::string error;
+		uint32_t	position = 0;
+		return kmodf::compile_program(filter, out, error, position, forward, include_forward);
+	};
+	auto at = [](const kmodf::Program& p, const Bytes& packet, uint8_t hook, uint32_t in = 2, uint32_t out = 3) {
+		Meta meta;
+		meta.hook		 = hook;
+		meta.in_ifindex	 = hook == 3 ? 0 : in;
+		meta.out_ifindex = hook == 1 ? 0 : out;
+		return run(p, packet, meta);
+	};
+	constexpr uint8_t in = 1, fwd = 2, out = 3;
+	kmodf::Program	  p;
+
+	// Local traffic is two hooks, forwarded traffic one, "both" all three
+	CHECK(compile("udp.DstPort == 9000", false, false, p));
+	CHECK(p.layers == (SWDIV_OPEN_LOCAL_IN | SWDIV_OPEN_LOCAL_OUT));
+	CHECK(kmodf::verify_program(p).empty());
+	CHECK(at(p, udp(1, 9000), in) && at(p, udp(1, 9000), out) && !at(p, udp(1, 9001), out) && !at(p, udp(1, 9001), in));
+	CHECK(!at(p, udp(1, 9000), fwd));  // a forwarded packet is not this program's business
+	CHECK(compile("udp.DstPort == 9000", true, false, p));
+	CHECK(p.layers == SWDIV_OPEN_FORWARD);
+	CHECK(at(p, udp(1, 9000), fwd));
+	CHECK(compile("udp.DstPort == 9000", false, true, p));
+	CHECK(p.layers == (SWDIV_OPEN_LOCAL_IN | SWDIV_OPEN_LOCAL_OUT | SWDIV_OPEN_FORWARD));
+	CHECK(at(p, udp(1, 9000), in) && at(p, udp(1, 9000), fwd) && at(p, udp(1, 9000), out));
+
+	// "outbound" and "inbound" narrow the layers (nothing is registered that could not match) and need no hook test
+	CHECK(compile("outbound and udp.DstPort == 9000", false, false, p));
+	CHECK(p.layers == SWDIV_OPEN_LOCAL_OUT);
+	for (const swdiv_insn& insn : p.insns)
+		CHECK(insn.src != SWDIV_SRC_HOOK);
+	CHECK(compile("inbound and udp.DstPort == 9000", false, false, p));
+	CHECK(p.layers == SWDIV_OPEN_LOCAL_IN);
+	CHECK(compile("outbound and udp.DstPort == 9000", false, true, p));
+	CHECK(p.layers == (SWDIV_OPEN_LOCAL_OUT | SWDIV_OPEN_FORWARD));
+	CHECK(at(p, udp(1, 9000), out) && at(p, udp(1, 9000), fwd) && !at(p, udp(1, 9000), in));
+
+	// An interface test follows the hook: the input interface where a packet arrives, the output interface where it leaves
+	CHECK(compile("ifIdx == 7", false, false, p));
+	CHECK(at(p, udp(1, 2), in, 7, 0) && at(p, udp(1, 2), out, 0, 7) && !at(p, udp(1, 2), in, 5, 0) && !at(p, udp(1, 2), out, 0, 5));
+	CHECK(!at(p, udp(1, 2), in, 0, 7));	 // the output interface of an arriving packet does not count
+
+	// A filter that matches nothing has no layers and no instructions
+	CHECK(compile("false", false, true, p));
+	CHECK(p.layers == 0 && p.insns.empty());
+}
+
 void test_a_filter_too_big_for_the_vm_is_refused_with_a_message()
 {
 	// 70 different address lists: more sets than the kernel takes
@@ -486,6 +538,7 @@ int main(int argc, char** argv)
 		{"the_verifier_refuses_what_it_must", test_the_verifier_refuses_what_it_must},
 		{"the_interpreter_stops_even_if_the_verifier_was_bypassed", test_the_interpreter_stops_even_if_the_verifier_was_bypassed},
 		{"the_compiler_output_has_the_expected_shape", test_the_compiler_output_has_the_expected_shape},
+		{"programs_for_several_hooks_test_the_hook_they_run_at", test_programs_for_several_hooks_test_the_hook_they_run_at},
 		{"a_filter_too_big_for_the_vm_is_refused_with_a_message", test_a_filter_too_big_for_the_vm_is_refused_with_a_message},
 		{"compiled_programs_agree_with_the_reference_on_random_filters_and_packets",
 		 test_compiled_programs_agree_with_the_reference_on_random_filters_and_packets},

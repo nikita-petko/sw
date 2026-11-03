@@ -32,6 +32,7 @@ struct swdiv_vm_ctx {
 	__u32		mark;
 	__u8		outbound;
 	__u8		loopback;
+	__u8		hook;		/* netfilter hook number: 1 LOCAL_IN, 2 FORWARD, 3 LOCAL_OUT (SWDIV_SRC_HOOK) */
 };
 
 /*
@@ -63,7 +64,7 @@ static inline int swdiv_vm_src_valid(__u32 src)
 	case SWDIV_SRC_TCP_FLAGS: case SWDIV_SRC_TCP_PAYLOAD_BYTE: case SWDIV_SRC_UDP_PAYLOAD_BYTE:
 	case SWDIV_SRC_TCP_PAYLOAD_LEN: case SWDIV_SRC_UDP_PAYLOAD_LEN:
 	case SWDIV_SRC_IN_IFINDEX: case SWDIV_SRC_OUT_IFINDEX: case SWDIV_SRC_MARK: case SWDIV_SRC_OUTBOUND:
-	case SWDIV_SRC_LOOPBACK: case SWDIV_SRC_PKT_LEN:
+	case SWDIV_SRC_LOOPBACK: case SWDIV_SRC_PKT_LEN: case SWDIV_SRC_HOOK:
 		return 1;
 	}
 	return 0;
@@ -203,6 +204,9 @@ static inline int swdiv_vm_load(const struct swdiv_vm_ctx *c, __u32 src, __u32 k
 		return 1;
 	case SWDIV_SRC_PKT_LEN:
 		*v = c->total_len;
+		return 1;
+	case SWDIV_SRC_HOOK:
+		*v = c->hook;
 		return 1;
 	}
 

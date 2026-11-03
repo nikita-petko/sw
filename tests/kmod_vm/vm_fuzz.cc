@@ -63,7 +63,8 @@ uint32_t pick_src(Rng& rng)
 									 SWDIV_SRC_MARK,
 									 SWDIV_SRC_OUTBOUND,
 									 SWDIV_SRC_LOOPBACK,
-									 SWDIV_SRC_PKT_LEN};
+									 SWDIV_SRC_PKT_LEN,
+									 SWDIV_SRC_HOOK};
 	return rng.chance(85) ? valid[rng.below(sizeof(valid) / sizeof(valid[0]))] : static_cast<uint32_t>(rng.next());
 }
 
@@ -180,6 +181,7 @@ void run_on_packets(Rng& rng, const std::vector<swdiv_insn>& program, const Rand
 		ctx.out_ifindex				= rng.below(5);
 		ctx.mark					= static_cast<uint32_t>(rng.next());
 		ctx.outbound				= 1;
+		ctx.hook					= static_cast<uint8_t>(rng.below(5));
 		if (rng.chance(3))
 			ctx.len = static_cast<uint32_t>(packet.size());	 // an oversized prefix is refused, not read
 		g_steps			 = 0;

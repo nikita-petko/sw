@@ -12,6 +12,9 @@
 //   through the rig swbench progcheck                       what SET_PROGRAM must accept and refuse swbench pktcheck --port P --iface IF
 //   verifies IP and UDP checksums of the packets arriving on IF (AF_PACKET) swbench tcpsink --port P            one connection: prints
 //   bytes, an FNV-1a hash and the peer address swbench tcpsend --dst IP --port P --bytes N [--seed S]
+//   swbench backend --filter F [--forward yes] [--include-forward yes] [--sniff yes] [--priority N] [--delay-ms D] [--batch yes]
+//                   [--discard-every K] [--modify dport --to-port P] [--seconds S]   the backend::open() channel, as the engine uses it
+//   swbench backend-load | backend-api       module loading by check_privileges(); the backend contract that needs no traffic
 // sink and sniff run until SIGINT/SIGTERM and then print their result. The -hold modes give every packet a verdict D ms after it
 // was captured (0: at once; -1: never, so only the module's timeout or its close releases it) and drop every K-th packet.
 #include <algorithm>
@@ -47,6 +50,11 @@
 #include "filter_program.h"
 #include "support.h"
 #include "swdivert_ring.h"
+
+// backend_cmd.cc: the lagsw backend itself (backends/kmod), driven like the engine drives it
+int run_backend(const std::vector<std::string>& arguments);
+int run_backend_load(const std::vector<std::string>& arguments);
+int run_backend_api(const std::vector<std::string>& arguments);
 
 namespace {
 std::atomic<bool> g_stop{false};
@@ -282,25 +290,6 @@ int run_sink(const Args& args)
 
 // ---- filter programs ----
 
-int install_program(int fd, const kmodf::Program& program)
-{
-	std::vector<swdiv_set_desc> descs;
-	for (const kmodf::SetData& set : program.sets)
-	{
-		swdiv_set_desc desc = {};
-		desc.kind			= set.kind;
-		desc.n				= static_cast<__u32>(set.elems.size() / (set.kind == SWDIV_SET_PORTS ? 2 : 1));
-		desc.elems			= static_cast<__u64>(reinterpret_cast<uintptr_t>(set.elems.data()));
-		descs.push_back(desc);
-	}
-	swdiv_program_args args = {};
-	args.insns				= static_cast<__u64>(reinterpret_cast<uintptr_t>(program.insns.data()));
-	args.n_insns			= static_cast<__u32>(program.insns.size());
-	args.n_sets				= static_cast<__u32>(descs.size());
-	args.sets				= static_cast<__u64>(reinterpret_cast<uintptr_t>(descs.data()));
-	return ioctl(fd, SWDIVERT_IOC_SET_PROGRAM, &args);
-}
-
 // Compiles a filter string with the user-space compiler (the NFQUEUE backend's parser and DNF conversion) and installs the program.
 bool install_filter(int fd, const std::string& text)
 {
@@ -318,7 +307,7 @@ bool install_filter(int fd, const std::string& text)
 		std::fprintf(stderr, "swbench: filter '%s': %s\n", text.c_str(), verdict.c_str());
 		return false;
 	}
-	if (install_program(fd, program) < 0)
+	if (kmodf::install_program(fd, program) < 0)
 	{
 		std::fprintf(stderr, "swbench: filter '%s': SWDIVERT_IOC_SET_PROGRAM: %s\n", text.c_str(), std::strerror(errno));
 		return false;
@@ -394,7 +383,7 @@ int run_vmcheck(const Args& args)
 		uint32_t		  position = 0;
 		if (!kmodf::compile_program(text, program, error, position))
 			continue;
-		if (install_program(under_test, program) < 0)
+		if (kmodf::install_program(under_test, program) < 0)
 		{
 			std::fprintf(stderr,
 						 "vmcheck: the kernel refused a program the user-space verifier accepted: '%s': %s\n",
@@ -1742,6 +1731,12 @@ int main(int argc, char** argv)
 		return run_vmcheck(args);
 	if (command == "progcheck")
 		return run_progcheck(args);
+	if (command == "backend")
+		return run_backend(args.v);
+	if (command == "backend-load")
+		return run_backend_load(args.v);
+	if (command == "backend-api")
+		return run_backend_api(args.v);
 	if (command == "tcpsink")
 		return run_tcpsink(args);
 	if (command == "tcpsend")

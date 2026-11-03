@@ -7,6 +7,8 @@
 # usage: scripts/tests/kmod_vm.sh [--mem MB] [--cpus N] [--timeout SEC] [--modules "m1 m2"] [--slub-debug FLAGS] [--keep] [--file F]... -- script [args...]
 #   --file F      also copy F into the VM at /opt/<basename F> (modules, test tools; the script is copied to /opt/run.sh)
 #   --modules     kernel modules (with dependencies) available to `modprobe` in the VM
+#   --python MODS Python 3 with just the standard-library modules MODS (space separated, plus what they import) in the VM: a few MB instead
+#                 of the whole standard library
 #   --slub-debug  slub_debug= flags (default FZP: sanity checks, red zones, poisoning: catches use-after-free and overflows of slab objects;
 #                 "" turns it off, which is what you want for timing)
 # The VM's console output is streamed; the exit status is the script's. A kernel panic or a timeout is a failure.
@@ -18,6 +20,7 @@ cpus=4
 timeout_s=300
 modules="veth nf_conntrack nf_nat nf_tables nft_nat nft_masq nft_chain_nat nft_ct nft_queue nfnetlink_queue nf_conntrack_netlink"
 files=()
+py_modules=""
 keep=0
 slab_debug="FZP"
 while [ $# -gt 0 ]; do
@@ -27,6 +30,7 @@ while [ $# -gt 0 ]; do
 	--timeout) timeout_s="$2"; shift 2 ;;
 	--modules) modules="$2"; shift 2 ;;
 	--file) files+=("$2"); shift 2 ;;
+	--python) py_modules="$2"; shift 2 ;;
 	--keep) keep=1; shift ;;
 	--slub-debug) slab_debug="$2"; shift 2 ;;
 	--) shift; break ;;
@@ -85,6 +89,23 @@ done
 # kmod's tools are symlinks to one binary: copy_bin followed them, which stored the same program under each name, so that works.
 for lib in /usr/lib/libnss_files.so.2; do [ -e "$lib" ] && put "$lib"; done
 
+# Python: the interpreter, its library, and exactly the standard-library files that importing the requested modules loads on the host
+if [ -n "$py_modules" ]; then
+	copy_bin python3 || { echo "python3 is not available on the host" >&2; exit 1; }
+	while read -r f; do
+		put "$f"
+		case "$f" in *.so) copy_libs "$f" ;; esac
+	done < <(python3 -c '
+import importlib, os, sys
+for name in sys.argv[1:]:
+    importlib.import_module(name)
+for module in list(sys.modules.values()):
+    path = getattr(module, "__file__", None)
+    if path and os.path.isfile(path):
+        print(path)
+' $py_modules)
+fi
+
 # Kernel modules with their dependencies, plus the metadata modprobe needs
 for m in $modules; do
 	modprobe -S "$release" --show-depends "$m" 2>/dev/null | awk '/^insmod/{print $2}'
@@ -101,7 +122,14 @@ depmod -b "$stage/usr" "$release" 2>/dev/null || depmod -b "$stage" "$release"
 cp "$script" "$stage/opt/run.sh"; chmod +x "$stage/opt/run.sh"
 for f in "${files[@]}"; do
 	cp -L "$f" "$stage/opt/$(basename "$f")"
-	case "$f" in *.ko) ;; *) chmod +x "$stage/opt/$(basename "$f")"; copy_libs "$f" ;; esac
+	case "$f" in
+	*.ko) ;;
+	*)
+		chmod +x "$stage/opt/$(basename "$f")"
+		# Only programs have libraries to bring along (scripts and data files are copied as they are)
+		[ "$(head -c 4 "$f" | tail -c 3)" = ELF ] && copy_libs "$f"
+		;;
+	esac
 done
 # nsswitch/hosts so tools do not stall on lookups
 echo "root:x:0:0:root:/:/bin/bash" > "$stage/etc/passwd"
