@@ -2,10 +2,10 @@
 # Sets up (and tears down) a gateway between two interfaces: IPv4 forwarding, NAT, an address for the LAN
 # side and optionally a DHCP server, turning this host into the router lagsw's `forward: true` profiles expect.
 #
-# usage: scripts/setup_gateway.sh up     --wan eth0 --lan wlan0 [--lan-address 192.168.50.1/24] [--dhcp]
+# usage: scripts/package/linux/setup_gateway.sh up     --wan eth0 --lan wlan0 [--lan-address 192.168.50.1/24] [--dhcp]
 #                                        [--dns 1.1.1.1,8.8.8.8] [--no-nat] [--ipv6] [--dry-run]
-#        scripts/setup_gateway.sh down   [--ipv6] [--dry-run]
-#        scripts/setup_gateway.sh status
+#        scripts/package/linux/setup_gateway.sh down   [--ipv6] [--dry-run]
+#        scripts/package/linux/setup_gateway.sh status
 #
 #   --wan IFACE          upstream interface (e.g. eth0): LAN traffic is forwarded out of it and masqueraded
 #   --lan IFACE          downstream interface (e.g. wlan0): clients behind it are allowed to use the WAN

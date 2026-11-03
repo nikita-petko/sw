@@ -16,7 +16,7 @@ $AppArgs  = @(
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 # In the repo the script lives in scripts/; in a package it sits next to the exe.
-$root = if ((Split-Path $here -Leaf) -eq 'scripts') { Split-Path $here -Parent } else { $here }
+$root = if ($here -match '[\\/]scripts[\\/]package[\\/]windows$') { Split-Path (Split-Path (Split-Path $here -Parent) -Parent) -Parent } else { $here }
 
 if (-not $Elevated) {
     # -Verb RunAs triggers UAC; WindowStyle Maximized fills the screen.

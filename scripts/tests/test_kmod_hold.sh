@@ -4,7 +4,7 @@
 # namespaces (the script re-runs itself in a new network namespace, so the host's networking is not touched), loads the module,
 # runs the scenarios and unloads it again.
 #
-# usage: test_kmod_hold.sh SWDIVERT.KO SWBENCH [test-name ...]       (as root; scripts/test_kmod_hold_vm.sh runs it in a VM)
+# usage: test_kmod_hold.sh SWDIVERT.KO SWBENCH [test-name ...]       (as root; scripts/tests/test_kmod_hold_vm.sh runs it in a VM)
 # Env:   SWT_NFQ=0 skips the NFQUEUE comparison.
 set -u
 

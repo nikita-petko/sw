@@ -249,7 +249,7 @@ A profile session is created and destroyed with activation and is tied to key st
 
 ### Backend
 
-- Localhost harness ([scripts/test_nfqueue_localhost.sh](../scripts/test_nfqueue_localhost.sh)): measured RTT through the gateway test shows the configured floor within tolerance; clean nft table removal after exit.
+- Localhost harness ([scripts/tests/test_nfqueue_localhost.sh](../scripts/tests/test_nfqueue_localhost.sh)): measured RTT through the gateway test shows the configured floor within tolerance; clean nft table removal after exit.
 - WinDivert: manual check with a ping/UDP echo and the timing capture, since CI has no Windows driver.
 
 ### Hypothesis check (the motivating claim)

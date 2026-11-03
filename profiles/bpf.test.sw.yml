@@ -1,4 +1,4 @@
-# Profile for the eBPF egress tier (see scripts/test_bpf_gateway.sh): the test gateway forwards between veth devices `vc` (client side)
+# Profile for the eBPF egress tier (see scripts/tests/test_bpf_gateway.sh): the test gateway forwards between veth devices `vc` (client side)
 # and `vs` (server side). Held keys activate profiles. The first three run in the kernel; "Hold" decides per packet in user space and
 # therefore uses NFQUEUE.
 global_filter: "tcp.DstPort == 8080 or tcp.SrcPort == 8080"

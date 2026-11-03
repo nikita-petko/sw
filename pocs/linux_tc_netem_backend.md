@@ -178,7 +178,7 @@ netem treats a GSO/GRO super-packet as one packet, so with offloads on, `loss` a
 
 ## 11. Test plan
 
-Reuse the privileged-container / network-namespace pattern from `scripts/test_nfqueue_localhost.sh` and `scripts/test_nfqueue_gateway.sh`.
+Reuse the privileged-container / network-namespace pattern from `scripts/tests/test_nfqueue_localhost.sh` and `scripts/tests/test_nfqueue_gateway.sh`.
 
 ### Functional
 - Idle: with netem at zero delay, `ping` and `iperf3` to a listed server show no added latency and no loss.

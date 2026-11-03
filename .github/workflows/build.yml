@@ -65,8 +65,8 @@ jobs:
         with:
           xmake-version: latest
 
-      - name: Build and package (scripts/build_aarch64.sh)
-        run: scripts/build_aarch64.sh --package
+      - name: Build and package (scripts/build/build_aarch64.sh)
+        run: scripts/build/build_aarch64.sh --package
 
       - uses: actions/upload-artifact@v4
         with:

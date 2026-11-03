@@ -2,9 +2,9 @@
 # Checks for the eBPF egress tier inside a throwaway privileged container (kernel 6.6+ with tcx, sch_fq, cls_bpf): a gateway between two
 # network namespaces whose veth devices carry the egress program. Covers delay accuracy, drop, batches, the passive-latency models,
 # ordering, mode routing and fallback, qdisc restoration, SIGTERM/SIGKILL and unprivileged operation.
-# usage: scripts/test_bpf_gateway.sh [path-to-lagsw]   (build with `xmake -y` first; a debug build gives the log messages some checks read)
+# usage: scripts/tests/test_bpf_gateway.sh [path-to-lagsw]   (build with `xmake -y` first; a debug build gives the log messages some checks read)
 set -euo pipefail
-root="$(cd "$(dirname "$0")/.." && pwd)"
+root="$(cd "$(dirname "$0")/../.." && pwd)"
 bin="${1:-$(find "$root/build/linux" -name lagsw -type f -path '*debug*' | head -1)}"
 [ -x "$bin" ] || { echo "lagsw binary not found; run xmake -y" >&2; exit 1; }
 

@@ -74,10 +74,9 @@ target("lagsw")
         os.mkdir(pkgdir)
 
         os.cp(target:targetfile(), pkgdir)
-        -- Windows-only helper scripts are skipped on Linux and vice versa
-        local scripts = is_plat("windows") and {"*.ps1", "*.cmd"} or {"*.sh"}
-        for _, pattern in ipairs(scripts) do
-            os.cp(path.join(os.projectdir(), "scripts", pattern), pkgdir)
+        -- only scripts under scripts/package/<plat> are shipped (build and test scripts never are)
+        for _, file in ipairs(os.files(path.join(os.projectdir(), "scripts", "package", target:plat(), "*"))) do
+            os.cp(file, pkgdir)
         end
         os.cp(path.join(os.projectdir(), "profiles"), pkgdir)
 

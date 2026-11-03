@@ -4,7 +4,7 @@
 # (readable), the kernel module tree of the same kernel under /usr/lib/modules and the usual host tools (bash, iproute2, util-linux,
 # kmod). Everything the VM runs is copied from the host into an initramfs; nothing is installed.
 #
-# usage: scripts/kmod_vm.sh [--mem MB] [--cpus N] [--timeout SEC] [--modules "m1 m2"] [--slub-debug FLAGS] [--keep] [--file F]... -- script [args...]
+# usage: scripts/tests/kmod_vm.sh [--mem MB] [--cpus N] [--timeout SEC] [--modules "m1 m2"] [--slub-debug FLAGS] [--keep] [--file F]... -- script [args...]
 #   --file F      also copy F into the VM at /opt/<basename F> (modules, test tools; the script is copied to /opt/run.sh)
 #   --modules     kernel modules (with dependencies) available to `modprobe` in the VM
 #   --slub-debug  slub_debug= flags (default FZP: sanity checks, red zones, poisoning: catches use-after-free and overflows of slab objects;
@@ -12,7 +12,7 @@
 # The VM's console output is streamed; the exit status is the script's. A kernel panic or a timeout is a failure.
 set -euo pipefail
 
-root="$(cd "$(dirname "$0")/.." && pwd)"
+root="$(cd "$(dirname "$0")/../.." && pwd)"
 mem=2048
 cpus=4
 timeout_s=300

@@ -1,5 +1,5 @@
 -- Integration module for the kernel-module build: /dev/swdivert_echo returns what was last written to it. It exists to prove the
--- xmake -> kbuild -> insmod -> user space chain (see scripts/test_kmod_echo.sh), not to be a part of the packet path.
+-- xmake -> kbuild -> insmod -> user space chain (see scripts/tests/test_kmod_echo.sh), not to be a part of the packet path.
 target("swdivert_echo")
     add_rules("kmod.module")
     add_files("echo.c")

@@ -3,9 +3,9 @@
 # gateway between two network namespaces, SIGTERM cleanup, and fail-open after SIGKILL. The owner-table checks
 # (the table disappears with the process; an unprivileged user holding only file capabilities and no nft binary can run
 # lagsw) need Linux 5.12+.
-# usage: scripts/test_nfqueue_gateway.sh [path-to-lagsw]   (build with `xmake -y` first)
+# usage: scripts/tests/test_nfqueue_gateway.sh [path-to-lagsw]   (build with `xmake -y` first)
 set -euo pipefail
-root="$(cd "$(dirname "$0")/.." && pwd)"
+root="$(cd "$(dirname "$0")/../.." && pwd)"
 bin="${1:-$(find "$root/build/linux" -name lagsw -type f -path '*debug*' | head -1)}"
 [ -x "$bin" ] || { echo "lagsw binary not found; run xmake -y" >&2; exit 1; }
 

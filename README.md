@@ -154,17 +154,17 @@ The binary is `build/linux/x86_64/release/lagsw`.
 
 #### Cross-compiling for ARM64
 
-[`scripts/build_aarch64.sh`](scripts/build_aarch64.sh) builds an `aarch64`
+[`scripts/build/build_aarch64.sh`](scripts/build/build_aarch64.sh) builds an `aarch64`
 (XMake: `arm64`) binary on an x86-64 Arch Linux or Ubuntu/Debian host. It
 detects `pacman` or `apt`, installs the cross compiler if it is missing (one
 `sudo` call), assembles an aarch64 sysroot, and runs XMake:
 
 ```sh
-scripts/build_aarch64.sh                 # build/linux/arm64/release/lagsw
-scripts/build_aarch64.sh --mode debug
-scripts/build_aarch64.sh --package       # also create dist/lagsw-v*-arm64-release.tar.gz
-scripts/build_aarch64.sh --sysroot-only  # just prepare the sysroot
-scripts/build_aarch64.sh -- --pcap_files=y   # extra `xmake f` arguments after --
+scripts/build/build_aarch64.sh                 # build/linux/arm64/release/lagsw
+scripts/build/build_aarch64.sh --mode debug
+scripts/build/build_aarch64.sh --package       # also create dist/lagsw-v*-arm64-release.tar.gz
+scripts/build/build_aarch64.sh --sysroot-only  # just prepare the sysroot
+scripts/build/build_aarch64.sh -- --pcap_files=y   # extra `xmake f` arguments after --
 ```
 
 The sysroot (default `build/sysroot/aarch64`, change it with `--sysroot`,
@@ -214,7 +214,7 @@ error if it is missing (`--help` and option errors still work unprivileged). It 
 itself under `sudo`. A warning is logged when `/dev/input/event*` is not readable, since hotkeys
 would not work. Re-run `setcap` after every rebuild, because replacing the file removes it.
 
-`scripts/bootstrap.sh` re-executes itself with `sudo` and runs `lagsw` with preset arguments.
+`scripts/package/linux/bootstrap.sh` re-executes itself with `sudo` and runs `lagsw` with preset arguments.
 
 ### How it behaves
 
@@ -244,15 +244,15 @@ would not work. Re-run `setcap` after every rebuild, because replacing the file 
 
 ### Setting up a gateway
 
-`scripts/setup_gateway.sh` configures the host as a router between two interfaces, which is what
+`scripts/package/linux/setup_gateway.sh` configures the host as a router between two interfaces, which is what
 `forward: true` profiles need. For example, share the wired uplink `eth0` with clients on a `wlan0`
 access point:
 
 ```sh
 # Give wlan0 the address 192.168.50.1/24, hand out leases with DHCP, forward + NAT to eth0:
-sudo scripts/setup_gateway.sh up --wan eth0 --lan wlan0 --lan-address 192.168.50.1/24 --dhcp
-sudo scripts/setup_gateway.sh status                      # also reprints the client network settings
-sudo scripts/setup_gateway.sh down                        # undo everything `up` did
+sudo scripts/package/linux/setup_gateway.sh up --wan eth0 --lan wlan0 --lan-address 192.168.50.1/24 --dhcp
+sudo scripts/package/linux/setup_gateway.sh status                      # also reprints the client network settings
+sudo scripts/package/linux/setup_gateway.sh down                        # undo everything `up` did
 ```
 
 `up` enables `net.ipv4.ip_forward`, allows `--lan` to `--wan` traffic (and the established replies back)
@@ -327,7 +327,7 @@ Requirements and behaviour:
 
 ### Testing
 
-`scripts/test_nfqueue_localhost.sh`, `scripts/test_nfqueue_gateway.sh` and `scripts/test_bpf_gateway.sh` run end to end in a
+`scripts/tests/test_nfqueue_localhost.sh`, `scripts/tests/test_nfqueue_gateway.sh` and `scripts/tests/test_bpf_gateway.sh` run end to end in a
 throwaway privileged Docker container (see [Included profiles](#included-profiles)).
 
 ## Usage
@@ -867,14 +867,14 @@ review and adapt them before using the configuration elsewhere.
 
 [`profiles/localhost.test.sw.yml`](profiles/localhost.test.sw.yml) exercises every
 delay mode, activation mode and feature against loopback traffic only (TCP
-55000/55002, UDP 55001). `scripts/test_nfqueue_localhost.sh` runs it end to end
+55000/55002, UDP 55001). `scripts/tests/test_nfqueue_localhost.sh` runs it end to end
 against the Linux backend inside a throwaway privileged Docker container
 (`pocs/linux_nfqueue_backend/localhost_harness.py` drives it). Setting the
 `LAGSW_TEST_KEYS` environment variable to a file path makes the Linux build read
 held keys (whitespace-separated names such as `d`, `ctrl`, `space`) from that
-file instead of `/dev/input`; this exists for the harness. `scripts/test_nfqueue_gateway.sh` additionally tests the forward hook
+file instead of `/dev/input`; this exists for the harness. `scripts/tests/test_nfqueue_gateway.sh` additionally tests the forward hook
 between two network namespaces ([`profiles/gateway.test.sw.yml`](profiles/gateway.test.sw.yml)),
-SIGTERM cleanup and fail-open after SIGKILL. `scripts/test_bpf_gateway.sh` does the same for the
+SIGTERM cleanup and fail-open after SIGKILL. `scripts/tests/test_bpf_gateway.sh` does the same for the
 [kernel shaping](#kernel-shaping-ebpf) tier with [`profiles/bpf.test.sw.yml`](profiles/bpf.test.sw.yml): delay accuracy,
 drop, batches, the passive-latency models and ordering, fallback and forced-tier behaviour, qdisc restoration, SIGTERM,
 SIGKILL and unprivileged operation.

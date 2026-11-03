@@ -1,5 +1,5 @@
 // End-to-end check of the kernel-module build: talks to a loaded swdivert_echo module. Needs root and the module, so it is run by
-// scripts/test_kmod_echo.sh rather than `xmake test`.
+// scripts/tests/test_kmod_echo.sh rather than `xmake test`.
 #include <cerrno>
 #include <cstdio>
 #include <cstring>

@@ -13,8 +13,8 @@ APP_ARGS=(
 # --------------------------------------------
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# In the repo the script lives in scripts/; in a package it sits next to the executable.
-if [[ "$(basename "$here")" == "scripts" ]]; then root="$(dirname "$here")"; else root="$here"; fi
+# In the repo the script lives in scripts/package/linux; in a package it sits next to the executable.
+if [[ "$here" == */scripts/package/linux ]]; then root="$(cd "$here/../../.." && pwd)"; else root="$here"; fi
 
 # Packet capture and keyboard polling (/dev/input) need root.
 if [[ $EUID -ne 0 ]]; then

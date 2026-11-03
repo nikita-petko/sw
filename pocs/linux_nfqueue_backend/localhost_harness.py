@@ -2,7 +2,7 @@
 """Drives lagsw against loopback traffic using profiles/localhost.test.sw.yml.
 
 Needs CAP_NET_ADMIN (nftables + NFQUEUE; the container runs it as root) and should run in a disposable network namespace/container, see
-scripts/test_nfqueue_localhost.sh. Keys are injected through LAGSW_TEST_KEYS, so no input device is touched.
+scripts/tests/test_nfqueue_localhost.sh. Keys are injected through LAGSW_TEST_KEYS, so no input device is touched.
 
 usage: localhost_harness.py <lagsw-binary> <profile.yml>
 """

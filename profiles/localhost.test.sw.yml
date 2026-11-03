@@ -2,7 +2,7 @@
 #
 # Every configuration field, delay mode and feature is used at least once, and every capture targets
 # loopback test traffic (TCP 55000/55002, UDP 55001), so the profile is safe to run on a development machine.
-# Drive it with scripts/test_nfqueue_localhost.sh, or by hand: start the echo servers in
+# Drive it with scripts/tests/test_nfqueue_localhost.sh, or by hand: start the echo servers in
 # pocs/linux_nfqueue_backend/localhost_harness.py and hold the profile keys.
 #
 # Notes for loopback:

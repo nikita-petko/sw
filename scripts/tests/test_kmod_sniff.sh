@@ -2,9 +2,9 @@
 # Loads the swdivert Phase 2 module into the RUNNING kernel, checks that it captures exactly what is forwarded through a
 # throw-away veth gateway (and survives a SIGKILLed reader), optionally benchmarks it against AF_PACKET and NFQUEUE, and unloads it.
 # Needs root and touches the host kernel (modules are host-wide, so no container). The traffic stays inside new network namespaces.
-# usage: sudo scripts/test_kmod_sniff.sh [--bench]    (build as your user first: xmake build swdivert swbench)
+# usage: sudo scripts/tests/test_kmod_sniff.sh [--bench]    (build as your user first: xmake build swdivert swbench)
 set -euo pipefail
-root="$(cd "$(dirname "$0")/.." && pwd)"
+root="$(cd "$(dirname "$0")/../.." && pwd)"
 newest() { find "$root/build" -name "$1" -type f -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-; }
 ko="$(newest swdivert.ko)"
 [ -n "$ko" ] || { echo "swdivert.ko not found; run: xmake build swdivert" >&2; exit 1; }

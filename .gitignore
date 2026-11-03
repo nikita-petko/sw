@@ -2,6 +2,8 @@
 .xmake/
 build/
 
+!scripts/build/
+
 # clangd cache
 .cache/
 

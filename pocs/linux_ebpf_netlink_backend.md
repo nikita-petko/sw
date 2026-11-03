@@ -231,7 +231,7 @@ With A in place there is no spawned helper, so `check_privileges` reduces to "ef
 
 ## 12. Test plan
 
-Reuse the privileged-container / network-namespace pattern of `scripts/test_nfqueue_localhost.sh` and `scripts/test_nfqueue_gateway.sh`, with a new `scripts/test_ebpf_*.sh`. Phase 1 (§13) is manual shell, no C++ changes.
+Reuse the privileged-container / network-namespace pattern of `scripts/tests/test_nfqueue_localhost.sh` and `scripts/tests/test_nfqueue_gateway.sh`, with a new `scripts/test_ebpf_*.sh`. Phase 1 (§13) is manual shell, no C++ changes.
 
 ### Functional
 - **A:** `nft list ruleset` shows the table with the `owner` flag; the same localhost and gateway suites pass with `cap_net_admin` only and no `nft` in `PATH`.
@@ -268,7 +268,7 @@ Implemented (all under `backends/nfqueue/shaper/` unless noted):
 - **Configuration and build.** `features: linux_bpf: {tier: auto|nfqueue|bpf, interfaces: [...]}` (parser, validation, schema). `xmake f --linux_bpf=n` omits the tier; by default it is built when clang has the bpf target and libbpf's headers exist, otherwise the build warns and continues without it. This differs from the proposal in two names: the option is boolean `linux_bpf` because xmake reserves the value `auto`, and the runtime key is `linux_bpf.tier` rather than a top-level `linux_tier`.
 - **Status.** With `netfilter_monitor` enabled the extra line appends `bpf: N stage(s) on M iface(s), matched .. delayed .. dropped ..`.
 
-Verified (Linux 7.2.11, privileged container with a veth gateway, `scripts/test_bpf_gateway.sh`; every check passes):
+Verified (Linux 7.2.11, privileged container with a veth gateway, `scripts/tests/test_bpf_gateway.sh`; every check passes):
 
 - Delay: a 300 ms forwarded profile gives 1.21 s for a four-packet exchange (NFQUEUE gives the same); no NFQUEUE queue is bound and no nftables rules exist. Drop, release and reactivation behave; counters report matched/delayed/dropped. Batch: three datagrams sent 100 ms apart leave together (spread 0.000 s, first reply at 1.200 s).
 - Passive latency, RTT through two shaped directions: fixed 100 ms gives 200.2 ms (sd 0.1); uniform 100±40 ms without `preserve_order` gives mean 199–202 ms and sd 31–32.5 ms (expected 200 and 32.7); normal 100/20 gives sd 28.1–28.9 ms (expected 28.3); `max_delay_ms` clamps every sample; with `preserve_order` there are no inversions at the server (the mean rises to about 250 ms, as the running maximum implies) and without it there are about 130 of 300. These are the `preserve_order` and `max_delay_ms` gaps the netem PoC listed.
@@ -299,8 +299,8 @@ Implemented in `backends/nfqueue/` and the engine:
 Verified (Linux 7.2.11, privileged containers, debug build):
 
 - Unit suites: `verdict_tracker_test` (9 cases), `nft_batch_test` (12, adds the guard rule), `engine_test` (the teardown flush reaches the backend as one batch of three) and the existing suites pass.
-- `scripts/test_nfqueue_localhost.sh`: 99 of 101 checks; the same two failures as before. New checks: three held connections are released with `batch accept of N packets` in the log and all complete; a profile without `outbound: true` delays a loopback exchange by 1.2 s with the guard, where the pre-change binary takes 2.4 s (the packet was held at both hooks).
-- `scripts/test_nfqueue_gateway.sh`: the new chain-count and guard checks pass and every earlier result is unchanged.
+- `scripts/tests/test_nfqueue_localhost.sh`: 99 of 101 checks; the same two failures as before. New checks: three held connections are released with `batch accept of N packets` in the log and all complete; a profile without `outbound: true` delays a loopback exchange by 1.2 s with the guard, where the pre-change binary takes 2.4 s (the packet was held at both hooks).
+- `scripts/tests/test_nfqueue_gateway.sh`: the new chain-count and guard checks pass and every earlier result is unchanged.
 - A first version took the tracker lock inside `verdict_mutex_`'s critical section, and `close()` deadlocked because `nfq_destroy_queue()` re-enters the receive callback while waiting for the kernel; the tracker now has its own mutex (lock order `verdict_mutex_`, then `tracker_mutex_`; nothing calls into libnetfilter_queue while holding the latter).
 
 Not measured: whether batching changes CPU or latency (that needs the §12 performance runs), behaviour on kernels before 7.2.11, and behaviour with policy routing keyed on the mark. Changing the mark on a locally generated packet makes the kernel re-run its routing lookup after the output hook; hosts that route on the top mark byte should not use it for that.
@@ -318,8 +318,8 @@ Implemented in `backends/nfqueue/`:
 Verified (Linux 7.2.11, privileged containers):
 
 - `nfqueue_filter_test` (20 cases) and `nft_batch_test` (10 cases) pass.
-- `scripts/test_nfqueue_localhost.sh`: 97 of 99 checks pass, the same two failures (`pcap files written`, `discovery debug: packets counted`) as the unmodified code.
-- `scripts/test_nfqueue_gateway.sh`: all previous checks keep their previous result (the one failing check, discovery counting on the gateway, fails identically on the unmodified code). New checks pass: SIGKILL removes the owner table, a stale non-owner table is replaced by an owner table, and a user with uid 65534 holding only a `cap_net_admin+ep` file capability, with `nft` removed from `PATH`, installs the forward chain, delays traffic and leaves nothing behind after SIGKILL. A copy without the capability is refused with an explanation.
+- `scripts/tests/test_nfqueue_localhost.sh`: 97 of 99 checks pass, the same two failures (`pcap files written`, `discovery debug: packets counted`) as the unmodified code.
+- `scripts/tests/test_nfqueue_gateway.sh`: all previous checks keep their previous result (the one failing check, discovery counting on the gateway, fails identically on the unmodified code). New checks pass: SIGKILL removes the owner table, a stale non-owner table is replaced by an owner table, and a user with uid 65534 holding only a `cap_net_admin+ep` file capability, with `nft` removed from `PATH`, installs the forward chain, delays traffic and leaves nothing behind after SIGKILL. A copy without the capability is refused with an explanation.
 
 Deviations from §6.2 and open items:
 

@@ -1,4 +1,4 @@
-# Gateway test profile for the forward hook (see scripts/test_nfqueue_gateway.sh).
+# Gateway test profile for the forward hook (see scripts/tests/test_nfqueue_gateway.sh).
 global_filter: "tcp.DstPort == 8080 or tcp.SrcPort == 8080"
 
 features:

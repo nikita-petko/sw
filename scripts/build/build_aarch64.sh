@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Cross-compiles lagsw for Linux aarch64 (XMake calls it arm64) from an x86-64 Arch Linux or Ubuntu/Debian host.
 # It installs the cross compiler, assembles an aarch64 sysroot with the libraries lagsw links against (without root,
-# in a directory of its own) and runs xmake. Run `scripts/build_aarch64.sh --help` for the options.
+# in a directory of its own) and runs xmake. Run `scripts/build/build_aarch64.sh --help` for the options.
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 sysroot="$root/build/sysroot/aarch64"
 mode="release"
 sysroot_only=0

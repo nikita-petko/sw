@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Runs the localhost feature profile against the NFQUEUE backend inside a throwaway privileged container.
 # The container keeps its own network namespace, so the host firewall and network are never touched.
-# usage: scripts/test_nfqueue_localhost.sh [path-to-lagsw]   (build with `xmake -y` first)
+# usage: scripts/tests/test_nfqueue_localhost.sh [path-to-lagsw]   (build with `xmake -y` first)
 set -euo pipefail
-root="$(cd "$(dirname "$0")/.." && pwd)"
+root="$(cd "$(dirname "$0")/../.." && pwd)"
 bin="${1:-$(find "$root/build/linux" -name lagsw -type f -path '*debug*' | head -1)}"
 [ -x "$bin" ] || { echo "lagsw binary not found; run xmake -y" >&2; exit 1; }
 
