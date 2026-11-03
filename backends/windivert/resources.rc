@@ -3,5 +3,11 @@
 #define WINDIVERT_DLL 101
 #define WINDIVERT_SYS 102
 
-WINDIVERT_DLL RCDATA "..\\..\\win_divert\\x64\\WinDivert.dll"
-WINDIVERT_SYS RCDATA "..\\..\\win_divert\\x64\\WinDivert64.sys"
+// Forward slashes: both rc.exe and windres (MinGW, on any host) accept them
+WINDIVERT_DLL RCDATA "../../win_divert/x64/WinDivert.dll"
+WINDIVERT_SYS RCDATA "../../win_divert/x64/WinDivert64.sys"
+
+#ifdef __MINGW32__
+// MSVC builds get the UAC manifest from the linker (windows.manifest.uac policy in src/xmake.lua)
+1 24 "lagsw.manifest"
+#endif

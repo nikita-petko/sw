@@ -21,7 +21,13 @@ rule("backend.nfqueue")
         target:add("syslinks", "netfilter_queue", "nfnetlink", "mnl", "nftnl")
         target:add("defines", "LAGSW_BACKEND_NFQUEUE")
 
-        -- The eBPF tier needs clang with the bpf target (build time only) and libbpf's headers.
+        -- The eBPF tier needs clang with the bpf target (build time only) and libbpf's headers (of the sysroot in cross builds).
+        local sysroot = get_config("sysroot")
+        if sysroot then
+            sysroot = path.absolute(sysroot, os.projectdir())
+        end
+        local header_dirs = sysroot and {path.join(sysroot, "usr", "include")} or {"/usr/include", "/usr/local/include"}
+        target:data_set("lagsw_bpf_include_dirs", header_dirs)
         import("lib.detect.find_tool")
         local program, reason
         if get_config("linux_bpf") ~= false then
@@ -30,9 +36,13 @@ rule("backend.nfqueue")
                 reason = "clang was not found"
             else
                 local targets = try { function () return os.iorunv(clang.program, {"--print-targets"}) end }
+                local has_libbpf = false
+                for _, dir in ipairs(header_dirs) do
+                    has_libbpf = has_libbpf or os.isfile(path.join(dir, "bpf", "libbpf.h"))
+                end
                 if not targets or not targets:find("bpf", 1, true) then
                     reason = "clang has no bpf target"
-                elseif not os.isfile("/usr/include/bpf/libbpf.h") and not os.isfile("/usr/local/include/bpf/libbpf.h") then
+                elseif not has_libbpf then
                     reason = "libbpf headers were not found"
                 else
                     program = clang.program
@@ -72,10 +82,16 @@ rule("backend.nfqueue")
         os.mkdir(gendir)
         local args = {"-target", "bpf", "-mcpu=v3", "-O2", "-g", "-I", path.join(scriptdir, "shaper")}
         -- Debian-style multiarch layouts keep <asm/*.h> outside /usr/include
-        for _, triplet in ipairs({"x86_64-linux-gnu", "aarch64-linux-gnu", "arm-linux-gnueabihf"}) do
-            if os.isdir("/usr/include/" .. triplet) then
+        for _, dir in ipairs(target:data("lagsw_bpf_include_dirs")) do
+            for _, triplet in ipairs({"x86_64-linux-gnu", "aarch64-linux-gnu", "arm-linux-gnueabihf"}) do
+                if os.isdir(path.join(dir, triplet)) then
+                    table.insert(args, "-I")
+                    table.insert(args, path.join(dir, triplet))
+                end
+            end
+            if get_config("sysroot") then
                 table.insert(args, "-I")
-                table.insert(args, "/usr/include/" .. triplet)
+                table.insert(args, dir)
             end
         end
         table.join2(args, {"-c", source, "-o", object})

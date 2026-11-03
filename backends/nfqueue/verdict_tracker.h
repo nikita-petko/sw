@@ -1,6 +1,7 @@
 #ifndef NFQUEUE_VERDICT_TRACKER_H_
 #define NFQUEUE_VERDICT_TRACKER_H_
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <unordered_map>
@@ -31,7 +32,7 @@ public:
 	bool remove(uint32_t id);
 
 	/// Number of packets waiting for a verdict.
-	size_t size() const { return waiting_.size(); }
+	std::size_t size() const { return waiting_.size(); }
 
 	/// Longest leading run of waiting packets that are all in `ids`. A verdict batch carries a single mark, so the run
 	/// also stops at the first packet whose mark differs from the oldest one's.

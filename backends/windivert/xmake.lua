@@ -3,7 +3,7 @@ local scriptdir = os.scriptdir()
 
 rule("backend.windivert")
     on_load(function (target)
-        if not target:is_plat("windows") then
+        if not target:is_plat("windows", "mingw") then
             raise("the WinDivert backend is only available on Windows")
         end
         target:add("files", path.join(scriptdir, "*.cc"), path.join(scriptdir, "*.rc"))

@@ -3,7 +3,7 @@
 -- produces programs for it. Run with `xmake test kmod_vm_test` and `xmake test kmod_vm_fuzz`; the sanitizer workflow applies
 -- AddressSanitizer/UndefinedBehaviorSanitizer or ThreadSanitizer to the fuzz target, and
 -- `xmake build kmod_vm_fuzz && build/.../kmod_vm_fuzz 5000000` runs it longer.
-if is_plat("linux") then
+if is_plat("linux") and is_host("linux") then
     local sources = {
         "../../backends/kmod/filter_program.cc",
         "../../backends/linux_shared/filter_lexer.cc",

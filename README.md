@@ -65,6 +65,24 @@ To remove generated build output:
 xmake clean
 ```
 
+### Cross-compiling from Linux (MinGW-w64)
+
+The Windows executable can also be built on Linux (or any host) with [MinGW-w64](https://www.mingw-w64.org/) instead of
+Visual Studio. It is built and tested with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (`xmake require llvm-mingw`
+downloads it); GCC-based MinGW-w64 (`x86_64-w64-mingw32-g++`, Debian/Ubuntu `g++-mingw-w64-x86-64-posix`) uses the same settings:
+
+```sh
+xmake f -p mingw -a x86_64 -m release                 # MinGW found on PATH or in /usr
+xmake f -p mingw -a x86_64 --mingw=/opt/llvm-mingw    # or give the toolchain directory
+xmake build lagsw
+xmake package lagsw            # dist/lagsw-v*-x86_64-release.zip (needs zip or 7z)
+```
+
+The result is a self-contained `build/mingw/x86_64/release/lagsw.exe` (libstdc++ and libgcc are linked statically) with
+the same embedded WinDivert runtime and administrator manifest as the Visual Studio build. The checked-in WinDivert
+files are x64, so only the `x86_64` architecture is functional. The unit tests build for MinGW too (`xmake test` on a
+Windows machine, or under Wine); the `windivert` benchmark and proof-of-concept programs are Visual Studio only.
+
 ### Optional features
 
 Each section of the profiles `features:` block is a compile-time feature. A
@@ -191,6 +209,44 @@ eBPF tier, and cross builds link `libcurl` and `zlib` from the sysroot
 (`-lcurl -lz`) instead of building them from source, which fails with cross
 toolchains. The script reconfigures XMake (`xmake f -c`), so run `xmake f`
 again afterwards to go back to a native build.
+
+#### Cross-compiling from Windows (clang)
+
+A Linux binary (`x86_64` or `arm64`) can be built on Windows, or on any other host, with clang and lld plus a Linux
+sysroot. [`scripts/build/make_sysroot.py`](scripts/build/make_sysroot.py) creates the sysroot from Debian (default,
+bookworm) or Ubuntu packages with only the Python standard library: no root, no WSL, nothing is installed on the host. It
+downloads the C/C++ runtime and headers and the libraries lagsw links against (`libnetfilter_queue`, `libmnl`, `libnftnl`,
+`libnfnetlink`, `libcurl`, `zlib`, `libbpf`) over HTTPS and checks every download against the SHA-256 sums of the release
+file (the release file's GPG signature is not checked). Where symbolic links cannot be created (Windows without Developer
+Mode) their targets are copied instead.
+
+```powershell
+python scripts/build/make_sysroot.py --arch x86_64 --dest build/sysroot/x86_64     # or --arch arm64; --distro ubuntu
+xmake f -p linux -a x86_64 --toolchain=clang --sysroot=build/sysroot/x86_64 -m release
+xmake build lagsw
+xmake package lagsw          # dist/lagsw-v*-x86_64-release.tar.gz
+```
+
+Requirements: clang 16+ with lld and the target (`clang --print-targets` lists `x86-64` / `aarch64`), **found on `PATH`**
+(`clang --version` must work in the shell that runs `xmake f`; `--sdk`/`--bin` are not enough). For example install LLVM
+(`winget install LLVM.LLVM`, then reopen the terminal) or put the `bin` directory of `xmake require llvm-mingw` (whose
+clang also builds Linux targets) on `PATH`. If `xmake f` ends with `toolchain not found!`, the configuration was not
+changed: a following `xmake build` or `xmake package` silently builds for the previous platform (for example Windows), so
+fix `PATH` and rerun `xmake f` first. The eBPF tier is built when that
+clang also has the `bpf` target and the sysroot has `libbpf` (the script includes it), and skipped with a warning
+otherwise; `--linux_bpf=n` leaves it out deliberately. The binary runs on distributions with a glibc at least as new as the
+sysroot's (Debian 12: 2.36), so the default sysroot suits most current distributions. For Debian the kernel headers and
+`libbpf` come from `bookworm-backports` because the eBPF tier needs 6.6+ and 1.3+ (the target then needs a `libbpf1` that new
+as well, or `--linux_bpf=n`). Notes:
+
+- The kernel modules (`xmake build -g kmod`) and their tests need the kernel headers of a running Linux and are only
+  available on Linux hosts; the unit tests cannot run on the build host.
+- Packaging on a Windows host cannot record executable bits in the `.tar.gz`: run `chmod +x lagsw bootstrap.sh` after
+  extracting it.
+- Settings of the sysroot are passed as `--sysroot`, `--target=<triple>` and `-fuse-ld=lld` (and `-stdlib=libstdc++`
+  because LLVM builds for MinGW default to libc++); see [`modules/toolchain.lua`](modules/toolchain.lua).
+- `xmake f` overwrites the project configuration. To keep a native and a cross configuration side by side, give the cross
+  one its own directories: set `XMAKE_CONFIGDIR=<dir>` and pass `-o <build dir>` to `xmake f`.
 
 ### Running
 

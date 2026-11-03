@@ -11,7 +11,7 @@ if has_config("net_monitor") then
         add_includedirs("../../include", "../../src", "..", "../engine")
         add_defines("LAGSW_NET_MONITOR_TESTING")
         add_options("server_discovery", "region_enforcement", "passive_latency", "pcap_files", "desync_countdown", "forwarded_address_discovery", "netfilter_monitor", "net_monitor")
-        if not is_plat("windows") then
+        if not is_os("windows") then
             add_syslinks("pthread")
         end
         add_tests("default")

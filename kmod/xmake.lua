@@ -13,7 +13,7 @@ option("kmod_kdir")
     set_description("Kernel build directory for kernel modules (default: $KDIR, else /lib/modules/<running kernel>/build)")
 option_end()
 
-if is_plat("linux") then
+if is_plat("linux") and is_host("linux") then
     add_moduledirs(path.join(os.scriptdir(), "modules"))
 
     rule("kmod.module")

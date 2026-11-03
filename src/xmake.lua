@@ -22,11 +22,11 @@ target("lagsw")
     add_options("server_discovery", "region_enforcement", "passive_latency", "pcap_files", "desync_countdown", "forwarded_address_discovery", "netfilter_monitor", "net_monitor", "config_tui")
 
     -- Operating-system services (input, timers, HTTPS, ...), one implementation per platform
-    if is_plat("windows") then
+    if is_os("windows") then
         add_files("platform/windows/*.cc")
     else
         add_files("platform/posix/*.cc")
-        if get_config("cross") or get_config("sdk") then
+        if linux_uses_sysroot() then
             -- Cross builds link the libraries of the target sysroot; building them from source fails with cross toolchains
             add_syslinks("curl", "z")
         else
@@ -37,11 +37,13 @@ target("lagsw")
     end
 
     -- Packet capture backend; WinDivert is Windows-only, other platforms use the stub until a real backend exists
-    if is_plat("windows") then
+    if is_os("windows") then
         add_rules("backend.windivert")
 
-        -- Add UAC admin policy
-        set_policy("windows.manifest.uac", "admin")
+        -- Add UAC admin policy (MinGW builds embed the manifest through the resource file instead)
+        if is_plat("windows") then
+            set_policy("windows.manifest.uac", "admin")
+        end
 
         -- For timeBeginPeriod
         add_links("winmm")
@@ -69,26 +71,37 @@ target("lagsw")
 
         local name = format("%s-v%s-%s-%s", target:name(), target:version(), target:arch(), get_config("mode"))
         local outdir = path.absolute(option.get("outputdir") or "dist")
+        -- scripts/package/<os>: "windows" also for MinGW builds
+        local targetos = target:plat() == "mingw" and "windows" or target:plat()
         local pkgdir = path.join(outdir, name)
         os.tryrm(pkgdir)
         os.mkdir(pkgdir)
 
         os.cp(target:targetfile(), pkgdir)
         -- only scripts under scripts/package/<plat> are shipped (build and test scripts never are)
-        for _, file in ipairs(os.files(path.join(os.projectdir(), "scripts", "package", target:plat(), "*"))) do
+        for _, file in ipairs(os.files(path.join(os.projectdir(), "scripts", "package", targetos, "*"))) do
             os.cp(file, pkgdir)
         end
         os.cp(path.join(os.projectdir(), "profiles"), pkgdir)
 
-        if is_plat("windows") then
+        if targetos == "windows" then
             local zip = path.join(outdir, name .. ".zip")
             os.tryrm(zip)
-            -- bsdtar ships with Windows 10+
-            os.vrunv("tar", {"-a", "-c", "-f", zip, "-C", pkgdir, "."})
+            if os.host() == "windows" then
+                -- bsdtar ships with Windows 10+
+                os.vrunv("tar", {"-a", "-c", "-f", zip, "-C", pkgdir, "."})
+            else
+                -- MinGW cross build on a Unix host: needs zip or 7z
+                import("utils.archive").archive(zip, {"."}, {curdir = pkgdir, recurse = true})
+            end
             cprint("${green}packaged: %s", zip)
         else
             -- tar preserves the executable bits of the binary and bootstrap.sh
-            os.runv("chmod", {"+x", path.join(pkgdir, target:basename())})
+            if os.host() == "windows" then
+                cprint("${yellow}warning: packaging a Linux target on Windows cannot set executable bits; run `chmod +x lagsw bootstrap.sh` after extracting")
+            else
+                os.runv("chmod", {"+x", path.join(pkgdir, target:basename())})
+            end
             local archive = path.join(outdir, name .. ".tar.gz")
             os.tryrm(archive)
             os.vrunv("tar", {"-czf", archive, "-C", pkgdir, "."})

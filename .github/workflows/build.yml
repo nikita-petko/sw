@@ -73,3 +73,58 @@ jobs:
           name: lagsw-linux-arm64
           path: dist/*.tar.gz
           if-no-files-found: error
+
+  windows-from-linux:
+    name: windows / x86_64 cross-build on Linux (MinGW)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+
+      - name: Install llvm-mingw
+        run: |
+          curl -fsSL -o llvm-mingw.tar.xz https://github.com/mstorsjo/llvm-mingw/releases/download/20240417/llvm-mingw-20240417-ucrt-ubuntu-20.04-x86_64.tar.xz
+          mkdir -p "$RUNNER_TEMP/llvm-mingw"
+          tar -xJf llvm-mingw.tar.xz -C "$RUNNER_TEMP/llvm-mingw" --strip-components=1
+
+      - name: Build and package
+        run: |
+          xmake f -p mingw -a x86_64 -m release --mingw="$RUNNER_TEMP/llvm-mingw" -y
+          xmake build -v lagsw
+          xmake package -o dist lagsw
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lagsw-windows-mingw
+          path: dist/*.zip
+          if-no-files-found: error
+
+  linux-from-windows:
+    name: linux / x86_64 cross-build on Windows (clang)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+
+      - name: Create the sysroot (scripts/build/make_sysroot.py)
+        run: python scripts/build/make_sysroot.py --arch x86_64 --dest build/sysroot/x86_64
+
+      - name: Build and package
+        run: |
+          xmake f -p linux -a x86_64 --toolchain=clang --sysroot=build/sysroot/x86_64 -m release -y
+          xmake build -v lagsw
+          xmake package -o dist lagsw
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lagsw-linux-x86_64-from-windows
+          path: dist/*.tar.gz
+          if-no-files-found: error

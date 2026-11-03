@@ -8,11 +8,15 @@
 #include <winsock2.h>
 #include <ws2ipdef.h>
 // The SDK's NDIS headers behind netioapi.h trip the strict warning level.
-#pragma warning(push)
-#pragma warning(disable : 4668)
+#ifdef _MSC_VER
+#	pragma warning(push)
+#	pragma warning(disable : 4668)
+#endif
 #include <iphlpapi.h>
 #include <netioapi.h>
-#pragma warning(pop)
+#ifdef _MSC_VER
+#	pragma warning(pop)
+#endif
 #include <io.h>
 #include <objbase.h>
 #include <timeapi.h>
