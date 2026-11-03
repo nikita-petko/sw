@@ -62,6 +62,7 @@ static void swdiv_stop(struct swdiv_handle *handle)
 	if (handle->hold_mode)
 		swdiv_hold_flush(handle);
 	swdiv_hook_stop(handle);
+	swdiv_priority_release(handle);
 	if (handle->hold_mode)
 		swdiv_hold_reopen(handle);
 	handle->started = false;
@@ -91,7 +92,7 @@ static int swdiv_do_open(struct swdiv_handle *handle, void __user *argp)
 
 	if (copy_from_user(&args, argp, sizeof(args)))
 		return -EFAULT;
-	if ((args.flags & ~SWDIV_OPEN_HOLD) || args.reserved || args.reserved2)
+	if ((args.flags & ~SWDIV_OPEN_HOLD) || args.reserved2 || args.priority < -30000 || args.priority > 30000)
 		return -EINVAL;
 	if (args.slots < SWDIV_MIN_SLOTS || args.slots > SWDIV_MAX_SLOTS || !is_power_of_2(args.slots))
 		return -EINVAL;
@@ -106,6 +107,7 @@ static int swdiv_do_open(struct swdiv_handle *handle, void __user *argp)
 	if (ret)
 		return ret;
 	handle->hold_mode = args.flags & SWDIV_OPEN_HOLD;
+	handle->priority = args.priority;
 	/* Pairs with the acquire in swdiv_poll(), which does not take the lock */
 	smp_store_release(&handle->ring_ready, true);
 
@@ -149,14 +151,22 @@ static long swdiv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			ret = -EINVAL;
 		else if (handle->started)
 			ret = -EBUSY;
-		else if (!(ret = swdiv_hook_start(handle)))
-			handle->started = true;
+		else if (!(ret = swdiv_priority_claim(handle))) {
+			ret = swdiv_hook_start(handle);
+			if (ret)
+				swdiv_priority_release(handle);
+			else
+				handle->started = true;
+		}
 		break;
 	case SWDIVERT_IOC_STOP:
 		swdiv_stop(handle);
 		break;
 	case SWDIVERT_IOC_VERDICT:
 		ret = swdiv_hold_verdicts(handle, argp);
+		break;
+	case SWDIVERT_IOC_INJECT:
+		ret = swdiv_inject(handle, argp);
 		break;
 	case SWDIVERT_IOC_STATS: {
 		struct swdiv_stats stats = {};
@@ -180,6 +190,11 @@ static long swdiv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			stats.resume_lost += cs->resume_lost;
 			stats.pass_unsupported += cs->pass_unsupported;
 			stats.pass_limit += cs->pass_limit;
+			stats.modified += cs->modified;
+			stats.mod_dropped += cs->mod_dropped;
+			stats.ct_detached += cs->ct_detached;
+			stats.injected += cs->injected;
+			stats.inject_failed += cs->inject_failed;
 		}
 		stats.held_now = atomic_read(&handle->held_count);
 		if (copy_to_user(argp, &stats, sizeof(stats)))

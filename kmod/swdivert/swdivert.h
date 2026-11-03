@@ -35,6 +35,11 @@ struct swdiv_cpu_stats {
 	u64 resume_lost;
 	u64 pass_unsupported;
 	u64 pass_limit;
+	u64 modified;
+	u64 mod_dropped;
+	u64 ct_detached;
+	u64 injected;
+	u64 inject_failed;
 };
 
 /*
@@ -77,6 +82,8 @@ struct swdiv_handle {
 	bool			ring_ready;
 	bool			started;
 	bool			hold_mode;
+	s32			priority;	/* as given by the user: higher is served first */
+	bool			claimed;	/* holds its priority among the started handles of the namespace (swdiv_handles_lock) */
 	struct swdiv_tuple	tuple;
 	struct nf_hook_ops	ops;
 	wait_queue_head_t	wq;
@@ -95,6 +102,12 @@ struct swdiv_handle {
 
 extern unsigned int swdiv_hold_ms;
 extern unsigned int swdiv_max_held;
+
+/*
+ * The handle that is injecting a packet on this CPU, while it does (BH disabled around the call). Hooks of that handle and of
+ * handles served before it skip the packet; see SWDIVERT_IOC_INJECT.
+ */
+DECLARE_PER_CPU(const struct swdiv_handle *, swdiv_injector);
 
 int  swdiv_ring_alloc(struct swdiv_ring *ring, u32 slots, u32 slot_bytes);
 void swdiv_ring_free(struct swdiv_ring *ring);
@@ -130,5 +143,15 @@ void swdiv_hold_reopen(struct swdiv_handle *handle);
 /* Hook registration: lets the network device notifier find the handles of a namespace */
 void swdiv_hold_destroy(struct swdiv_handle *handle);
 int  swdiv_hold_verdicts(struct swdiv_handle *handle, void __user *argp);
+/* A priority is used by one started handle per namespace: claim it before the hook is registered, release it after it is gone. */
+int  swdiv_priority_claim(struct swdiv_handle *handle);
+void swdiv_priority_release(struct swdiv_handle *handle);
+
+/* inject.c */
+int  swdiv_inject(struct swdiv_handle *handle, void __user *argp);
+/* Checks the bytes of a whole IPv4 packet; returns the length to use (the IP total length) or a negative errno. */
+int  swdiv_packet_check(const u8 *data, u32 len);
+/* Recomputes the checksums asked for in SWDIV_CALC_* on a linear skb that starts at the IP header. */
+void swdiv_packet_checksums(struct sk_buff *skb, u32 flags);
 
 #endif

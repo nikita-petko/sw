@@ -4,7 +4,10 @@
 //   swbench flood  --dst IP --port P --pps N --seconds S --size B
 //   swbench sink   --port P
 //   swbench sniff  --mode swdiv|afpacket|nfq --port P [--iface IF] [--snap B] [--slots N]
-//   swbench sniff  --mode swdiv-hold|nfq-hold --port P [--proto udp|tcp] [--delay-ms D] [--drop-every K] [--batch yes]
+//   swbench sniff  --mode swdiv-hold|nfq-hold --port P [--proto udp|tcp] [--delay-ms D] [--drop-every K] [--batch yes] [--modify payload]
+//   swbench sniff  --mode swdiv-hold ... [--prio N] [--snap B] [--modify payload|grow|shrink|dport|dst|bad] [--to-port P] [--to-ip IP]
+//                                        [--twin yes --inject-if IF]   modify every held packet / inject a copy of it before resuming
+//   swbench pktcheck --port P --iface IF   verifies IP and UDP checksums of the packets arriving on IF (AF_PACKET)
 //   swbench tcpsink --port P            one connection: prints bytes, an FNV-1a hash and the peer address
 //   swbench tcpsend --dst IP --port P --bytes N [--seed S]
 // sink and sniff run until SIGINT/SIGTERM and then print their result. The -hold modes give every packet a verdict D ms after it
@@ -180,6 +183,7 @@ int run_sink(const Args& args)
 {
 	const long port	  = args.num("--port");
 	const bool verify = args.get("--verify", "no") != "no";
+	const char fill	  = args.get("--fill", "x")[0];
 	const int  fd	  = socket(AF_INET, SOCK_DGRAM, 0);
 	if (fd < 0)
 		die("socket");
@@ -199,6 +203,7 @@ int run_sink(const Args& args)
 	iovec			   iov[kBatch];
 	uint64_t		   received = 0, corrupt = 0, dups = 0, reordered = 0;
 	uint64_t			   max_seq[8] = {};
+	unsigned			   len_min = 0xFFFFFFFFu, len_max = 0;
 	std::vector<uint32_t> latency_us;
 	std::vector<uint8_t>  seen[8]; // per flood stream (the high bits of the sequence number)
 	latency_us.reserve(1 << 20);
@@ -220,6 +225,8 @@ int run_sink(const Args& args)
 		{
 			++received;
 			const unsigned len = msgs[i].msg_len;
+			len_min			   = std::min(len_min, len);
+			len_max			   = std::max(len_max, len);
 			if (len < 16)
 			{
 				++corrupt;
@@ -231,7 +238,7 @@ int run_sink(const Args& args)
 			latency_us.push_back(static_cast<uint32_t>(std::min<uint64_t>((now - stamp) / 1000, 0xFFFFFFFFull)));
 			if (verify)
 				for (unsigned b = 16; b < len; ++b)
-					if (buffers[i][b] != 'x')
+					if (buffers[i][b] != fill)
 					{
 						++corrupt;
 						break;
@@ -252,7 +259,7 @@ int run_sink(const Args& args)
 	}
 	std::sort(latency_us.begin(), latency_us.end());
 	auto pct = [&](double p) { return latency_us.empty() ? 0u : latency_us[static_cast<size_t>(p * static_cast<double>(latency_us.size() - 1))]; };
-	std::printf("received=%llu cpu_ms=%.1f lat_p50_us=%u lat_p99_us=%u lat_max_us=%u corrupt=%llu dups=%llu reordered=%llu\n",
+	std::printf("received=%llu cpu_ms=%.1f lat_p50_us=%u lat_p99_us=%u lat_max_us=%u corrupt=%llu dups=%llu reordered=%llu len_min=%u len_max=%u\n",
 				static_cast<unsigned long long>(received),
 				cpu_ms_self(),
 				pct(0.50),
@@ -260,7 +267,274 @@ int run_sink(const Args& args)
 				latency_us.empty() ? 0u : latency_us.back(),
 				static_cast<unsigned long long>(corrupt),
 				static_cast<unsigned long long>(dups),
-				static_cast<unsigned long long>(reordered));
+				static_cast<unsigned long long>(reordered),
+				received ? len_min : 0u,
+				len_max);
+	return 0;
+}
+
+// ---- fuzzing of the packet-writing ioctls ----
+// INJECT and RESUME_MOD take bytes from user space and put them on the wire. This throws well-formed, nearly well-formed and
+// plain garbage packets, odd flags, lengths and pointers at them. The module must answer with an error or deliver the packet, and
+// neither crash nor hang; the caller then checks that traffic still flows and the kernel log is clean.
+
+int run_fuzz(const Args& args)
+{
+	const long		   iterations = args.num("--iterations", "20000");
+	uint64_t		   rng		  = static_cast<uint64_t>(args.num("--seed", "12345")) * 2862933555777941757ull + 3037000493ull;
+	const unsigned	   ifindex	  = if_nametoindex(args.get("--inject-if", "vc").c_str());
+	auto next = [&]() {
+		rng ^= rng << 13;
+		rng ^= rng >> 7;
+		rng ^= rng << 17;
+		return rng;
+	};
+
+	const int fd = open("/dev/" SWDIVERT_DEVICE_NAME, O_RDWR | O_CLOEXEC);
+	if (fd < 0)
+		die("open /dev/" SWDIVERT_DEVICE_NAME);
+	swdiv_open_args open_args = {};
+	open_args.slots			  = 256;
+	open_args.slot_bytes	  = 2048 + SWDIVERT_SLOT_HDR_BYTES;
+	open_args.flags			  = SWDIV_OPEN_HOLD;
+	if (ioctl(fd, SWDIVERT_IOC_OPEN, &open_args) < 0)
+		die("SWDIVERT_IOC_OPEN");
+	swdiv_tuple tuple = {};
+	tuple.proto		  = IPPROTO_UDP;
+	tuple.dport		  = htons(9000);
+	ioctl(fd, SWDIVERT_IOC_SET_FILTER, &tuple);
+	if (ioctl(fd, SWDIVERT_IOC_START) < 0)
+		die("SWDIVERT_IOC_START");
+
+	auto packet = [&]() {
+		std::vector<unsigned char> p(static_cast<size_t>(next() % 2200));
+		for (auto& byte : p)
+			byte = static_cast<unsigned char>(next());
+		if (p.size() >= 28 && next() % 10 < 7)
+		{
+			// A plausible IPv4 packet with a few fields that are wrong
+			const size_t ihl = 5 + next() % 11;
+			p[0]			 = static_cast<unsigned char>(0x40 | (next() % 8 == 0 ? next() % 16 : ihl));
+			const size_t tot = next() % 6 == 0 ? next() % 4000 : p.size();
+			p[2]			 = static_cast<unsigned char>(tot >> 8);
+			p[3]			 = static_cast<unsigned char>(tot);
+			static const unsigned char protos[] = {1, 6, 17, 17, 6, 47, 132};
+			p[9]			 = next() % 8 == 0 ? static_cast<unsigned char>(next()) : protos[next() % 7];
+			if (next() % 4 != 0)
+				p[6] = p[7] = 0; // mostly not a fragment
+			const unsigned char src[] = {10, 10, 1, 2}, dst[] = {10, 10, 2, 2};
+			std::memcpy(&p[12], src, 4);
+			if (next() % 3 != 0)
+				std::memcpy(&p[16], dst, 4);
+		}
+		return p;
+	};
+	auto make_verdict = [](uint64_t id, uint32_t kind) {
+		swdiv_verdict v = {};
+		v.id			= id;
+		v.verdict		= kind;
+		return v;
+	};
+	const uint32_t flag_choices[] = {0, SWDIV_CALC_IP, SWDIV_CALC_L4, SWDIV_CALC_IP | SWDIV_CALC_L4, 0x8, 0xFFFFFFFFu};
+	uint64_t	   ok = 0, einval = 0, enoent = 0, other = 0, efault = 0;
+	auto count = [&](int result) {
+		if (result == 0)
+			++ok;
+		else if (errno == EINVAL)
+			++einval;
+		else if (errno == ENOENT)
+			++enoent;
+		else if (errno == EFAULT)
+			++efault;
+		else
+			++other;
+	};
+
+	for (long i = 0; i < iterations; ++i)
+	{
+		std::vector<unsigned char> p = packet();
+		switch (next() % 6)
+		{
+		case 0:
+		case 1:
+		{
+			swdiv_inject_args inject = {};
+			inject.data				 = static_cast<__u64>(reinterpret_cast<uintptr_t>(p.data()));
+			inject.len				 = static_cast<__u32>(p.size());
+			inject.flags			 = flag_choices[next() % 6];
+			inject.ifindex			 = ifindex;
+			count(ioctl(fd, SWDIVERT_IOC_INJECT, &inject));
+			break;
+		}
+		case 2:
+		{
+			swdiv_inject_args inject = {}; // odd arguments: a null or wild pointer, an absurd length, an interface that does not exist
+			inject.data				 = next() % 2 ? 0 : static_cast<__u64>(next());
+			inject.len				 = next() % 2 ? static_cast<__u32>(next()) : static_cast<__u32>(p.size());
+			inject.flags			 = flag_choices[next() % 6];
+			inject.ifindex			 = next() % 2 ? ifindex : static_cast<unsigned>(next() % 100000);
+			inject.reserved			 = next() % 8 == 0;
+			count(ioctl(fd, SWDIVERT_IOC_INJECT, &inject));
+			break;
+		}
+		case 3:
+		case 4:
+		{
+			swdiv_verdict verdict = make_verdict(next() % 64, SWDIV_V_RESUME_MOD);
+			verdict.data		  = static_cast<__u64>(reinterpret_cast<uintptr_t>(p.data()));
+			verdict.len			  = static_cast<__u32>(p.size());
+			verdict.flags		  = flag_choices[next() % 6];
+			swdiv_verdict_args args = {};
+			args.items				= static_cast<__u64>(reinterpret_cast<uintptr_t>(&verdict));
+			args.count				= 1;
+			const int result		= ioctl(fd, SWDIVERT_IOC_VERDICT, &args);
+			if (result == 0 && verdict.status != 0)
+			{
+				errno = static_cast<int>(verdict.status);
+				count(-1);
+			}
+			else
+			{
+				count(result);
+			}
+			break;
+		}
+		default:
+		{
+			swdiv_verdict verdict = make_verdict(next(), static_cast<uint32_t>(next() % 6));
+			verdict.data		  = next() % 2 ? 0 : static_cast<__u64>(next());
+			verdict.len			  = static_cast<__u32>(next());
+			verdict.flags		  = static_cast<__u32>(next());
+			swdiv_verdict_args args = {};
+			args.items				= next() % 8 ? static_cast<__u64>(reinterpret_cast<uintptr_t>(&verdict)) : static_cast<__u64>(next());
+			args.count				= next() % 8 ? 1 : static_cast<__u32>(next());
+			args.reserved			= next() % 16 == 0;
+			count(ioctl(fd, SWDIVERT_IOC_VERDICT, &args));
+			break;
+		}
+		}
+	}
+	ioctl(fd, SWDIVERT_IOC_STOP);
+	swdiv_stats stats = {};
+	ioctl(fd, SWDIVERT_IOC_STATS, &stats);
+	std::printf("fuzz_iterations=%ld fuzz_ok=%llu fuzz_einval=%llu fuzz_enoent=%llu fuzz_efault=%llu fuzz_other=%llu injected=%llu inject_failed=%llu\n",
+				iterations, static_cast<unsigned long long>(ok), static_cast<unsigned long long>(einval), static_cast<unsigned long long>(enoent),
+				static_cast<unsigned long long>(efault), static_cast<unsigned long long>(other), static_cast<unsigned long long>(stats.injected),
+				static_cast<unsigned long long>(stats.inject_failed));
+	return 0;
+}
+
+// ---- packet-level checksum verification on the receiving side ----
+// A UDP socket cannot tell: veth may mark a received packet as already verified. This looks at the packets as they arrive (AF_PACKET,
+// IP level) and checks the IP header checksum and the UDP checksum itself. Packets the stack marks as "checksum not ready yet"
+// (offloaded, still the pseudo-header sum) cannot be judged and are counted apart.
+
+uint32_t sum16(const unsigned char* data, size_t size, uint32_t sum)
+{
+	for (size_t i = 0; i + 1 < size; i += 2)
+		sum += (static_cast<uint32_t>(data[i]) << 8) | data[i + 1];
+	if (size & 1)
+		sum += static_cast<uint32_t>(data[size - 1]) << 8;
+	return sum;
+}
+
+uint16_t fold(uint32_t sum)
+{
+	while (sum >> 16)
+		sum = (sum & 0xFFFF) + (sum >> 16);
+	return static_cast<uint16_t>(sum);
+}
+
+int run_pktcheck(const Args& args)
+{
+	const long		  port	= args.num("--port");
+	const std::string iface = args.get("--iface");
+	const int		  fd	= socket(AF_PACKET, SOCK_DGRAM, htons(ETH_P_IP));
+	if (fd < 0)
+		die("socket AF_PACKET");
+	int on = 1;
+	setsockopt(fd, SOL_PACKET, PACKET_AUXDATA, &on, sizeof(on));
+	int rcvbuf = 16 << 20;
+	setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
+	sockaddr_ll bind_addr  = {};
+	bind_addr.sll_family   = AF_PACKET;
+	bind_addr.sll_protocol = htons(ETH_P_IP);
+	bind_addr.sll_ifindex  = static_cast<int>(if_nametoindex(iface.c_str()));
+	if (bind_addr.sll_ifindex == 0 || bind(fd, reinterpret_cast<sockaddr*>(&bind_addr), sizeof(bind_addr)) < 0)
+		die("bind AF_PACKET");
+	install_signals();
+	announce_ready();
+
+	uint64_t good = 0, bad_ip = 0, bad_l4 = 0, partial = 0, no_l4_sum = 0, total = 0;
+	unsigned char buffer[65536];
+	while (!g_stop)
+	{
+		pollfd pfd = {fd, POLLIN, 0};
+		if (poll(&pfd, 1, 100) <= 0)
+			continue;
+		for (;;)
+		{
+			char		 control[256];
+			iovec		 iov  = {buffer, sizeof(buffer)};
+			msghdr		 msg  = {};
+			sockaddr_ll	 from = {};
+			msg.msg_name	  = &from;
+			msg.msg_namelen	  = sizeof(from);
+			msg.msg_iov		  = &iov;
+			msg.msg_iovlen	  = 1;
+			msg.msg_control	  = control;
+			msg.msg_controllen = sizeof(control);
+			const ssize_t count = recvmsg(fd, &msg, MSG_DONTWAIT);
+			if (count <= 0)
+				break;
+			if (from.sll_pkttype == PACKET_OUTGOING || count < 28)
+				continue;
+			const size_t ihl = static_cast<size_t>(buffer[0] & 0x0F) * 4;
+			if ((buffer[0] >> 4) != 4 || buffer[9] != 17 || ihl + 8 > static_cast<size_t>(count))
+				continue;
+			const unsigned dport = (static_cast<unsigned>(buffer[ihl + 2]) << 8) | buffer[ihl + 3];
+			if (dport != static_cast<unsigned>(port))
+				continue;
+			++total;
+			bool csum_not_ready = false;
+			for (cmsghdr* c = CMSG_FIRSTHDR(&msg); c; c = CMSG_NXTHDR(&msg, c))
+				if (c->cmsg_level == SOL_PACKET && c->cmsg_type == PACKET_AUXDATA)
+					csum_not_ready = (reinterpret_cast<tpacket_auxdata*>(CMSG_DATA(c))->tp_status & TP_STATUS_CSUMNOTREADY) != 0;
+			if (csum_not_ready)
+			{
+				++partial;
+				continue;
+			}
+			const size_t   tot	 = (static_cast<size_t>(buffer[2]) << 8) | buffer[3];
+			const size_t   ulen	 = tot - ihl;
+			bool		   ok	 = true;
+			if (fold(sum16(buffer, ihl, 0)) != 0xFFFF)
+			{
+				++bad_ip;
+				ok = false;
+			}
+			const unsigned udp_sum = (static_cast<unsigned>(buffer[ihl + 6]) << 8) | buffer[ihl + 7];
+			if (udp_sum == 0)
+			{
+				++no_l4_sum;
+			}
+			else
+			{
+				uint32_t sum = sum16(buffer + 12, 8, 0) + 17 + static_cast<uint32_t>(ulen);
+				sum			 = sum16(buffer + ihl, ulen, sum);
+				if (fold(sum) != 0xFFFF)
+				{
+					++bad_l4;
+					ok = false;
+				}
+			}
+			if (ok)
+				++good;
+		}
+	}
+	std::printf("pk_total=%llu pk_good=%llu pk_bad_ip=%llu pk_bad_l4=%llu pk_partial=%llu pk_no_l4_sum=%llu\n", static_cast<unsigned long long>(total),
+				static_cast<unsigned long long>(good), static_cast<unsigned long long>(bad_ip), static_cast<unsigned long long>(bad_l4),
+				static_cast<unsigned long long>(partial), static_cast<unsigned long long>(no_l4_sum));
 	return 0;
 }
 
@@ -377,13 +651,145 @@ void print_result(const SniffResult& result, double cpu_ms)
 				static_cast<unsigned long long>(result.wakeups));
 }
 
+swdiv_verdict make_verdict(uint64_t id, uint32_t verdict)
+{
+	swdiv_verdict v = {};
+	v.id			= id;
+	v.verdict		= verdict;
+	return v;
+}
+
+// What the hold modes do to a packet before they resume it
+struct ModifyPlan
+{
+	std::string mode; // empty: resume unchanged
+	uint16_t	to_port = 9001;
+	uint32_t	to_ip	= 0; // network order
+};
+
+void put16(std::vector<unsigned char>& p, size_t offset, uint16_t value)
+{
+	p[offset]	  = static_cast<unsigned char>(value >> 8);
+	p[offset + 1] = static_cast<unsigned char>(value & 0xFF);
+}
+
+// The new bytes of a UDP packet for the plan (empty: leave it alone, e.g. when the ring only has a truncated copy) and the
+// checksum work the kernel has to do for it.
+std::vector<unsigned char> build_modified(const unsigned char* pkt, uint32_t len, const ModifyPlan& plan, uint32_t& flags)
+{
+	std::vector<unsigned char> out;
+	if (plan.mode.empty() || len < 28)
+		return out;
+	const size_t ihl	= static_cast<size_t>(pkt[0] & 0x0F) * 4;
+	const size_t total	= (static_cast<size_t>(pkt[2]) << 8) | pkt[3];
+	if (plan.mode == "tcp-flip")
+	{
+		// Flips the last byte of every TCP segment that carries data. The receiver only accepts the segment if the checksum the
+		// module computed is right, so a transfer that completes proves the TCP checksum code.
+		if (pkt[9] != 6 || total > len || ihl + 20 > total)
+			return out;
+		const size_t header = ihl + static_cast<size_t>(pkt[ihl + 12] >> 4) * 4;
+		if (header >= total)
+			return out;
+		out.assign(pkt, pkt + total);
+		out[total - 1] ^= 0xFF;
+		flags = SWDIV_CALC_L4;
+		return out;
+	}
+	if (pkt[9] != 17 || ihl + 8 > len || total > len)
+		return out;
+	out.assign(pkt, pkt + total);
+	if (plan.mode == "payload")
+	{
+		// 'x' -> 'y' behind the 16 bytes of timestamp and sequence number
+		for (size_t i = ihl + 8 + 16; i < out.size(); ++i)
+			if (out[i] == 'x')
+				out[i] = 'y';
+		flags = SWDIV_CALC_L4;
+	}
+	else if (plan.mode == "grow")
+	{
+		out.insert(out.end(), 100, 'z');
+		put16(out, 2, static_cast<uint16_t>(out.size()));
+		put16(out, ihl + 4, static_cast<uint16_t>(out.size() - ihl));
+		flags = SWDIV_CALC_IP | SWDIV_CALC_L4;
+	}
+	else if (plan.mode == "shrink")
+	{
+		if (out.size() > ihl + 8 + 64)
+			out.resize(ihl + 8 + 64);
+		put16(out, 2, static_cast<uint16_t>(out.size()));
+		put16(out, ihl + 4, static_cast<uint16_t>(out.size() - ihl));
+		flags = SWDIV_CALC_IP | SWDIV_CALC_L4;
+	}
+	else if (plan.mode == "dport")
+	{
+		put16(out, ihl + 2, plan.to_port);
+		flags = SWDIV_CALC_L4;
+	}
+	else if (plan.mode == "dst")
+	{
+		std::memcpy(&out[16], &plan.to_ip, 4);
+		flags = SWDIV_CALC_IP | SWDIV_CALC_L4;
+	}
+	else if (plan.mode == "bad")
+	{
+		out[0] = 0x55; // IP version 5: the module must refuse it and keep the packet held
+		flags  = 0;
+	}
+	return out;
+}
+
+// A copy of a packet of flood stream 0-4 as stream 5-9... (stream + 5, so that it is told apart and no copy of a copy is made), to be injected
+std::vector<unsigned char> build_twin(const unsigned char* pkt, uint32_t len)
+{
+	std::vector<unsigned char> out;
+	if (len < 28)
+		return out;
+	const size_t ihl   = static_cast<size_t>(pkt[0] & 0x0F) * 4;
+	const size_t total = (static_cast<size_t>(pkt[2]) << 8) | pkt[3];
+	if (pkt[9] != 17 || total > len || total < ihl + 8 + 16)
+		return out;
+	uint32_t stream = 0;
+	std::memcpy(&stream, pkt + ihl + 8 + 12, sizeof(stream));
+	if (stream >= 5)
+		return out;
+	out.assign(pkt, pkt + total);
+	const uint32_t twin = stream + 5; // a stream of its own per original stream, so twins of different floods never collide
+	std::memcpy(&out[ihl + 8 + 12], &twin, sizeof(twin));
+	return out;
+}
+
+// A verdict batch item waiting for its due time, with the bytes of a RESUME_MOD if there are any
+struct Pending
+{
+	uint64_t				   id;
+	uint64_t				   due;
+	std::vector<unsigned char> bytes;
+	uint32_t				   flags;
+};
+
 // Verdicts of the hold modes, sent in batches (one ioctl per drain of the ring)
 struct HoldState
 {
 	int								 fd = -1;
-	std::deque<std::pair<uint64_t, uint64_t>> pending; // (id, due time in ns), in due order because the delay is constant
+	std::deque<Pending>				 pending;	  // in due order because the delay is constant
 	std::vector<swdiv_verdict>		 batch;
-	uint64_t						 seen = 0, resumed = 0, dropped = 0, enoent = 0, errors = 0;
+	std::deque<std::vector<unsigned char>> batch_data; // the bytes the RESUME_MOD items of `batch` point to
+	uint64_t						 seen = 0, resumed = 0, dropped = 0, enoent = 0, errors = 0, injected = 0, inject_errors = 0;
+
+	void add_resume(uint64_t id, std::vector<unsigned char>&& bytes, uint32_t flags)
+	{
+		swdiv_verdict v = make_verdict(id, bytes.empty() ? SWDIV_V_RESUME : SWDIV_V_RESUME_MOD);
+		if (!bytes.empty())
+		{
+			batch_data.push_back(std::move(bytes));
+			v.data	= static_cast<__u64>(reinterpret_cast<uintptr_t>(batch_data.back().data()));
+			v.len	= static_cast<__u32>(batch_data.back().size());
+			v.flags = flags;
+		}
+		batch.push_back(v);
+	}
 };
 
 void flush_verdicts(HoldState& hold)
@@ -406,6 +812,8 @@ void flush_verdicts(HoldState& hold)
 				const swdiv_verdict& verdict = hold.batch[offset + i];
 				if (verdict.status == 0)
 					(verdict.verdict == SWDIV_V_DROP ? hold.dropped : hold.resumed)++;
+				else if (verdict.status == EINVAL)
+					++hold.errors;
 				else if (verdict.status == ENOENT)
 					++hold.enoent;
 				else
@@ -415,6 +823,7 @@ void flush_verdicts(HoldState& hold)
 		offset += count;
 	}
 	hold.batch.clear();
+	hold.batch_data.clear();
 }
 
 // The ring: poll() to sleep, then drain everything that is published. With `hold` the packets are stolen and every one gets a verdict.
@@ -422,6 +831,13 @@ int sniff_swdiv(const Args& args, bool hold_mode)
 {
 	const long delay_ms	  = args.num("--delay-ms", "0");
 	const long drop_every = args.num("--drop-every", "0");
+	ModifyPlan plan;
+	plan.mode = args.get("--modify", "");
+	plan.to_port = static_cast<uint16_t>(args.num("--to-port", "9001"));
+	if (!args.get("--to-ip", "").empty())
+		inet_pton(AF_INET, args.get("--to-ip").c_str(), &plan.to_ip);
+	const bool		  twin		= args.get("--twin", "no") != "no";
+	const unsigned	  inject_if = if_nametoindex(args.get("--inject-if", "vc").c_str());
 	const long port	 = args.num("--port");
 	const long snap	 = args.num("--snap", "224");
 	const long slots = args.num("--slots", "16384");
@@ -439,6 +855,7 @@ int sniff_swdiv(const Args& args, bool hold_mode)
 	open_args.slots			  = static_cast<__u32>(slots);
 	open_args.slot_bytes	  = static_cast<__u32>(snap + SWDIVERT_SLOT_HDR_BYTES);
 	open_args.flags			  = hold_mode ? SWDIV_OPEN_HOLD : 0;
+	open_args.priority		  = static_cast<__s32>(args.num("--prio", "0"));
 	if (ioctl(fd, SWDIVERT_IOC_OPEN, &open_args) < 0)
 		die("SWDIVERT_IOC_OPEN");
 	void* data = mmap(nullptr, open_args.data_bytes, PROT_READ, MAP_SHARED, fd, 0);
@@ -483,12 +900,29 @@ int sniff_swdiv(const Args& args, bool hold_mode)
 				if (!hold_mode || !(slot->flags & SWDIV_SLOT_F_HELD))
 					continue;
 				++hold.seen;
+				if (twin && slot->caplen == slot->len)
+				{
+					std::vector<unsigned char> copy = build_twin(swdiv_slot_data(slot), slot->len);
+					if (!copy.empty())
+					{
+						swdiv_inject_args inject = {};
+						inject.data				 = static_cast<__u64>(reinterpret_cast<uintptr_t>(copy.data()));
+						inject.len				 = static_cast<__u32>(copy.size());
+						inject.flags			 = SWDIV_CALC_IP | SWDIV_CALC_L4;
+						inject.ifindex			 = inject_if;
+						(ioctl(fd, SWDIVERT_IOC_INJECT, &inject) == 0 ? hold.injected : hold.inject_errors)++;
+					}
+				}
+				uint32_t				   flags = 0;
+				std::vector<unsigned char> bytes;
+				if (slot->caplen == slot->len)
+					bytes = build_modified(swdiv_slot_data(slot), slot->len, plan, flags);
 				if (drop_every > 0 && hold.seen % static_cast<uint64_t>(drop_every) == 0)
-					hold.batch.push_back({slot->id, SWDIV_V_DROP, 0});
+					hold.batch.push_back(make_verdict(slot->id, SWDIV_V_DROP));
 				else if (delay_ms == 0)
-					hold.batch.push_back({slot->id, SWDIV_V_RESUME, 0});
+					hold.add_resume(slot->id, std::move(bytes), flags);
 				else if (delay_ms > 0)
-					hold.pending.emplace_back(slot->id, now + static_cast<uint64_t>(delay_ms) * 1000000ull);
+					hold.pending.push_back({slot->id, now + static_cast<uint64_t>(delay_ms) * 1000000ull, std::move(bytes), flags});
 				// delay_ms < 0: no verdict, ever
 			}
 			(void)sink;
@@ -499,14 +933,15 @@ int sniff_swdiv(const Args& args, bool hold_mode)
 		if (hold_mode)
 		{
 			const uint64_t now = now_ns();
-			while (!hold.pending.empty() && hold.pending.front().second <= now)
+			while (!hold.pending.empty() && hold.pending.front().due <= now)
 			{
-				hold.batch.push_back({hold.pending.front().first, SWDIV_V_RESUME, 0});
+				Pending& due = hold.pending.front();
+				hold.add_resume(due.id, std::move(due.bytes), due.flags);
 				hold.pending.pop_front();
 			}
 			flush_verdicts(hold);
 			if (!hold.pending.empty())
-				timeout_ms = static_cast<int>(std::min<uint64_t>(100, (hold.pending.front().second - now) / 1000000ull + 1));
+				timeout_ms = static_cast<int>(std::min<uint64_t>(100, (hold.pending.front().due - now) / 1000000ull + 1));
 		}
 		if (avail == 0)
 		{
@@ -529,13 +964,16 @@ int sniff_swdiv(const Args& args, bool hold_mode)
 	print_result(result, cpu_ms_self());
 	if (hold_mode)
 		std::printf("held=%llu resumed=%llu vdropped=%llu expired=%llu flushed=%llu dev_dropped=%llu resume_lost=%llu pass_unsupported=%llu pass_limit=%llu "
-					"enoent=%llu verr=%llu\n",
+					"enoent=%llu verr=%llu modified=%llu mod_dropped=%llu ct_detached=%llu injected=%llu inject_failed=%llu tool_injected=%llu tool_inject_errors=%llu\n",
 					static_cast<unsigned long long>(stats.held), static_cast<unsigned long long>(stats.resumed),
 					static_cast<unsigned long long>(stats.verdict_dropped), static_cast<unsigned long long>(stats.expired),
 					static_cast<unsigned long long>(stats.flushed), static_cast<unsigned long long>(stats.dev_dropped),
 					static_cast<unsigned long long>(stats.resume_lost), static_cast<unsigned long long>(stats.pass_unsupported),
 					static_cast<unsigned long long>(stats.pass_limit), static_cast<unsigned long long>(hold.enoent),
-					static_cast<unsigned long long>(hold.errors));
+					static_cast<unsigned long long>(hold.errors), static_cast<unsigned long long>(stats.modified),
+					static_cast<unsigned long long>(stats.mod_dropped), static_cast<unsigned long long>(stats.ct_detached),
+					static_cast<unsigned long long>(stats.injected), static_cast<unsigned long long>(stats.inject_failed),
+					static_cast<unsigned long long>(hold.injected), static_cast<unsigned long long>(hold.inject_errors));
 	return 0;
 }
 
@@ -627,8 +1065,35 @@ int sniff_afpacket(const Args& args)
 	return 0;
 }
 
+// What the kernel does for SWDIV_CALC_*, done in user space: NFQUEUE hands back exactly the bytes it is given, so this is what an
+// NFQUEUE-based engine has to do for every packet it changes (lagsw does it with calc_checksums()).
+void calc_checksums_user(std::vector<unsigned char>& p, uint32_t flags)
+{
+	const size_t ihl  = static_cast<size_t>(p[0] & 0x0F) * 4;
+	const size_t ulen = p.size() - ihl;
+	if ((flags & SWDIV_CALC_L4) && p[9] == 17 && ulen >= 8)
+	{
+		p[ihl + 6]	 = p[ihl + 7] = 0;
+		uint32_t sum = sum16(p.data() + 12, 8, 0) + 17 + static_cast<uint32_t>(ulen);
+		sum			 = sum16(p.data() + ihl, ulen, sum);
+		uint16_t csum = static_cast<uint16_t>(~fold(sum));
+		if (csum == 0)
+			csum = 0xFFFF;
+		p[ihl + 6] = static_cast<unsigned char>(csum >> 8);
+		p[ihl + 7] = static_cast<unsigned char>(csum);
+	}
+	if (flags & SWDIV_CALC_IP)
+	{
+		p[10] = p[11] = 0;
+		const uint16_t csum = static_cast<uint16_t>(~fold(sum16(p.data(), ihl, 0)));
+		p[10]				= static_cast<unsigned char>(csum >> 8);
+		p[11]				= static_cast<unsigned char>(csum);
+	}
+}
+
 struct NfqState
 {
+	ModifyPlan							plan;
 	SniffResult							result;
 	bool								hold		= false;
 	long								delay_ms	= 0;
@@ -656,6 +1121,16 @@ int nfq_callback(nfq_q_handle* queue, nfgenmsg*, nfq_data* packet, void* data)
 	}
 	++state->result.captured;
 	const uint32_t id = ntohl(header->packet_id);
+	if (state->hold && !state->plan.mode.empty() && length > 0)
+	{
+		uint32_t				   flags = 0;
+		std::vector<unsigned char> bytes = build_modified(payload, static_cast<uint32_t>(length), state->plan, flags);
+		if (!bytes.empty())
+		{
+			calc_checksums_user(bytes, flags | SWDIV_CALC_IP); // an NFQUEUE engine recomputes both, whatever it changed
+			return nfq_set_verdict(queue, id, NF_ACCEPT, static_cast<uint32_t>(bytes.size()), bytes.data());
+		}
+	}
 	if (state->hold)
 	{
 		++state->seen;
@@ -691,6 +1166,7 @@ int sniff_nfq(const Args& args, bool hold_mode)
 	state.delay_ms	= args.num("--delay-ms", "0");
 	state.drop_every = args.num("--drop-every", "0");
 	state.batch		 = args.get("--batch", "no") != "no";
+	state.plan.mode	 = args.get("--modify", "");
 	nfq_q_handle* queue = nfq_create_queue(handle, 0, &nfq_callback, &state);
 	if (!queue)
 		die("nfq_create_queue");
@@ -774,6 +1250,10 @@ int main(int argc, char** argv)
 		return run_sink(args);
 	if (command == "sniff")
 		return run_sniff(args);
+	if (command == "pktcheck")
+		return run_pktcheck(args);
+	if (command == "fuzz")
+		return run_fuzz(args);
 	if (command == "tcpsink")
 		return run_tcpsink(args);
 	if (command == "tcpsend")

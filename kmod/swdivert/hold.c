@@ -11,6 +11,7 @@
  * a packet is resumed or dropped exactly once. Nothing that holds packets may ever lose one: stop, close (including SIGKILL of
  * the reader) and a reader that stops answering all resume the packets (the "fail open" requirement of the design).
  */
+#include <linux/ip.h>
 #include <linux/jiffies.h>
 #include <linux/moduleparam.h>
 #include <linux/netdevice.h>
@@ -19,10 +20,15 @@
 #include <linux/sched.h>
 #include <linux/skbuff.h>
 #include <linux/slab.h>
+#include <linux/tcp.h>
+#include <linux/udp.h>
 #include <linux/uaccess.h>
 #include <net/dst.h>
 #include <net/gso.h>
+#include <net/ip.h>
+#include <net/inet_dscp.h>
 #include <net/net_namespace.h>
+#include <net/route.h>
 
 #include "swdivert.h"
 
@@ -102,6 +108,115 @@ static void swdiv_entry_resume(struct swdiv_handle *h, struct swdiv_held *e)
 {
 	swdiv_continue(h, e->skb, &e->state);
 	swdiv_entry_free(e);
+}
+
+/* The 5-tuple of an IPv4 packet; ports are 0 unless it is a TCP or UDP packet that is not a later fragment */
+struct swdiv_tuple4 {
+	__be32 saddr, daddr;
+	__be16 sport, dport;
+	u8 proto;
+};
+
+static void swdiv_tuple_of(const struct sk_buff *skb, const u8 *linear, struct swdiv_tuple4 *t)
+{
+	const struct iphdr *iph = (const struct iphdr *)(linear ? linear : skb_network_header(skb));
+	const u32 ihl = iph->ihl * 4;
+	__be16 ports[2];
+	const __be16 *p = NULL;
+
+	t->saddr = iph->saddr;
+	t->daddr = iph->daddr;
+	t->proto = iph->protocol;
+	t->sport = t->dport = 0;
+	if ((iph->protocol != IPPROTO_TCP && iph->protocol != IPPROTO_UDP) || (iph->frag_off & htons(IP_OFFSET)))
+		return;
+	if (linear)
+		p = (const __be16 *)(linear + ihl);
+	else
+		p = skb_header_pointer(skb, skb_network_offset(skb) + ihl, sizeof(ports), ports);
+	if (p) {
+		t->sport = p[0];
+		t->dport = p[1];
+	}
+}
+
+/*
+ * Resumes a held packet with `data[len]` (a whole IPv4 packet that swdiv_packet_check() accepted) in place of its bytes. The
+ * skb keeps everything else it carries: what the stack knows about the packet's route, connection and device is only adjusted
+ * where the new bytes contradict it: a changed destination address is routed again, a changed 5-tuple detaches the connection
+ * tracking entry (its NAT mapping and state were made for the old tuple, so the rest of the path treats the packet as untracked).
+ * Failure here (no memory, no route) drops the packet, counted as mod_dropped.
+ */
+static void swdiv_entry_resume_mod(struct swdiv_handle *h, struct swdiv_held *e, const u8 *data, u32 len, u32 flags)
+{
+	struct sk_buff *skb = e->skb;
+	struct swdiv_tuple4 before, after;
+	struct iphdr *iph;
+	int err = -EINVAL;
+
+	local_bh_disable();
+	rcu_read_lock();
+
+	/* At the FORWARD hook the packet starts at the IP header; anything else is not something this knows how to rewrite */
+	if (skb_network_offset(skb) != 0)
+		goto fail;
+	swdiv_tuple_of(skb, NULL, &before);
+	err = skb_linearize(skb);
+	if (!err)
+		err = skb_unclone(skb, GFP_ATOMIC);
+	if (!err && len > skb->len)
+		err = pskb_expand_head(skb, 0, len - skb->len, GFP_ATOMIC);
+	if (err)
+		goto fail;
+	if (len > skb->len)
+		skb_put(skb, len - skb->len);
+	else if (len < skb->len)
+		skb_trim(skb, len);
+	memcpy(skb->data, data, len);
+	skb_reset_network_header(skb);
+	iph = ip_hdr(skb);
+	skb_set_transport_header(skb, iph->ihl * 4);
+
+	swdiv_packet_checksums(skb, flags);
+	/* The receive-side checksum state describes the old bytes */
+	if (skb->ip_summed == CHECKSUM_COMPLETE)
+		skb->ip_summed = CHECKSUM_NONE;
+
+	swdiv_tuple_of(skb, NULL, &after);
+	if (memcmp(&before, &after, sizeof(before))) {
+		nf_reset_ct(skb);
+		this_cpu_inc(h->stats->ct_detached);
+	}
+	if (before.daddr != after.daddr) {
+		struct net_device *out;
+
+		skb_dst_drop(skb);
+		if (ip_route_input(skb, iph->daddr, iph->saddr, inet_dsfield_to_dscp(iph->tos), e->state.in)) {
+			err = -ENETUNREACH;
+			goto fail;
+		}
+		/* The hooks after this one are told the device the packet leaves through */
+		out = skb_dst(skb)->dev;
+		if (out != e->state.out) {
+			dev_hold(out);
+			if (e->state.out)
+				dev_put(e->state.out);
+			e->state.out = out;
+		}
+	}
+
+	this_cpu_inc(h->stats->modified);
+	swdiv_continue(h, skb, &e->state);
+	rcu_read_unlock();
+	local_bh_enable();
+	swdiv_entry_free(e);
+	return;
+
+fail:
+	rcu_read_unlock();
+	local_bh_enable();
+	this_cpu_inc(h->stats->mod_dropped);
+	swdiv_entry_drop(e);
 }
 
 typedef bool (*swdiv_pred)(const struct swdiv_held *e, const void *arg);
@@ -373,7 +488,29 @@ int swdiv_hold_verdicts(struct swdiv_handle *h, void __user *argp)
 
 		if (copy_from_user(&v, &items[i], sizeof(v)))
 			return -EFAULT;
-		if (v.verdict != SWDIV_V_RESUME && v.verdict != SWDIV_V_DROP) {
+		if (v.verdict == SWDIV_V_RESUME_MOD) {
+			u8 *buf;
+			int total;
+
+			if (!v.len || v.len > SWDIV_MAX_PACKET || (v.flags & ~(SWDIV_CALC_IP | SWDIV_CALC_L4))) {
+				status = EINVAL;
+			} else if (IS_ERR(buf = memdup_user(u64_to_user_ptr(v.data), v.len))) {
+				status = -PTR_ERR(buf);
+			} else {
+				/* Bad bytes are refused before the packet is taken: it stays held (and the timeout still applies) */
+				total = swdiv_packet_check(buf, v.len);
+				if (total < 0) {
+					status = EINVAL;
+				} else {
+					e = swdiv_take_id(h, v.id);
+					if (!e)
+						status = ENOENT;
+					else
+						swdiv_entry_resume_mod(h, e, buf, total, v.flags);
+				}
+				kfree(buf);
+			}
+		} else if (v.verdict != SWDIV_V_RESUME && v.verdict != SWDIV_V_DROP) {
 			status = EINVAL;
 		} else {
 			e = swdiv_take_id(h, v.id);
@@ -423,6 +560,33 @@ static int swdiv_netdev_event(struct notifier_block *nb, unsigned long event, vo
 static struct notifier_block swdiv_netdev_nb = {
 	.notifier_call = swdiv_netdev_event,
 };
+
+/* ---- priorities ---- */
+
+int swdiv_priority_claim(struct swdiv_handle *h)
+{
+	struct swdiv_handle *o;
+	int ret = 0;
+
+	mutex_lock(&swdiv_handles_lock);
+	list_for_each_entry(o, &swdiv_handles, node) {
+		if (o != h && o->claimed && net_eq(o->net, h->net) && o->priority == h->priority) {
+			ret = -EEXIST;
+			break;
+		}
+	}
+	if (!ret)
+		h->claimed = true;
+	mutex_unlock(&swdiv_handles_lock);
+	return ret;
+}
+
+void swdiv_priority_release(struct swdiv_handle *h)
+{
+	mutex_lock(&swdiv_handles_lock);
+	h->claimed = false;
+	mutex_unlock(&swdiv_handles_lock);
+}
 
 void swdiv_hold_register(struct swdiv_handle *h)
 {

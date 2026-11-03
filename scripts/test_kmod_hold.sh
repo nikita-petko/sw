@@ -22,12 +22,14 @@ pass=0
 fail=0
 CLIENT_PID=""
 SERVER_PID=""
+ALT_PID=""
 BG_PIDS=()
 
 cleanup() {
 	for pid in "${BG_PIDS[@]:-}"; do [ -n "$pid" ] && kill -9 "$pid" 2>/dev/null; done
 	[ -n "$CLIENT_PID" ] && kill "$CLIENT_PID" 2>/dev/null
 	[ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null
+	[ -n "$ALT_PID" ] && kill "$ALT_PID" 2>/dev/null
 	rm -rf "$tmp"
 }
 trap cleanup EXIT
@@ -76,12 +78,28 @@ rig_up() {
 	ns client "$swbench" flood --dst 10.10.2.2 --port 9999 --pps 20 --seconds 1 --size 64 > /dev/null
 }
 
+# A third host on its own link (10.10.3.0/24), for the test that re-routes packets
+rig_alt_up() {
+	local own; own="$(readlink /proc/self/ns/net)"
+	unshare -n sleep infinity & ALT_PID=$!
+	until [ "$(readlink "/proc/$ALT_PID/ns/net" 2>/dev/null)" != "$own" ]; do sleep 0.02; done
+	ip link add va type veth peer name a0 || return 1
+	ip link set a0 netns "$ALT_PID"
+	ip addr add 10.10.3.1/24 dev va
+	ip link set va up
+	ns alt ip link set lo up
+	ns alt ip addr add 10.10.3.2/24 dev a0
+	ns alt ip link set a0 up
+	ns alt ip route add default via 10.10.3.1
+}
+
 rig_down() {
-	kill "$CLIENT_PID" "$SERVER_PID" 2>/dev/null
-	wait "$CLIENT_PID" "$SERVER_PID" 2>/dev/null
-	CLIENT_PID="" SERVER_PID=""
+	kill "$CLIENT_PID" "$SERVER_PID" $ALT_PID 2>/dev/null
+	wait "$CLIENT_PID" "$SERVER_PID" $ALT_PID 2>/dev/null
+	CLIENT_PID="" SERVER_PID="" ALT_PID=""
 	ip link del vc 2>/dev/null
 	ip link del vs 2>/dev/null
+	ip link del va 2>/dev/null
 	nft flush ruleset 2>/dev/null
 	return 0
 }
@@ -90,7 +108,7 @@ rig_down() {
 start_bg() {
 	local name="$1"; shift
 	local who=""
-	if [ "$1" = client ] || [ "$1" = server ]; then who="$1"; shift; fi
+	if [ "$1" = client ] || [ "$1" = server ] || [ "$1" = alt ]; then who="$1"; shift; fi
 	if [ -n "$who" ]; then ns "$who" "$@" > "$tmp/$name.out" 2> "$tmp/$name.err" & else "$@" > "$tmp/$name.out" 2> "$tmp/$name.err" & fi
 	local pid=$!
 	eval "PID_$name=$pid"
@@ -345,6 +363,222 @@ t_rate() {
 	rig_down
 }
 
+# ---- Phase 4: modify, chain, inject ----
+
+SNAP=1520	# a whole 1500-byte packet fits a slot (slot_bytes is a multiple of 16)
+MODREADER=("$swbench" sniff --mode swdiv-hold --snap $SNAP --slots 2048)
+
+t_mod_payload() {
+	rig_up || return
+	start_bg sink server "$swbench" sink --port $PORT --verify yes --fill y
+	start_bg pk server "$swbench" pktcheck --port $PORT --iface s0
+	start_bg reader "${MODREADER[@]}" --port $PORT --delay-ms 0 --modify payload
+	flood 2000 2 200
+	sleep 0.4
+	stop_bg reader; stop_bg pk; stop_bg sink
+	local sent recv; sent="$(kv "$tmp/flood.out" sent)"; recv="$(kv "$tmp/sink.out" received)"
+	check "modified payload: everything delivered ($sent sent, $recv received)" eq "$recv" "$sent"
+	check "modified payload: every packet carries the new bytes (corrupt = bytes that are not 'y')" eq "$(kv "$tmp/sink.out" corrupt)/$(kv "$tmp/sink.out" dups)" "0/0"
+	check "modified payload: every packet was resumed with new bytes ($(kv "$tmp/reader.out" modified) modified, $(kv "$tmp/reader.out" mod_dropped) dropped)" eq "$(kv "$tmp/reader.out" modified)/$(kv "$tmp/reader.out" mod_dropped)" "$sent/0"
+	check "modified payload: IP and UDP checksums verified on the wire at the receiver ($(kv "$tmp/pk.out" pk_good) good, $(kv "$tmp/pk.out" pk_bad_ip) bad IP, $(kv "$tmp/pk.out" pk_bad_l4) bad UDP)" \
+		eq "$(kv "$tmp/pk.out" pk_good)/$(kv "$tmp/pk.out" pk_bad_ip)/$(kv "$tmp/pk.out" pk_bad_l4)/$(kv "$tmp/pk.out" pk_partial)" "$sent/0/0/0"
+	rig_down
+}
+
+mod_len_case() { # mod_len_case MODE EXPECTED_UDP_PAYLOAD_LEN
+	rig_up || return
+	start_bg sink server "$swbench" sink --port $PORT
+	start_bg pk server "$swbench" pktcheck --port $PORT --iface s0
+	start_bg reader "${MODREADER[@]}" --port $PORT --delay-ms 0 --modify "$1"
+	flood 1000 2 200
+	sleep 0.4
+	stop_bg reader; stop_bg pk; stop_bg sink
+	local sent recv; sent="$(kv "$tmp/flood.out" sent)"; recv="$(kv "$tmp/sink.out" received)"
+	check "$1: everything delivered ($sent sent, $recv received)" eq "$recv" "$sent"
+	check "$1: the packets have the new length ($(kv "$tmp/sink.out" len_min)..$(kv "$tmp/sink.out" len_max) bytes, expected $2)" eq "$(kv "$tmp/sink.out" len_min)/$(kv "$tmp/sink.out" len_max)" "$2/$2"
+	check "$1: checksums verified at the receiver ($(kv "$tmp/pk.out" pk_good) good)" eq "$(kv "$tmp/pk.out" pk_good)/$(kv "$tmp/pk.out" pk_bad_ip)/$(kv "$tmp/pk.out" pk_bad_l4)" "$sent/0/0"
+	rig_down
+}
+t_mod_grow() { mod_len_case grow 300; }
+t_mod_shrink() { mod_len_case shrink 64; }
+
+t_mod_tcp() {
+	rig_up || return
+	start_bg sink server "$swbench" tcpsink --port $TCP_PORT
+	start_bg reader "${MODREADER[@]}" --port $TCP_PORT --proto tcp --delay-ms 0 --modify tcp-flip
+	ns client "$swbench" tcpsend --dst 10.10.2.2 --port $TCP_PORT --bytes 1048576 --seed 777 > "$tmp/send.out" 2>&1
+	sleep 0.3
+	stop_bg reader; stop_bg sink
+	check "TCP with a modified byte per segment: the whole 1 MiB arrived (so the TCP checksum was right)" eq "$(kv "$tmp/sink.out" bytes)" 1048576
+	check "TCP: the segments really were modified (the stream differs from what was sent)" test "$(kv "$tmp/sink.out" hash)" != "$(kv "$tmp/send.out" hash)"
+	check "TCP: modified segments ($(kv "$tmp/reader.out" modified)), none dropped" eq "$(kv "$tmp/reader.out" mod_dropped)" 0
+	check "TCP: some segments were modified" gt "$(kv "$tmp/reader.out" modified)" 500
+	rig_down
+}
+
+t_mod_bad() {
+	rig_up || return
+	set_param hold_ms 250
+	start_bg sink server "$swbench" sink --port $PORT
+	start_bg reader "${MODREADER[@]}" --port $PORT --delay-ms 0 --modify bad
+	flood 500 1 200
+	sleep 0.8
+	stop_bg reader; stop_bg sink
+	set_param hold_ms 2000
+	local sent recv; sent="$(kv "$tmp/flood.out" sent)"; recv="$(kv "$tmp/sink.out" received)"
+	check "bad bytes in RESUME_MOD: refused for every packet ($(kv "$tmp/reader.out" verr) EINVAL)" eq "$(kv "$tmp/reader.out" verr)" "$sent"
+	check "bad bytes: the packets stayed held and the timeout released them unmodified ($recv of $sent, $(kv "$tmp/reader.out" expired) expired)" eq "$recv/$(kv "$tmp/reader.out" expired)" "$sent/$sent"
+	check "bad bytes: nothing was modified" eq "$(kv "$tmp/reader.out" modified)" 0
+	rig_down
+}
+
+t_mod_dst() {
+	rig_up || return
+	rig_alt_up || { bad "could not set up the third host"; rig_down; return; }
+	start_bg sink server "$swbench" sink --port $PORT
+	start_bg altsink alt "$swbench" sink --port $PORT
+	start_bg pk alt "$swbench" pktcheck --port $PORT --iface a0
+	start_bg reader "${MODREADER[@]}" --port $PORT --delay-ms 0 --modify dst --to-ip 10.10.3.2
+	flood 1000 2 200
+	sleep 0.4
+	stop_bg reader; stop_bg pk; stop_bg altsink; stop_bg sink
+	local sent alt orig; sent="$(kv "$tmp/flood.out" sent)"; alt="$(kv "$tmp/altsink.out" received)"; orig="$(kv "$tmp/sink.out" received)"
+	check "destination rewritten: the packets were routed again, to the third host ($sent sent, $alt received there)" eq "$alt" "$sent"
+	check "destination rewritten: none reached the original server ($orig)" eq "$orig" 0
+	check "destination rewritten: checksums right at the new destination ($(kv "$tmp/pk.out" pk_good) good, $(kv "$tmp/pk.out" pk_bad_l4) bad)" eq "$(kv "$tmp/pk.out" pk_good)/$(kv "$tmp/pk.out" pk_bad_ip)/$(kv "$tmp/pk.out" pk_bad_l4)" "$sent/0/0"
+	check "destination rewritten: the 5-tuple change was noted ($(kv "$tmp/reader.out" ct_detached))" eq "$(kv "$tmp/reader.out" ct_detached)" "$sent"
+	rig_down
+}
+
+# Two handles form a chain by priority: the higher priority is served first, and what it resumes continues to the next handle
+# (with its modifications): WinDivert's "injected and resumed packets are diverted to the next priority handle".
+chain_case() { # chain_case LABEL PRIO_A PRIO_B EXPECTED_B_HELD(sent|0)
+	rig_up || return
+	start_bg sink server "$swbench" sink --port 9001 --verify yes
+	start_bg readerA "${MODREADER[@]}" --port $PORT --delay-ms 0 --prio "$2" --modify dport --to-port 9001
+	start_bg readerB "$swbench" sniff --mode swdiv-hold --port 9001 --delay-ms 0 --prio "$3"
+	flood 2000 2 200 $PORT
+	sleep 0.4
+	stop_bg readerB; stop_bg readerA; stop_bg sink
+	local sent recv; sent="$(kv "$tmp/flood.out" sent)"; recv="$(kv "$tmp/sink.out" received)"
+	check "$1: delivered ($sent sent to port $PORT, $recv received on 9001)" eq "$recv" "$sent"
+	check "$1: A held and rewrote every packet" eq "$(kv "$tmp/readerA.out" held)/$(kv "$tmp/readerA.out" modified)" "$sent/$sent"
+	local want_b="$4"; [ "$want_b" = sent ] && want_b="$sent"
+	check "$1: B (filter: port 9001) held $(kv "$tmp/readerB.out" held), expected $want_b" eq "$(kv "$tmp/readerB.out" held)" "$want_b"
+	rig_down
+}
+t_chain_order() {
+	chain_case "A served first (100) then B (50): B sees what A rewrote" 100 50 sent
+	chain_case "B served first (100) then A (50): B never sees the rewritten packets" 50 100 0
+}
+
+t_priority_unique() {
+	rig_up || return
+	start_bg readerA "$swbench" sniff --mode swdiv-hold --port $PORT --delay-ms 0 --prio 7
+	timeout 5 "$swbench" sniff --mode swdiv-hold --port 9005 --prio 7 > "$tmp/dupe.out" 2> "$tmp/dupe.err"
+	check "a second started handle with the same priority is refused (EEXIST)" grep -q 'File exists' "$tmp/dupe.err"
+	timeout 1 "$swbench" sniff --mode swdiv-hold --port 9005 --prio 8 > "$tmp/other.out" 2> "$tmp/other.err"
+	check "a different priority is accepted" grep -q '^ready' "$tmp/other.out"
+	stop_bg readerA
+	rig_down
+}
+
+t_inject_twin() {
+	rig_up || return
+	start_bg sink server "$swbench" sink --port $PORT --verify yes
+	start_bg pk server "$swbench" pktcheck --port $PORT --iface s0
+	start_bg reader "${MODREADER[@]}" --port $PORT --delay-ms 0 --twin yes --inject-if vc
+	flood 1000 2 200
+	sleep 0.5
+	stop_bg reader; stop_bg pk; stop_bg sink
+	local sent recv; sent="$(kv "$tmp/flood.out" sent)"; recv="$(kv "$tmp/sink.out" received)"
+	check "inject: the originals and one injected twin of each reached the server ($sent sent, $recv received)" eq "$recv" "$((2 * sent))"
+	check "inject: no duplicates, no corruption (originals and twins have separate sequence numbers)" eq "$(kv "$tmp/sink.out" dups)/$(kv "$tmp/sink.out" corrupt)" "0/0"
+	check "inject: loop avoidance: the handle held only the originals, never its own injected twins ($(kv "$tmp/reader.out" held) held)" eq "$(kv "$tmp/reader.out" held)" "$sent"
+	check "inject: every injection succeeded ($(kv "$tmp/reader.out" injected) injected, $(kv "$tmp/reader.out" inject_failed) failed)" eq "$(kv "$tmp/reader.out" injected)/$(kv "$tmp/reader.out" inject_failed)" "$sent/0"
+	check "inject: the injected packets have valid checksums on the wire ($(kv "$tmp/pk.out" pk_bad_ip) bad IP, $(kv "$tmp/pk.out" pk_bad_l4) bad UDP)" eq "$(kv "$tmp/pk.out" pk_bad_ip)/$(kv "$tmp/pk.out" pk_bad_l4)" "0/0"
+	rig_down
+}
+
+t_inject_chain() {
+	rig_up || return
+	start_bg sink server "$swbench" sink --port $PORT
+	start_bg readerA "${MODREADER[@]}" --port $PORT --delay-ms 0 --twin yes --inject-if vc --prio 100
+	start_bg readerB "$swbench" sniff --mode swdiv-hold --port $PORT --delay-ms 0 --prio 50
+	flood 1000 2 200
+	sleep 0.5
+	stop_bg readerB; stop_bg readerA; stop_bg sink
+	local sent recv; sent="$(kv "$tmp/flood.out" sent)"; recv="$(kv "$tmp/sink.out" received)"
+	check "inject + chain: everything delivered ($sent sent, $recv received)" eq "$recv" "$((2 * sent))"
+	check "inject + chain: A held only the originals ($(kv "$tmp/readerA.out" held))" eq "$(kv "$tmp/readerA.out" held)" "$sent"
+	check "inject + chain: B (served after A) held the originals and A's injected twins ($(kv "$tmp/readerB.out" held))" eq "$(kv "$tmp/readerB.out" held)" "$((2 * sent))"
+	rig_down
+}
+
+t_mod_tcp_nat() {
+	rig_up || return
+	modprobe nf_tables nft_chain_nat nft_masq nf_nat nf_conntrack 2>/dev/null
+	nft -f - <<'RULES' 2>"$tmp/nft.err"
+table ip swt_nat {
+	chain post {
+		type nat hook postrouting priority 100; policy accept;
+		oifname "vs" masquerade
+	}
+}
+RULES
+	if [ -s "$tmp/nft.err" ]; then bad "could not set up NAT: $(cat "$tmp/nft.err")"; rig_down; return; fi
+	start_bg sink server "$swbench" tcpsink --port $TCP_PORT
+	start_bg reader "${MODREADER[@]}" --port $TCP_PORT --proto tcp --delay-ms 0 --modify tcp-flip
+	ns client "$swbench" tcpsend --dst 10.10.2.2 --port $TCP_PORT --bytes 1048576 --seed 777 > "$tmp/send.out" 2>&1
+	sleep 0.3
+	stop_bg reader; stop_bg sink
+	check "modified TCP segments through masquerade: the whole 1 MiB arrived" eq "$(kv "$tmp/sink.out" bytes)" 1048576
+	check "modified TCP segments through masquerade: the server saw the gateway's address (connection tracking survived the modification)" eq "$(kv "$tmp/sink.out" peer)" 10.10.2.1
+	check "modified TCP segments through masquerade: the tuple did not change, so no tracking entry was detached ($(kv "$tmp/reader.out" ct_detached))" eq "$(kv "$tmp/reader.out" ct_detached)" 0
+	rig_down
+}
+
+# Modification, timeout, injection and a kill racing each other: nothing may be lost, delivered twice or crash anything
+t_race_mod() {
+	rig_up || return
+	set_param hold_ms 3
+	start_bg sink server "$swbench" sink --port $PORT
+	start_bg reader "${MODREADER[@]}" --port $PORT --delay-ms 3 --modify payload --twin yes --inject-if vc
+	ns client "$swbench" flood --dst 10.10.2.2 --port $PORT --pps 15000 --seconds 2 --size 200 --stream 0 > "$tmp/flood0.out" 2>&1 &
+	local f0=$!
+	ns client "$swbench" flood --dst 10.10.2.2 --port $PORT --pps 15000 --seconds 2 --size 200 --stream 1 > "$tmp/flood1.out" 2>&1 &
+	local f1=$!
+	BG_PIDS+=("$f0" "$f1")
+	sleep 1
+	kill -9 "$(pid_of reader)"; wait "$(pid_of reader)" 2>/dev/null
+	wait "$f0" "$f1"
+	sleep 0.5
+	stop_bg sink
+	set_param hold_ms 2000
+	local sent recv; sent=$(($(kv "$tmp/flood0.out" sent) + $(kv "$tmp/flood1.out" sent))); recv="$(kv "$tmp/sink.out" received)"
+	check "modify + inject + timeout + kill racing: every original arrived, plus injected twins ($sent sent, $recv received)" ge "$recv" "$sent"
+	check "modify + inject + timeout + kill racing: nothing delivered twice" eq "$(kv "$tmp/sink.out" dups)" 0
+	rig_down
+}
+
+# Garbage into INJECT and RESUME_MOD: must neither crash nor wedge anything
+t_fuzz() {
+	rig_up || return
+	start_bg sink server "$swbench" sink --port $PORT
+	"$swbench" fuzz --iterations 30000 --seed 1 > "$tmp/fuzz.out" 2>&1
+	local rc=$?
+	check "fuzz: 30000 malformed INJECT/RESUME_MOD calls completed ($(tail -1 "$tmp/fuzz.out" | cut -c1-150))" eq "$rc" 0
+	check "fuzz: nothing ended in an unexpected error code ($(kv "$tmp/fuzz.out" fuzz_other))" eq "$(kv "$tmp/fuzz.out" fuzz_other)" 0
+	check "fuzz: some calls were refused as invalid and some were valid" test "$(kv "$tmp/fuzz.out" fuzz_einval)" -gt 1000 -a "$(kv "$tmp/fuzz.out" inject_failed)" -ge 0
+	# The path still works afterwards
+	start_bg reader "${MODREADER[@]}" --port $PORT --delay-ms 0 --modify payload
+	flood 1000 1 200
+	sleep 0.3
+	stop_bg reader; stop_bg sink
+	check "fuzz: traffic still flows and can still be modified afterwards ($(kv "$tmp/flood.out" sent) sent, $(kv "$tmp/sink.out" received) received)" eq "$(kv "$tmp/sink.out" received)" "$(kv "$tmp/flood.out" sent)"
+	rig_down
+}
+
 # Phase 2 still works after the Phase 3 changes of the slot layout and the statistics: sniff-only handles copy and let packets go
 t_sniff() {
 	rig_up || return
@@ -398,16 +632,18 @@ bench_row() { # bench_row LABEL PPS ; the sink and reader are running, the rig i
 	stop_bg sink
 	sent="$(kv "$tmp/flood.out" sent)"; recv="$(kv "$tmp/sink.out" received)"
 	captured="$(kv "$tmp/reader.out" captured)"; cpu="$(kv "$tmp/reader.out" cpu_ms)"
-	printf '| %s | %s | %s | %s | %s.%s %% | %s | %s | %s | %s |\n' "$label" "$pps" "$sent" "$recv" \
+	printf '| %s | %s | %s | %s | %s.%s %% | %s | %s | %s | %s | %s | %s |\n' "$label" "$pps" "$sent" "$recv" \
 		"$(( (sent - recv) * 100 / sent ))" "$(( ((sent - recv) * 1000 / sent) % 10 ))" \
 		"$(kv "$tmp/sink.out" lat_p50_us)" "$(kv "$tmp/sink.out" lat_p99_us)" "$(kv "$tmp/sink.out" lat_max_us)" \
-		"$([ -n "$captured" ] && [ "$captured" != 0 ] && awk -v c="$cpu" -v n="$captured" 'BEGIN{printf "%.2f", c*1000/n}' || echo -)"
+		"$([ -n "$captured" ] && [ "$captured" != 0 ] && awk -v c="$cpu" -v n="$captured" 'BEGIN{printf "%.2f", c*1000/n}' || echo -)" \
+		"$([ -n "${BENCH_FILL:-}" ] && echo "$(kv "$tmp/sink.out" corrupt)" || echo -)" \
+		"$([ -n "$captured" ] && echo "$(kv "$tmp/reader.out" dropped)" || echo -)"
 	unset PID_reader
 }
 
 t_bench() {
-	echo "| mode | pps | sent | delivered | lost | latency p50 us | p99 us | max us | reader CPU us/packet |"
-	echo "|---|---|---|---|---|---|---|---|---|"
+	echo "| mode | pps | sent | delivered | lost | latency p50 us | p99 us | max us | reader CPU us/packet | wrong bytes | ring full / ENOBUFS |"
+	echo "|---|---|---|---|---|---|---|---|---|---|---|"
 	local pps
 	for pps in ${BENCH_PPS:-20000 100000}; do
 		rig_up || return
@@ -455,6 +691,32 @@ RULES
 			rig_down
 		done
 		set_param hold_wake_us 0
+
+		# The same with every packet modified (payload bytes rewritten, checksums fixed): NFQUEUE sends the whole packet back and
+		# the engine recomputes the checksums; the module takes the bytes and a flag. Both read the whole packet.
+		export BENCH_FILL=y
+		rig_up || return
+		modprobe nfnetlink_queue nf_tables nft_queue 2>/dev/null
+		nft -f - <<RULES 2>/dev/null
+table ip swt_q {
+	chain f {
+		type filter hook forward priority -150; policy accept;
+		udp dport $PORT queue flags bypass num 0
+	}
+}
+RULES
+		start_bg sink server "$swbench" sink --port $PORT --verify yes --fill y
+		start_bg reader "$swbench" sniff --mode nfq-hold --port $PORT --delay-ms 0 --snap $SNAP --modify payload
+		bench_row "NFQUEUE, modify every packet (checksums in user space)" "$pps"
+		rig_down
+
+		rig_up || return
+		set_param hold_wake_us 0
+		start_bg sink server "$swbench" sink --port $PORT --verify yes --fill y
+		start_bg reader "${MODREADER[@]}" --port $PORT --delay-ms 0 --modify payload
+		bench_row "swdivert, modify every packet (RESUME_MOD, checksums in the kernel)" "$pps"
+		rig_down
+		unset BENCH_FILL
 	done
 }
 
@@ -465,9 +727,9 @@ insmod "$ko" || { echo "insmod failed"; exit 1; }
 dmesg_before="$(dmesg | wc -l)"
 [ -c /dev/swdivert ] || { echo "/dev/swdivert did not appear"; exit 1; }
 
-default_tests=(sniff resume_now delay drop_verdict tcp tcp_nat sigkill_hold graceful_stop hold_timeout max_held device_removal rate race)
+default_tests=(sniff mod_payload mod_grow mod_shrink mod_tcp mod_tcp_nat mod_bad mod_dst chain_order priority_unique inject_twin inject_chain race_mod fuzz resume_now delay drop_verdict tcp tcp_nat sigkill_hold graceful_stop hold_timeout max_held device_removal rate race)
 [ "${#only[@]}" -eq 0 ] && only=("${default_tests[@]}")
-for t in sniff resume_now delay drop_verdict tcp tcp_nat sigkill_hold graceful_stop hold_timeout max_held device_removal rate race bench; do
+for t in sniff mod_payload mod_grow mod_shrink mod_tcp mod_tcp_nat mod_bad mod_dst chain_order priority_unique inject_twin inject_chain race_mod fuzz resume_now delay drop_verdict tcp tcp_nat sigkill_hold graceful_stop hold_timeout max_held device_removal rate race bench; do
 	want_test "$t" || continue
 	echo "== $t"
 	"t_$t"

@@ -54,7 +54,12 @@ unsigned int swdiv_hook(void *priv, struct sk_buff *skb, const struct nf_hook_st
 {
 	struct swdiv_handle *handle = priv;
 	struct swdiv_cpu_stats *stats = this_cpu_ptr(handle->stats);
+	const struct swdiv_handle *injector = this_cpu_read(swdiv_injector);
 	bool truncated = false;
+
+	/* A packet this handle (or one served before it) injects is not offered to it again: that would loop */
+	if (injector && handle->ops.priority <= injector->ops.priority)
+		return NF_ACCEPT;
 
 	stats->seen++;
 	if (!swdiv_match(&handle->tuple, skb))
@@ -149,7 +154,8 @@ int swdiv_hook_start(struct swdiv_handle *handle)
 	handle->ops.hook = swdiv_hook;
 	handle->ops.pf = NFPROTO_IPV4;
 	handle->ops.hooknum = NF_INET_FORWARD;
-	handle->ops.priority = NF_IP_PRI_FIRST;
+	/* Higher user priority = lower netfilter priority number = earlier. NF_IP_PRI_FIRST is INT_MIN: the handles run before everything else */
+	handle->ops.priority = NF_IP_PRI_FIRST + 30000 - handle->priority;
 	handle->ops.priv = handle;
 	return nf_register_net_hook(handle->net, &handle->ops);
 }
