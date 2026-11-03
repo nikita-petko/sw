@@ -18,6 +18,7 @@
 struct net;
 struct sk_buff;
 struct net_device;
+struct swdiv_prog;
 
 struct swdiv_cpu_stats {
 	u64 seen;
@@ -82,9 +83,9 @@ struct swdiv_handle {
 	bool			ring_ready;
 	bool			started;
 	bool			hold_mode;
+	struct swdiv_prog __rcu	*prog;		/* the filter; replaced atomically (RCU), never NULL while the handle is open */
 	s32			priority;	/* as given by the user: higher is served first */
 	bool			claimed;	/* holds its priority among the started handles of the namespace (swdiv_handles_lock) */
-	struct swdiv_tuple	tuple;
 	struct nf_hook_ops	ops;
 	wait_queue_head_t	wq;
 	/* Batched reader wake-up (see swdiv_notify) */
@@ -146,6 +147,13 @@ int  swdiv_hold_verdicts(struct swdiv_handle *handle, void __user *argp);
 /* A priority is used by one started handle per namespace: claim it before the hook is registered, release it after it is gone. */
 int  swdiv_priority_claim(struct swdiv_handle *handle);
 void swdiv_priority_release(struct swdiv_handle *handle);
+
+/* prog.c: filter programs */
+struct swdiv_prog *swdiv_prog_from_user(const struct swdiv_program_args *args);
+struct swdiv_prog *swdiv_prog_from_tuple(const struct swdiv_tuple *tuple);
+void swdiv_prog_install(struct swdiv_handle *handle, struct swdiv_prog *prog);
+void swdiv_prog_free(struct swdiv_handle *handle);
+bool swdiv_prog_match(const struct swdiv_handle *handle, const struct sk_buff *skb, const struct nf_hook_state *state);
 
 /* inject.c */
 int  swdiv_inject(struct swdiv_handle *handle, void __user *argp);

@@ -579,6 +579,141 @@ t_fuzz() {
 	rig_down
 }
 
+# ---- Phase 5: filter programs ----
+
+# Floods three ports one after the other and leaves "sent_PORT" in $tmp/sent.PORT
+flood_ports() { # flood_ports PPS SECONDS PORT...
+	local pps="$1" secs="$2"; shift 2
+	local port
+	for port in "$@"; do
+		flood "$pps" "$secs" 200 "$port"
+		kv "$tmp/flood.out" sent > "$tmp/sent.$port"
+	done
+}
+
+t_filter_string() {
+	rig_up || return
+	start_bg sink9000 server "$swbench" sink --port 9000
+	start_bg sink9001 server "$swbench" sink --port 9001
+	start_bg sink9002 server "$swbench" sink --port 9002
+	start_bg reader "$swbench" sniff --mode swdiv-hold --delay-ms 0 --filter "udp and (udp.DstPort == 9000 or udp.DstPort == 9001) and ip.DstAddr == 10.10.2.2"
+	flood_ports 1000 1 9000 9001 9002
+	sleep 0.3
+	stop_bg reader; stop_bg sink9000; stop_bg sink9001; stop_bg sink9002
+	local s0 s1 s2; s0="$(cat "$tmp/sent.9000")"; s1="$(cat "$tmp/sent.9001")"; s2="$(cat "$tmp/sent.9002")"
+	check "filter string: the packets of the two ports it names were held ($(kv "$tmp/reader.out" held) held of $((s0 + s1)))" eq "$(kv "$tmp/reader.out" held)" "$((s0 + s1))"
+	check "filter string: the third port was left alone and everything arrived ($(kv "$tmp/sink9000.out" received)/$s0, $(kv "$tmp/sink9001.out" received)/$s1, $(kv "$tmp/sink9002.out" received)/$s2)" \
+		eq "$(kv "$tmp/sink9000.out" received)/$(kv "$tmp/sink9001.out" received)/$(kv "$tmp/sink9002.out" received)" "$s0/$s1/$s2"
+	rig_down
+
+	# Negation: a negated port test still needs the protocol (a field of an absent protocol never matches)
+	rig_up || return
+	start_bg sink9000 server "$swbench" sink --port 9000
+	start_bg sink9002 server "$swbench" sink --port 9002
+	start_bg reader "$swbench" sniff --mode swdiv-hold --delay-ms 0 --filter "udp.DstPort != 9002"
+	flood_ports 1000 1 9000 9002
+	sleep 0.3
+	stop_bg reader; stop_bg sink9000; stop_bg sink9002
+	check "negated port: held the other port only ($(kv "$tmp/reader.out" held) held, $(cat "$tmp/sent.9000") sent to 9000)" eq "$(kv "$tmp/reader.out" held)" "$(cat "$tmp/sent.9000")"
+	check "negated port: everything arrived" eq "$(kv "$tmp/sink9000.out" received)/$(kv "$tmp/sink9002.out" received)" "$(cat "$tmp/sent.9000")/$(cat "$tmp/sent.9002")"
+	rig_down
+}
+
+t_filter_set() {
+	local list="ip.DstAddr == 10.10.9.1" i
+	for i in $(seq 2 200); do list="$list or ip.DstAddr == 10.10.9.$i"; done
+	# A server list of 200 addresses is one sorted set in the program, and 10.10.2.2 is in it
+	rig_up || return
+	start_bg sink server "$swbench" sink --port $PORT
+	start_bg reader "$swbench" sniff --mode swdiv-hold --delay-ms 0 --filter "udp and ($list or ip.DstAddr == 10.10.2.2)"
+	flood 2000 1 200
+	sleep 0.3
+	stop_bg reader; stop_bg sink
+	check "address set of 201 entries: the packets to the address in it were held ($(kv "$tmp/reader.out" held) held, $(kv "$tmp/flood.out" sent) sent)" eq "$(kv "$tmp/reader.out" held)" "$(kv "$tmp/flood.out" sent)"
+	check "address set: everything arrived" eq "$(kv "$tmp/sink.out" received)" "$(kv "$tmp/flood.out" sent)"
+	rig_down
+	# ... and without it nothing is held
+	rig_up || return
+	start_bg sink server "$swbench" sink --port $PORT
+	start_bg reader "$swbench" sniff --mode swdiv-hold --delay-ms 0 --filter "udp and ($list)"
+	flood 2000 1 200
+	sleep 0.3
+	stop_bg reader; stop_bg sink
+	check "address set without the destination: nothing was held ($(kv "$tmp/reader.out" held))" eq "$(kv "$tmp/reader.out" held)" 0
+	check "address set without the destination: everything arrived untouched" eq "$(kv "$tmp/sink.out" received)" "$(kv "$tmp/flood.out" sent)"
+	rig_down
+	# A negated list: everything but the listed addresses
+	rig_up || return
+	start_bg sink server "$swbench" sink --port $PORT
+	start_bg reader "$swbench" sniff --mode swdiv-hold --delay-ms 0 --filter "udp and not ($list)"
+	flood 2000 1 200
+	sleep 0.3
+	stop_bg reader; stop_bg sink
+	check "negated address set: the destination is not in it, so everything was held ($(kv "$tmp/reader.out" held))" eq "$(kv "$tmp/reader.out" held)" "$(kv "$tmp/flood.out" sent)"
+	rig_down
+}
+
+# The filter is replaced while traffic flows: a packet sees the old or the new program, never a mixture, and nothing is lost
+t_filter_swap() {
+	rig_up || return
+	start_bg sink9000 server "$swbench" sink --port 9000
+	start_bg sink9001 server "$swbench" sink --port 9001
+	start_bg reader "$swbench" sniff --mode swdiv-hold --delay-ms 0 --filter "udp.DstPort == 9000" --filter2 "udp.DstPort == 9001" --swap-ms 1000
+	ns client "$swbench" flood --dst 10.10.2.2 --port 9000 --pps 2000 --seconds 2 --size 200 > "$tmp/flood0.out" 2>&1 &
+	local f0=$!
+	ns client "$swbench" flood --dst 10.10.2.2 --port 9001 --pps 2000 --seconds 2 --size 200 > "$tmp/flood1.out" 2>&1 &
+	local f1=$!
+	BG_PIDS+=("$f0" "$f1")
+	wait "$f0" "$f1"
+	sleep 0.3
+	stop_bg reader; stop_bg sink9000; stop_bg sink9001
+	local s0 s1 held; s0="$(kv "$tmp/flood0.out" sent)"; s1="$(kv "$tmp/flood1.out" sent)"; held="$(kv "$tmp/reader.out" held)"
+	check "filter replaced under traffic: nothing lost ($(kv "$tmp/sink9000.out" received)/$s0 and $(kv "$tmp/sink9001.out" received)/$s1)" eq "$(kv "$tmp/sink9000.out" received)/$(kv "$tmp/sink9001.out" received)" "$s0/$s1"
+	# About one second of one port before the swap and one second of the other after it: roughly 4000 of the 8000 packets
+	check "filter replaced under traffic: the old program held its port before the swap and the new one its port after it ($held held of $((s0 + s1)))" test "$held" -gt 2500 -a "$held" -lt 5500
+	check "filter replaced under traffic: no program was refused" test -z "$(cat "$tmp/reader.err")"
+	rig_down
+}
+
+t_filter_bad() {
+	rig_up || return
+	"$swbench" sniff --mode swdiv-hold --filter 'udp.Nope == 1' > "$tmp/bad.out" 2> "$tmp/bad.err"
+	local rc=$?
+	check "an unsupported filter term is refused by the compiler with a message and a position (exit $rc: $(head -c 100 "$tmp/bad.err"))" eq "$rc" 2
+	check "the message names the term" grep -q 'unsupported filter term' "$tmp/bad.err"
+	"$swbench" sniff --mode swdiv-hold --filter 'tcp.DstPort == 99999' > "$tmp/bad.out" 2> "$tmp/bad.err"
+	check "a port out of range is refused" eq "$?" 2
+	rig_down
+}
+
+# What the kernel decides on real packets against the reference evaluator: random filters, compiled and installed, random packets
+# injected through the rig. Both directions of the comparison are checked (kernel against reference, user-space VM against reference).
+t_vmcheck() {
+	rig_up || return
+	# The server must not answer (ICMP errors, echo replies, resets): an answer would cross the hook too and be counted as a second packet
+	ns server nft add table ip quiet
+	ns server nft 'add chain ip quiet input { type filter hook input priority 0 ; policy drop ; }'
+	local seed
+	for seed in 3 4; do
+		"$swbench" vmcheck --filters 50 --packets 100 --seed "$seed" > "$tmp/vmcheck.out" 2> "$tmp/vmcheck.err"
+		local rc=$?
+		check "kernel against the reference, seed $seed: $(kv "$tmp/vmcheck.out" vmcheck_filters) filters, $(kv "$tmp/vmcheck.out" vmcheck_visited) packets reached the hook, $(kv "$tmp/vmcheck.out" vmcheck_matched) matched, $(kv "$tmp/vmcheck.out" vmcheck_mismatches) mismatches" eq "$rc/$(kv "$tmp/vmcheck.out" vmcheck_mismatches)" "0/0"
+		[ "$rc" != 0 ] && { head -5 "$tmp/vmcheck.err"; cat "$tmp/vmcheck.out"; }
+		check "kernel against the reference, seed $seed: enough packets reached the hook to mean something" ge "$(kv "$tmp/vmcheck.out" vmcheck_visited)" 1500
+		check "kernel against the reference, seed $seed: some matched and some did not" test "$(kv "$tmp/vmcheck.out" vmcheck_matched)" -gt 100 -a "$(kv "$tmp/vmcheck.out" vmcheck_matched)" -lt "$(kv "$tmp/vmcheck.out" vmcheck_visited)"
+	done
+	rig_down
+}
+
+t_progcheck() {
+	rig_up || return
+	"$swbench" progcheck > "$tmp/progcheck.out" 2> "$tmp/progcheck.err"
+	local rc=$?
+	check "SET_PROGRAM accepts what it must and refuses the rest ($(kv "$tmp/progcheck.out" progcheck_cases) cases, $(kv "$tmp/progcheck.out" progcheck_failed) wrong)" eq "$rc/$(kv "$tmp/progcheck.out" progcheck_failed)" "0/0"
+	[ "$rc" != 0 ] && cat "$tmp/progcheck.err"
+	rig_down
+}
+
 # Phase 2 still works after the Phase 3 changes of the slot layout and the statistics: sniff-only handles copy and let packets go
 t_sniff() {
 	rig_up || return
@@ -727,9 +862,9 @@ insmod "$ko" || { echo "insmod failed"; exit 1; }
 dmesg_before="$(dmesg | wc -l)"
 [ -c /dev/swdivert ] || { echo "/dev/swdivert did not appear"; exit 1; }
 
-default_tests=(sniff mod_payload mod_grow mod_shrink mod_tcp mod_tcp_nat mod_bad mod_dst chain_order priority_unique inject_twin inject_chain race_mod fuzz resume_now delay drop_verdict tcp tcp_nat sigkill_hold graceful_stop hold_timeout max_held device_removal rate race)
+default_tests=(sniff filter_string filter_set filter_swap filter_bad vmcheck progcheck mod_payload mod_grow mod_shrink mod_tcp mod_tcp_nat mod_bad mod_dst chain_order priority_unique inject_twin inject_chain race_mod fuzz resume_now delay drop_verdict tcp tcp_nat sigkill_hold graceful_stop hold_timeout max_held device_removal rate race)
 [ "${#only[@]}" -eq 0 ] && only=("${default_tests[@]}")
-for t in sniff mod_payload mod_grow mod_shrink mod_tcp mod_tcp_nat mod_bad mod_dst chain_order priority_unique inject_twin inject_chain race_mod fuzz resume_now delay drop_verdict tcp tcp_nat sigkill_hold graceful_stop hold_timeout max_held device_removal rate race bench; do
+for t in sniff filter_string filter_set filter_swap filter_bad vmcheck progcheck mod_payload mod_grow mod_shrink mod_tcp mod_tcp_nat mod_bad mod_dst chain_order priority_unique inject_twin inject_chain race_mod fuzz resume_now delay drop_verdict tcp tcp_nat sigkill_hold graceful_stop hold_timeout max_held device_removal rate race bench; do
 	want_test "$t" || continue
 	echo "== $t"
 	"t_$t"

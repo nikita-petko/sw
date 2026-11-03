@@ -5,7 +5,9 @@ if is_plat("linux") then
         set_kind("binary")
         set_default(false)
         add_files("swbench.cc")
-        add_includedirs("../../kmod/include")
+        -- The same lexer, parser and DNF conversion as the NFQUEUE backend, and the compiler that turns its output into filter programs
+        add_files("../../backends/kmod/filter_program.cc", "../../backends/nfqueue/filter_lexer.cc", "../../backends/nfqueue/filter_parser.cc", "../../backends/nfqueue/filter_compiler.cc")
+        add_includedirs("../../kmod/include", "../../backends/kmod", "../../backends/nfqueue", "../../tests/kmod_vm")
         add_syslinks("netfilter_queue", "nfnetlink", "mnl")
     target_end()
 end

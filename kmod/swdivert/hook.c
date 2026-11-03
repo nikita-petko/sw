@@ -11,45 +11,6 @@
 
 #include "swdivert.h"
 
-static bool swdiv_match(const struct swdiv_tuple *tuple, const struct sk_buff *skb)
-{
-	struct iphdr iph_buf;
-	const struct iphdr *iph;
-	__be16 ports[2];
-	const __be16 *p;
-	unsigned int off = skb_network_offset(skb);
-	unsigned int ihl;
-
-	iph = skb_header_pointer(skb, off, sizeof(iph_buf), &iph_buf);
-	if (!iph || iph->version != 4)
-		return false;
-	if (tuple->proto && iph->protocol != tuple->proto)
-		return false;
-	if (tuple->saddr && iph->saddr != tuple->saddr)
-		return false;
-	if (tuple->daddr && iph->daddr != tuple->daddr)
-		return false;
-	if (!tuple->sport && !tuple->dport)
-		return true;
-
-	/* Ports exist only in the first fragment of TCP/UDP */
-	if (iph->frag_off & htons(IP_OFFSET))
-		return false;
-	if (iph->protocol != IPPROTO_TCP && iph->protocol != IPPROTO_UDP)
-		return false;
-	ihl = iph->ihl * 4;
-	if (ihl < sizeof(*iph))
-		return false;
-	p = skb_header_pointer(skb, off + ihl, sizeof(ports), ports);
-	if (!p)
-		return false;
-	if (tuple->sport && p[0] != tuple->sport)
-		return false;
-	if (tuple->dport && p[1] != tuple->dport)
-		return false;
-	return true;
-}
-
 unsigned int swdiv_hook(void *priv, struct sk_buff *skb, const struct nf_hook_state *state)
 {
 	struct swdiv_handle *handle = priv;
@@ -62,7 +23,7 @@ unsigned int swdiv_hook(void *priv, struct sk_buff *skb, const struct nf_hook_st
 		return NF_ACCEPT;
 
 	stats->seen++;
-	if (!swdiv_match(&handle->tuple, skb))
+	if (!swdiv_prog_match(handle, skb, state))
 		return NF_ACCEPT;
 	stats->matched++;
 

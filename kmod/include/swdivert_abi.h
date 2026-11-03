@@ -1,7 +1,8 @@
 /*
  * ABI of /dev/swdivert, shared by the kernel module and user space (only <linux/...> uapi headers are used).
  *
- * SPIKE STATUS (Phases 2-4 of pocs/linux_kernel_module_backend.md): FORWARD hook, one hard-coded 5-tuple filter. A handle either
+ * SPIKE STATUS (Phases 2-5 of pocs/linux_kernel_module_backend.md): FORWARD hook, a filter program per handle (SET_PROGRAM, or the
+ * 5-tuple of SET_FILTER, which is turned into a program). A handle either
  * sniffs (copies matching packets into the ring and lets them go) or holds (copies them into the ring and steals the original
  * until user space gives a verdict: resume, resume with new bytes, or drop). Handles have a priority and form a chain; a handle
  * can also inject packets of its own. SWDIVERT_ABI_VERSION stays 0 until the ABI is declared stable; user space refuses any
@@ -111,6 +112,86 @@ struct swdiv_inject_args {
 	__u32	reserved;
 };
 
+/*
+ * Filter programs. A program is a disjunction of clauses, each a conjunction of tests, as the user-space compiler produces from a
+ * WinDivert-style filter string. Layout: an array of instructions executed from index 0; a test that holds goes on to the next
+ * instruction, one that does not (or whose field is absent) jumps FORWARD to `fail`, which is the first instruction of the next
+ * clause; ACCEPT ends the program with a match; running off the end means no match. Jumps only go forward, so every program
+ * terminates within SWDIV_MAX_INSNS steps, and the kernel verifies that (and the rest below) before it accepts a program.
+ *
+ * Values are host-order integers: addresses as 0x0A0A0102 for 10.10.1.2, ports as 80. A field of a protocol the packet does not
+ * have (a TCP port of a UDP packet, any L4 field of a later fragment or of a header cut short) is absent and every test of it fails,
+ * whether it is ==, != or a range. Everything is read from the first SWDIV_VM_PREFIX bytes of the IP packet.
+ */
+#define SWDIV_MAX_INSNS		4096
+#define SWDIV_MAX_SETS		64
+#define SWDIV_MAX_SET_ELEMS	65536		/* per set (a port set counts its ranges) */
+#define SWDIV_MAX_TOTAL_ELEMS	(1U << 20)	/* over all sets of a program */
+#define SWDIV_VM_PREFIX		256
+
+struct swdiv_insn {
+	__u16	op;		/* SWDIV_OP_* */
+	__u16	fail;		/* where to continue when the test fails: index > this one, <= n_insns (n_insns = no match) */
+	__u16	src;		/* SWDIV_SRC_*: the value a test looks at */
+	__u16	k;		/* RAW_BYTE and *_PAYLOAD_BYTE: the offset, < SWDIV_VM_PREFIX; zero otherwise */
+	__u32	a;		/* the value to compare with, the mask, the lower bound or the set number */
+	__u32	b;		/* MASK_EQ: the value the masked field must have; RANGE: the upper bound; zero otherwise */
+};
+
+#define SWDIV_OP_ACCEPT		1	/* the packet matches (all other fields zero) */
+#define SWDIV_OP_EQ		2	/* src == a */
+#define SWDIV_OP_NE		3
+#define SWDIV_OP_LT		4
+#define SWDIV_OP_LE		5
+#define SWDIV_OP_GT		6
+#define SWDIV_OP_GE		7
+#define SWDIV_OP_MASK_EQ	8	/* (src & a) == b */
+#define SWDIV_OP_RANGE		9	/* a <= src <= b */
+#define SWDIV_OP_IN_SET		10	/* src is in set number a */
+#define SWDIV_OP_NOT_IN_SET	11	/* src is present and not in set number a */
+
+#define SWDIV_SRC_IP_PROTO	1
+#define SWDIV_SRC_IP_SRC	2
+#define SWDIV_SRC_IP_DST	3
+#define SWDIV_SRC_IP_TTL	4
+#define SWDIV_SRC_IP_TOTLEN	5
+#define SWDIV_SRC_IP_FRAG	6	/* the flags and fragment offset word, masked with 0x3fff (more-fragments and offset) */
+#define SWDIV_SRC_RAW_BYTE	7	/* byte k of the IP packet */
+#define SWDIV_SRC_TCP_SPORT	10
+#define SWDIV_SRC_TCP_DPORT	11
+#define SWDIV_SRC_UDP_SPORT	12
+#define SWDIV_SRC_UDP_DPORT	13
+#define SWDIV_SRC_TCP_FLAGS	14
+#define SWDIV_SRC_TCP_PAYLOAD_BYTE	15	/* byte k of the TCP payload (absent when it lies beyond the prefix or the packet) */
+#define SWDIV_SRC_UDP_PAYLOAD_BYTE	16
+#define SWDIV_SRC_TCP_PAYLOAD_LEN	17
+#define SWDIV_SRC_UDP_PAYLOAD_LEN	18
+#define SWDIV_SRC_IN_IFINDEX	30
+#define SWDIV_SRC_OUT_IFINDEX	31
+#define SWDIV_SRC_MARK		32
+#define SWDIV_SRC_OUTBOUND	33	/* 1 on the FORWARD hook, where every packet counts as outbound */
+#define SWDIV_SRC_LOOPBACK	34
+#define SWDIV_SRC_PKT_LEN	35	/* the whole packet's length, not only the prefix */
+
+#define SWDIV_SET_IPV4		1	/* n addresses, sorted ascending without duplicates */
+#define SWDIV_SET_PORTS		2	/* n ranges as (lo, hi) pairs of u32, ascending, not overlapping, hi <= 65535 */
+
+struct swdiv_set_desc {
+	__u32	kind;		/* SWDIV_SET_* */
+	__u32	n;
+	__u64	elems;		/* user pointer to n u32 (IPv4) or 2n u32 (ports) */
+};
+
+/* SWDIVERT_IOC_SET_PROGRAM: replaces the handle's program atomically, also while it is started (packets in flight see the old or
+ * the new program, never a mixture). The program is copied, then verified; nothing about it is trusted. */
+struct swdiv_program_args {
+	__u64	insns;		/* user pointer to struct swdiv_insn[n_insns]; n_insns = 0 is a program that matches nothing */
+	__u32	n_insns;
+	__u32	n_sets;
+	__u64	sets;		/* user pointer to struct swdiv_set_desc[n_sets] */
+	__u64	reserved;
+};
+
 #define SWDIVERT_IOC_VERSION	_IOR('s', 0x10, __u32)
 #define SWDIVERT_IOC_OPEN	_IOWR('s', 0x11, struct swdiv_open_args)
 #define SWDIVERT_IOC_SET_FILTER	_IOW('s', 0x12, struct swdiv_tuple)
@@ -119,6 +200,7 @@ struct swdiv_inject_args {
 #define SWDIVERT_IOC_STATS	_IOR('s', 0x15, struct swdiv_stats)
 #define SWDIVERT_IOC_VERDICT	_IOWR('s', 0x16, struct swdiv_verdict_args)
 #define SWDIVERT_IOC_INJECT	_IOW('s', 0x17, struct swdiv_inject_args)
+#define SWDIVERT_IOC_SET_PROGRAM _IOW('s', 0x18, struct swdiv_program_args)
 
 /*
  * Memory layout of the ring (mmap offset 0, read-only for user space):

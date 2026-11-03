@@ -7,6 +7,9 @@
 //   swbench sniff  --mode swdiv-hold|nfq-hold --port P [--proto udp|tcp] [--delay-ms D] [--drop-every K] [--batch yes] [--modify payload]
 //   swbench sniff  --mode swdiv-hold ... [--prio N] [--snap B] [--modify payload|grow|shrink|dport|dst|bad] [--to-port P] [--to-ip IP]
 //                                        [--twin yes --inject-if IF]   modify every held packet / inject a copy of it before resuming
+//   swbench sniff  ... [--filter "WinDivert-style filter"] [--filter2 F2 --swap-ms T]   filter program instead of --port/--proto; F2 replaces it after T ms
+//   swbench vmcheck [--filters N --packets M --seed S]   kernel against the reference evaluator, on packets injected through the rig
+//   swbench progcheck                       what SET_PROGRAM must accept and refuse
 //   swbench pktcheck --port P --iface IF   verifies IP and UDP checksums of the packets arriving on IF (AF_PACKET)
 //   swbench tcpsink --port P            one connection: prints bytes, an FNV-1a hash and the peer address
 //   swbench tcpsend --dst IP --port P --bytes N [--seed S]
@@ -42,6 +45,8 @@
 #include <libnetfilter_queue/libnetfilter_queue.h>
 #include <linux/netfilter.h>
 
+#include "filter_program.h"
+#include "support.h"
 #include "swdivert_ring.h"
 
 namespace {
@@ -273,6 +278,360 @@ int run_sink(const Args& args)
 	return 0;
 }
 
+// ---- filter programs ----
+
+int install_program(int fd, const kmodf::Program& program)
+{
+	std::vector<swdiv_set_desc> descs;
+	for (const kmodf::SetData& set : program.sets)
+	{
+		swdiv_set_desc desc = {};
+		desc.kind			= set.kind;
+		desc.n				= static_cast<__u32>(set.elems.size() / (set.kind == SWDIV_SET_PORTS ? 2 : 1));
+		desc.elems			= static_cast<__u64>(reinterpret_cast<uintptr_t>(set.elems.data()));
+		descs.push_back(desc);
+	}
+	swdiv_program_args args = {};
+	args.insns				= static_cast<__u64>(reinterpret_cast<uintptr_t>(program.insns.data()));
+	args.n_insns			= static_cast<__u32>(program.insns.size());
+	args.n_sets				= static_cast<__u32>(descs.size());
+	args.sets				= static_cast<__u64>(reinterpret_cast<uintptr_t>(descs.data()));
+	return ioctl(fd, SWDIVERT_IOC_SET_PROGRAM, &args);
+}
+
+// Compiles a filter string with the user-space compiler (the NFQUEUE backend's parser and DNF conversion) and installs the program.
+bool install_filter(int fd, const std::string& text)
+{
+	kmodf::Program program;
+	std::string	   error;
+	uint32_t	   position = 0;
+	if (!kmodf::compile_program(text, program, error, position))
+	{
+		std::fprintf(stderr, "swbench: filter '%s': %s (at %u)\n", text.c_str(), error.c_str(), position);
+		return false;
+	}
+	const std::string verdict = kmodf::verify_program(program);
+	if (!verdict.empty())
+	{
+		std::fprintf(stderr, "swbench: filter '%s': %s\n", text.c_str(), verdict.c_str());
+		return false;
+	}
+	if (install_program(fd, program) < 0)
+	{
+		std::fprintf(stderr, "swbench: filter '%s': SWDIVERT_IOC_SET_PROGRAM: %s\n", text.c_str(), std::strerror(errno));
+		return false;
+	}
+	return true;
+}
+
+// A handle with a ring and no reader, started: enough to count what a filter matches (and, with `priority`, to inject)
+int open_counting_handle(int priority)
+{
+	const int fd = open("/dev/" SWDIVERT_DEVICE_NAME, O_RDWR | O_CLOEXEC);
+	if (fd < 0)
+		die("open /dev/" SWDIVERT_DEVICE_NAME);
+	swdiv_open_args open_args = {};
+	open_args.slots			  = 64;
+	open_args.slot_bytes	  = 2048 + SWDIVERT_SLOT_HDR_BYTES;
+	open_args.priority		  = priority;
+	if (ioctl(fd, SWDIVERT_IOC_OPEN, &open_args) < 0)
+		die("SWDIVERT_IOC_OPEN");
+	if (ioctl(fd, SWDIVERT_IOC_START) < 0)
+		die("SWDIVERT_IOC_START");
+	return fd;
+}
+
+// A packet that survives everything in front of the FORWARD hook (valid header and checksum after the kernel recomputes it, a time to live
+// above 1, a destination the gateway routes to the server link) and still varies in what the filters look at.
+vmtest::Bytes forwardable_packet(vmtest::Rng& rng)
+{
+	using vmtest::pick;
+	vmtest::PacketSpec spec;
+	static const uint8_t protos[] = {6, 6, 6, 17, 17, 17, 1, 47};
+	spec.proto					  = protos[rng.below(8)];
+	spec.src					  = pick(rng, vmtest::addr_pool());
+	spec.dst					  = 0x0A0A0200 | (2 + rng.below(4));	// 10.10.2.2 .. 10.10.2.5
+	spec.sport					  = pick(rng, vmtest::port_pool());
+	spec.dport					  = pick(rng, vmtest::port_pool());
+	spec.ttl					  = static_cast<uint8_t>(2 + rng.below(60));
+	spec.ip_options				  = rng.chance(15) ? 1 + rng.below(2) : 0;	// zero bytes: an options list that ends at once
+	spec.tcp_flags				  = static_cast<uint8_t>(rng.below(64));
+	spec.tcp_doff				  = 5 + rng.below(3);
+	spec.frag					  = rng.chance(88) ? 0 : (rng.chance(50) ? 0x2000 : 1 + rng.below(100));
+	spec.payload.resize(rng.chance(80) ? rng.below(60) : rng.below(380));
+	for (uint8_t& byte : spec.payload)
+		byte = static_cast<uint8_t>(rng.next());
+	return vmtest::build(spec);
+}
+
+// The kernel's decision against the reference evaluator, packet by packet: random filters, compiled and installed, and random packets
+// injected on the client link. A second handle injects (a handle never sees what it injects itself) and the handle under test counts.
+int run_vmcheck(const Args& args)
+{
+	const long		 filters	= args.num("--filters", "40");
+	const long		 per_filter = args.num("--packets", "100");
+	vmtest::Rng		 rng(static_cast<uint64_t>(args.num("--seed", "7")));
+	const unsigned	 vc = if_nametoindex("vc"), vs = if_nametoindex("vs");
+	if (!vc || !vs)
+	{
+		std::fprintf(stderr, "swbench: vmcheck needs the client/server rig (interfaces vc and vs)\n");
+		return 2;
+	}
+	vmtest::addr_pool() = {0x0A0A0102, 0x0A0A0105, 0x0A0A0202, 0x0A0A0203, 0x0A0A0204, 0x0A0A0209};
+	vmtest::if_pool()	= {vc, vs, 999};
+
+	const int under_test = open_counting_handle(0);
+	const int injector	 = open_counting_handle(100);	// served first, so the handle under test sees its packets
+	uint64_t  compiled = 0, packets = 0, visited = 0, matched = 0, dropped_early = 0, odd = 0, mismatches = 0, user_mismatches = 0;
+
+	for (long f = 0; f < filters; ++f)
+	{
+		const std::string text = vmtest::random_filter(rng, 1 + rng.below(3));
+		kmodf::Program	  program;
+		std::string		  error;
+		uint32_t		  position = 0;
+		if (!kmodf::compile_program(text, program, error, position))
+			continue;
+		if (install_program(under_test, program) < 0)
+		{
+			std::fprintf(stderr, "vmcheck: the kernel refused a program the user-space verifier accepted: '%s': %s\n", text.c_str(), std::strerror(errno));
+			return 1;
+		}
+		++compiled;
+		const nfq::Node tree = nfq::parse_filter(text);
+		for (long i = 0; i < per_filter; ++i)
+		{
+			const vmtest::Bytes packet = forwardable_packet(rng);
+			vmtest::Meta		meta;
+			meta.in_ifindex	 = vc;
+			meta.out_ifindex = vs;
+			const bool expected = vmtest::reference(tree, false, vmtest::facts_of(packet, meta));
+			if (vmtest::run(program, packet, meta) != expected)
+				++user_mismatches;
+
+			swdiv_stats before = {}, after = {};
+			ioctl(under_test, SWDIVERT_IOC_STATS, &before);
+			swdiv_inject_args inject = {};
+			inject.data				 = static_cast<__u64>(reinterpret_cast<uintptr_t>(packet.data()));
+			inject.len				 = static_cast<__u32>(packet.size());
+			inject.flags			 = SWDIV_CALC_IP | SWDIV_CALC_L4;
+			inject.ifindex			 = vc;
+			if (ioctl(injector, SWDIVERT_IOC_INJECT, &inject) < 0)
+			{
+				++dropped_early;
+				continue;
+			}
+			ioctl(under_test, SWDIVERT_IOC_STATS, &after);
+			++packets;
+			const uint64_t seen = after.seen - before.seen, hit = after.matched - before.matched;
+			if (seen == 0)
+			{
+				++dropped_early;	// the stack dropped it before the hook (nothing to compare)
+			}
+			else if (seen == 1)
+			{
+				++visited;
+				matched += hit;
+				if ((hit == 1) != expected)
+				{
+					if (++mismatches <= 5)
+						std::fprintf(stderr, "vmcheck MISMATCH: filter '%s': kernel %s, reference %s, packet of %zu bytes (proto %d)\n", text.c_str(),
+									 hit ? "matched" : "did not match", expected ? "matches" : "does not match", packet.size(), packet[9]);
+				}
+			}
+			else
+			{
+				++odd;
+			}
+		}
+	}
+	std::printf("vmcheck_filters=%llu vmcheck_packets=%llu vmcheck_visited=%llu vmcheck_matched=%llu vmcheck_dropped_early=%llu vmcheck_odd=%llu vmcheck_mismatches=%llu "
+				"vmcheck_user_mismatches=%llu\n",
+				static_cast<unsigned long long>(compiled), static_cast<unsigned long long>(packets), static_cast<unsigned long long>(visited),
+				static_cast<unsigned long long>(matched), static_cast<unsigned long long>(dropped_early), static_cast<unsigned long long>(odd),
+				static_cast<unsigned long long>(mismatches), static_cast<unsigned long long>(user_mismatches));
+	return mismatches == 0 && user_mismatches == 0 && odd == 0 ? 0 : 1;
+}
+
+// What SET_PROGRAM has to accept and what it has to refuse, through the real ioctl.
+int run_progcheck(const Args&)
+{
+	const int fd = open("/dev/" SWDIVERT_DEVICE_NAME, O_RDWR | O_CLOEXEC);
+	if (fd < 0)
+		die("open /dev/" SWDIVERT_DEVICE_NAME);
+	struct Case
+	{
+		std::string					   what;
+		std::vector<swdiv_insn>		   insns;
+		std::vector<swdiv_set_desc>	   descs;
+		std::vector<std::vector<uint32_t>> arrays;	// the memory the descriptors point to
+		int							   expect_errno;	// 0: accepted
+	};
+	std::vector<Case> cases;
+	auto insn = [](uint16_t op, uint16_t src, uint32_t a, uint32_t b, uint16_t fail, uint16_t k = 0) {
+		swdiv_insn i = {};
+		i.op = op, i.src = src, i.a = a, i.b = b, i.fail = fail, i.k = k;
+		return i;
+	};
+	const swdiv_insn accept = insn(SWDIV_OP_ACCEPT, 0, 0, 0, 0);
+	auto add = [&](const std::string& what, std::vector<swdiv_insn> insns, int expect) {
+		Case c;
+		c.what = what, c.insns = std::move(insns), c.expect_errno = expect;
+		cases.push_back(std::move(c));
+	};
+	auto add_set = [&](Case& c, uint32_t kind, std::vector<uint32_t> elems) {
+		c.arrays.push_back(std::move(elems));
+		swdiv_set_desc d = {};
+		d.kind			 = kind;
+		d.n				 = static_cast<__u32>(c.arrays.back().size() / (kind == SWDIV_SET_PORTS ? 2 : 1));
+		c.descs.push_back(d);
+	};
+	add("a plain program", {insn(SWDIV_OP_EQ, SWDIV_SRC_IP_PROTO, 17, 0, 2), accept}, 0);
+	add("a program with no instructions", {}, 0);
+	add("a jump that does not go forward", {insn(SWDIV_OP_EQ, SWDIV_SRC_IP_PROTO, 17, 0, 0), accept}, EINVAL);
+	add("a jump past the end", {insn(SWDIV_OP_EQ, SWDIV_SRC_IP_PROTO, 17, 0, 3), accept}, EINVAL);
+	add("an unknown operation", {insn(40, SWDIV_SRC_IP_PROTO, 17, 0, 1)}, EINVAL);
+	add("an unknown source", {insn(SWDIV_OP_EQ, 77, 17, 0, 1)}, EINVAL);
+	add("a read offset beyond the prefix", {insn(SWDIV_OP_EQ, SWDIV_SRC_RAW_BYTE, 0, 0, 1, 256)}, EINVAL);
+	{
+		std::vector<swdiv_insn> max(SWDIV_MAX_INSNS, accept);
+		add("the largest program (4096 instructions)", max, 0);
+		max.push_back(accept);
+		add("one instruction too many", max, EINVAL);
+	}
+	{
+		Case c;
+		c.what = "a set that does not exist";
+		c.insns = {insn(SWDIV_OP_IN_SET, SWDIV_SRC_IP_SRC, 3, 0, 2), accept};
+		c.expect_errno = EINVAL;
+		cases.push_back(c);
+	}
+	{
+		Case c;
+		c.what = "an address set that is used";
+		c.insns = {insn(SWDIV_OP_IN_SET, SWDIV_SRC_IP_SRC, 0, 0, 2), accept};
+		c.expect_errno = 0;
+		add_set(c, SWDIV_SET_IPV4, {1, 5, 9});
+		cases.push_back(c);
+	}
+	for (const auto& [what, kind, elems] : std::vector<std::tuple<std::string, uint32_t, std::vector<uint32_t>>>{
+			 {"an unsorted address set", SWDIV_SET_IPV4, {5, 1}},
+			 {"an address set with a duplicate", SWDIV_SET_IPV4, {5, 5}},
+			 {"overlapping port ranges", SWDIV_SET_PORTS, {10, 20, 20, 30}},
+			 {"a reversed port range", SWDIV_SET_PORTS, {30, 20}},
+			 {"a port beyond 65535", SWDIV_SET_PORTS, {10, 70000}},
+			 {"an unknown set kind", 9, {1}}})
+	{
+		Case c;
+		c.what = what;
+		c.expect_errno = EINVAL;
+		add_set(c, kind, elems);
+		cases.push_back(std::move(c));
+	}
+	{
+		Case c;
+		c.what = "the largest set (65536 addresses)";
+		c.expect_errno = 0;
+		std::vector<uint32_t> big(SWDIV_MAX_SET_ELEMS);
+		for (uint32_t i = 0; i < big.size(); ++i)
+			big[i] = i;
+		add_set(c, SWDIV_SET_IPV4, big);
+		cases.push_back(std::move(c));
+		Case d;
+		d.what = "a set one element too large";
+		d.expect_errno = EINVAL;
+		big.push_back(SWDIV_MAX_SET_ELEMS);
+		add_set(d, SWDIV_SET_IPV4, big);
+		cases.push_back(std::move(d));
+	}
+	{
+		Case c;
+		c.what = "64 sets (the limit)";
+		c.expect_errno = 0;
+		for (uint32_t i = 0; i < SWDIV_MAX_SETS; ++i)
+			add_set(c, SWDIV_SET_IPV4, {i});
+		cases.push_back(std::move(c));
+		Case d;
+		d.what = "65 sets";
+		d.expect_errno = EINVAL;
+		for (uint32_t i = 0; i < SWDIV_MAX_SETS + 1; ++i)
+			add_set(d, SWDIV_SET_IPV4, {i});
+		cases.push_back(std::move(d));
+	}
+	{
+		// 16 sets of 65536 are exactly the total limit of 1 Mi elements; one more is over it
+		Case c;
+		c.what = "sets that add up to exactly the total limit";
+		c.expect_errno = 0;
+		std::vector<uint32_t> big(SWDIV_MAX_SET_ELEMS);
+		for (uint32_t i = 0; i < big.size(); ++i)
+			big[i] = i;
+		for (int i = 0; i < 16; ++i)
+			add_set(c, SWDIV_SET_IPV4, big);
+		cases.push_back(c);
+		Case d = c;
+		d.what = "sets that add up to more than the total limit";
+		d.expect_errno = EINVAL;
+		d.descs.clear();
+		d.arrays.clear();
+		for (int i = 0; i < 17; ++i)
+			add_set(d, SWDIV_SET_IPV4, big);
+		cases.push_back(std::move(d));
+	}
+
+	int failed = 0;
+	for (Case& c : cases)
+	{
+		// The descriptors point into c.arrays (their data pointers are stable: the vectors are not touched again)
+		for (size_t i = 0; i < c.descs.size(); ++i)
+			c.descs[i].elems = static_cast<__u64>(reinterpret_cast<uintptr_t>(c.arrays[i].data()));
+		swdiv_program_args args = {};
+		args.insns				= static_cast<__u64>(reinterpret_cast<uintptr_t>(c.insns.data()));
+		args.n_insns			= static_cast<__u32>(c.insns.size());
+		args.n_sets				= static_cast<__u32>(c.descs.size());
+		args.sets				= static_cast<__u64>(reinterpret_cast<uintptr_t>(c.descs.data()));
+		errno					= 0;
+		const int result		= ioctl(fd, SWDIVERT_IOC_SET_PROGRAM, &args);
+		const int got			= result == 0 ? 0 : errno;
+		if (got != c.expect_errno)
+		{
+			std::fprintf(stderr, "progcheck FAIL: %s: expected %s, got %s\n", c.what.c_str(), c.expect_errno ? std::strerror(c.expect_errno) : "success",
+						 got ? std::strerror(got) : "success");
+			++failed;
+		}
+	}
+	// Bad arguments of the call itself
+	auto expect = [&](const char* what, swdiv_program_args args, int expected) {
+		errno			 = 0;
+		const int result = ioctl(fd, SWDIVERT_IOC_SET_PROGRAM, &args);
+		const int got	 = result == 0 ? 0 : errno;
+		if (got != expected)
+		{
+			std::fprintf(stderr, "progcheck FAIL: %s: expected %s, got %s\n", what, expected ? std::strerror(expected) : "success", got ? std::strerror(got) : "success");
+			++failed;
+		}
+	};
+	swdiv_program_args a = {};
+	a.reserved			 = 1;
+	expect("reserved field set", a, EINVAL);
+	a = {};
+	a.n_insns = 5;	// no memory behind the pointer
+	expect("instructions at a null pointer", a, EFAULT);
+	a.insns = 0x1000;
+	expect("instructions at a wild pointer", a, EFAULT);
+	a = {};
+	a.n_sets = 2;
+	expect("set descriptors at a null pointer", a, EFAULT);
+	a = {};
+	a.n_insns = 0xFFFFFFFFu;
+	expect("an absurd instruction count", a, EINVAL);
+	a = {};
+	a.n_sets = 0xFFFFFFFFu;
+	expect("an absurd set count", a, EINVAL);
+	std::printf("progcheck_cases=%zu progcheck_failed=%d\n", cases.size() + 6, failed);
+	return failed == 0 ? 0 : 1;
+}
+
 // ---- fuzzing of the packet-writing ioctls ----
 // INJECT and RESUME_MOD take bytes from user space and put them on the wire. This throws well-formed, nearly well-formed and
 // plain garbage packets, odd flags, lengths and pointers at them. The module must answer with an error or deliver the packet, and
@@ -353,7 +712,7 @@ int run_fuzz(const Args& args)
 	for (long i = 0; i < iterations; ++i)
 	{
 		std::vector<unsigned char> p = packet();
-		switch (next() % 6)
+		switch (next() % 8)
 		{
 		case 0:
 		case 1:
@@ -397,6 +756,56 @@ int run_fuzz(const Args& args)
 			{
 				count(result);
 			}
+			break;
+		}
+		case 6:
+		{
+			// A program of random instructions, mostly plausible ones, with sets: the verifier decides
+			std::vector<swdiv_insn> insns(next() % 40);
+			static const uint16_t sources[] = {1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18, 30, 31, 32, 33, 34, 35};
+			for (size_t k = 0; k < insns.size(); ++k)
+			{
+				swdiv_insn& in = insns[k];
+				in.op		   = next() % 10 ? static_cast<uint16_t>(1 + next() % 11) : static_cast<uint16_t>(next());
+				in.src		   = next() % 6 ? sources[next() % 22] : static_cast<uint16_t>(next());
+				in.fail		   = next() % 4 ? static_cast<uint16_t>(k + 1 + next() % (insns.size() - k + 1)) : static_cast<uint16_t>(next());
+				in.k		   = next() % 3 ? 0 : static_cast<uint16_t>(next() % 300);
+				in.a		   = next() % 3 ? static_cast<uint32_t>(next() % 70) : static_cast<uint32_t>(next());
+				in.b		   = next() % 2 ? 0 : static_cast<uint32_t>(next() % 70);
+				if (in.op == SWDIV_OP_ACCEPT && next() % 4)
+					in.fail = in.src = in.k = 0, in.a = in.b = 0;
+			}
+			std::vector<std::vector<uint32_t>> arrays(next() % 4);
+			std::vector<swdiv_set_desc>		   descs(arrays.size());
+			for (size_t k = 0; k < arrays.size(); ++k)
+			{
+				descs[k].kind = next() % 8 ? 1 + next() % 2 : static_cast<uint32_t>(next());
+				const size_t n = next() % 30;
+				arrays[k].resize(n * (descs[k].kind == SWDIV_SET_PORTS ? 2 : 1));
+				uint32_t at = static_cast<uint32_t>(next() % 50);
+				for (uint32_t& v : arrays[k])
+					v = next() % 6 ? (at += 1 + static_cast<uint32_t>(next() % 9)) : static_cast<uint32_t>(next());
+				descs[k].n	   = static_cast<__u32>(n);
+				descs[k].elems = static_cast<__u64>(reinterpret_cast<uintptr_t>(arrays[k].data()));
+			}
+			swdiv_program_args pargs = {};
+			pargs.insns				 = static_cast<__u64>(reinterpret_cast<uintptr_t>(insns.data()));
+			pargs.n_insns			 = static_cast<__u32>(insns.size());
+			pargs.n_sets			 = static_cast<__u32>(descs.size());
+			pargs.sets				 = static_cast<__u64>(reinterpret_cast<uintptr_t>(descs.data()));
+			count(ioctl(fd, SWDIVERT_IOC_SET_PROGRAM, &pargs));
+			break;
+		}
+		case 7:
+		{
+			// Hostile arguments of the call itself
+			swdiv_program_args pargs = {};
+			pargs.insns				 = next() % 2 ? 0 : static_cast<__u64>(next());
+			pargs.n_insns			 = next() % 2 ? static_cast<__u32>(next() % 6000) : static_cast<__u32>(next());
+			pargs.sets				 = next() % 2 ? 0 : static_cast<__u64>(next());
+			pargs.n_sets			 = next() % 2 ? static_cast<__u32>(next() % 100) : static_cast<__u32>(next());
+			pargs.reserved			 = next() % 8 == 0;
+			count(ioctl(fd, SWDIVERT_IOC_SET_PROGRAM, &pargs));
 			break;
 		}
 		default:
@@ -838,7 +1247,7 @@ int sniff_swdiv(const Args& args, bool hold_mode)
 		inet_pton(AF_INET, args.get("--to-ip").c_str(), &plan.to_ip);
 	const bool		  twin		= args.get("--twin", "no") != "no";
 	const unsigned	  inject_if = if_nametoindex(args.get("--inject-if", "vc").c_str());
-	const long port	 = args.num("--port");
+	const long port	 = args.num("--port", "0");
 	const long snap	 = args.num("--snap", "224");
 	const long slots = args.num("--slots", "16384");
 
@@ -869,11 +1278,24 @@ int sniff_swdiv(const Args& args, bool hold_mode)
 					  static_cast<off_t>(open_args.cons_offset));
 	if (cons == MAP_FAILED)
 		die("mmap consumer page");
-	swdiv_tuple tuple = {};
-	tuple.proto		  = args.get("--proto", "udp") == "tcp" ? IPPROTO_TCP : IPPROTO_UDP;
-	tuple.dport		  = htons(static_cast<uint16_t>(port));
-	if (ioctl(fd, SWDIVERT_IOC_SET_FILTER, &tuple) < 0)
-		die("SWDIVERT_IOC_SET_FILTER");
+	const std::string filter  = args.get("--filter", "");
+	const std::string filter2 = args.get("--filter2", "");
+	if (!filter.empty())
+	{
+		if (!install_filter(fd, filter))
+			return 2;
+	}
+	else
+	{
+		swdiv_tuple tuple = {};
+		tuple.proto		  = args.get("--proto", "udp") == "tcp" ? IPPROTO_TCP : IPPROTO_UDP;
+		tuple.dport		  = htons(static_cast<uint16_t>(port));
+		if (ioctl(fd, SWDIVERT_IOC_SET_FILTER, &tuple) < 0)
+			die("SWDIVERT_IOC_SET_FILTER");
+	}
+	const long swap_ms = args.num("--swap-ms", "0");
+	uint64_t   swap_at = 0;
+	bool	   swapped = filter2.empty();
 
 	swdiv_ring_view view;
 	swdiv_ring_view_init(&view, data, open_args.hdr_bytes, static_cast<swdiv_cons*>(cons));
@@ -885,8 +1307,15 @@ int sniff_swdiv(const Args& args, bool hold_mode)
 	SniffResult result;
 	HoldState	hold;
 	hold.fd = fd;
+	swap_at = now_ns() + static_cast<uint64_t>(swap_ms) * 1000000ull;
 	while (!g_stop)
 	{
+		if (!swapped && now_ns() >= swap_at)
+		{
+			swapped = true;
+			if (!install_filter(fd, filter2))
+				std::fprintf(stderr, "swbench: the replacement filter was refused\n");
+		}
 		const __u32 avail = swdiv_ring_avail(&view);
 		if (avail != 0)
 		{
@@ -1254,6 +1683,10 @@ int main(int argc, char** argv)
 		return run_pktcheck(args);
 	if (command == "fuzz")
 		return run_fuzz(args);
+	if (command == "vmcheck")
+		return run_vmcheck(args);
+	if (command == "progcheck")
+		return run_progcheck(args);
 	if (command == "tcpsink")
 		return run_tcpsink(args);
 	if (command == "tcpsend")

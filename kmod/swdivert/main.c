@@ -41,6 +41,18 @@ static int swdiv_open(struct inode *inode, struct file *file)
 		kfree(handle);
 		return -ENOMEM;
 	}
+	/* Until user space sets a filter every IPv4 packet matches */
+	{
+		const struct swdiv_tuple any = {};
+		struct swdiv_prog *prog = swdiv_prog_from_tuple(&any);
+
+		if (IS_ERR(prog)) {
+			free_percpu(handle->stats);
+			kfree(handle);
+			return PTR_ERR(prog);
+		}
+		RCU_INIT_POINTER(handle->prog, prog);
+	}
 	mutex_init(&handle->lock);
 	init_waitqueue_head(&handle->wq);
 	swdiv_wake_timer_init(handle);
@@ -77,6 +89,7 @@ static int swdiv_release(struct inode *inode, struct file *file)
 	swdiv_wake_timer_cancel(handle);
 	swdiv_hold_unregister(handle);
 	swdiv_hold_destroy(handle);
+	swdiv_prog_free(handle);
 	if (handle->ring_ready)
 		swdiv_ring_free(&handle->ring);
 	put_net(handle->net);
@@ -136,13 +149,31 @@ static long swdiv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		break;
 	case SWDIVERT_IOC_SET_FILTER: {
 		struct swdiv_tuple tuple;
+		struct swdiv_prog *prog;
 
-		if (handle->started) {
-			ret = -EBUSY;
-		} else if (copy_from_user(&tuple, argp, sizeof(tuple))) {
+		if (copy_from_user(&tuple, argp, sizeof(tuple))) {
 			ret = -EFAULT;
 		} else {
-			handle->tuple = tuple;
+			prog = swdiv_prog_from_tuple(&tuple);
+			if (IS_ERR(prog))
+				ret = PTR_ERR(prog);
+			else
+				swdiv_prog_install(handle, prog);
+		}
+		break;
+	}
+	case SWDIVERT_IOC_SET_PROGRAM: {
+		struct swdiv_program_args pargs;
+		struct swdiv_prog *prog;
+
+		if (copy_from_user(&pargs, argp, sizeof(pargs))) {
+			ret = -EFAULT;
+		} else {
+			prog = swdiv_prog_from_user(&pargs);
+			if (IS_ERR(prog))
+				ret = PTR_ERR(prog);
+			else
+				swdiv_prog_install(handle, prog);
 		}
 		break;
 	}
