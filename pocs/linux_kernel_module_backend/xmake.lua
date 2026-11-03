@@ -10,7 +10,7 @@ if is_plat("linux") then
         -- `swbench backend ...` drives the real lagsw backend (backends/kmod) with traffic, so it links it and what it needs
         add_files("backend_cmd.cc", "../../backends/kmod/backend.cc", "../../backends/kmod/module.cc")
         add_files("../../backends/nfqueue/filters.cc", "../../backends/nfqueue/checksums.cc", "../../backends/nfqueue/privileges.cc")
-        add_files("../../src/log.cc", "../../tests/support/platform_stub.cc")
+        add_files("../../src/log/*.cc", "../../tests/support/platform_stub.cc")
         add_includedirs("../../include", "../../src", "../../tests")
         add_includedirs("../../kmod/include", "../../backends/kmod", "../../backends/nfqueue", "../../tests/kmod_vm")
         add_syslinks("pthread")

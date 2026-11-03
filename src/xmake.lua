@@ -1,7 +1,7 @@
 target("lagsw")
     set_version("8")
     set_kind("binary")
-    add_files("*.cc", "packet_mode/*.cc", "passive_latency/*.cc", "net_monitor/*.cc", "config_tui/*.cc", "options/*.cc", "packet_engine/*.cc")
+    add_files("*.cc", "log/*.cc", "packet_mode/*.cc", "passive_latency/*.cc", "net_monitor/*.cc", "config_tui/*.cc", "options/*.cc", "packet_engine/*.cc")
 
     -- The version banner; only this file is rebuilt when the commit changes
     on_load(function (target)

@@ -4,7 +4,7 @@ target("engine_test")
     set_default(false)
     set_rundir(os.projectdir())
     add_files("engine_test.cc", "fakes.cc", "../support/platform_stub.cc")
-    add_files("../../src/log.cc", "../../src/format.cc", "../../src/packet_headers.cc", "../../src/packet_mode/*.cc", "../../src/passive_latency/*.cc", "../../src/packet_engine/*.cc")
+    add_files("../../src/log/*.cc", "../../src/format.cc", "../../src/packet_headers.cc", "../../src/packet_mode/*.cc", "../../src/passive_latency/*.cc", "../../src/packet_engine/*.cc")
     add_includedirs("../../include", "../../src", "..")
     add_options("server_discovery", "region_enforcement", "passive_latency", "pcap_files", "desync_countdown", "forwarded_address_discovery", "netfilter_monitor", "net_monitor")
     if not is_plat("windows") then
