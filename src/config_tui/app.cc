@@ -1133,17 +1133,17 @@ std::string App::render(int width, int height)
 		prompt_.kind == Prompt::Kind::edit_value || prompt_.kind == Prompt::Kind::add_value || prompt_.kind == Prompt::Kind::select_value;
 	if (dialog && columns >= 12 && total >= 9)
 	{
-		const bool		  select = prompt_.kind == Prompt::Kind::select_value;
-		const size_t	  width	 = (std::min)(columns - 4, size_t{64});
-		const size_t	  inner	 = width - 4;
-		const std::string title	 = select ? "Select value" : prompt_.kind == Prompt::Kind::add_value ? "Add item" : "Edit value";
-		const auto		  line	 = [&](const std::string& content, const char* style) {
+		const bool		  select	   = prompt_.kind == Prompt::Kind::select_value;
+		const size_t	  dialog_width = (std::min)(columns - 4, size_t{64});
+		const size_t	  inner		   = dialog_width - 4;
+		const std::string title		   = select ? "Select value" : prompt_.kind == Prompt::Kind::add_value ? "Add item" : "Edit value";
+		const auto		  line		   = [&](const std::string& content, const char* style) {
 			return std::string(kBold) + "\u2502 " + kReset + style + fit(content, inner) + kReset + kBold + " \u2502" + kReset;
 		};
 		const auto edge = [&](const char* open, const char* close, const std::string& heading) {
 			const std::string shown = heading.empty() ? std::string() : " " + heading + " ";
 			std::string		  out	= std::string(kBold) + open + "\u2500" + shown;
-			for (size_t i = shown.size() + 1; i < width - 2; ++i)
+			for (size_t i = shown.size() + 1; i < dialog_width - 2; ++i)
 				out += "\u2500";
 			return out + close + kReset;
 		};
@@ -1170,7 +1170,7 @@ std::string App::render(int width, int height)
 			box.push_back(line("Enter confirm  Esc cancel", kDim));
 		}
 		box.push_back(edge("\u2514", "\u2518", ""));
-		const size_t left = (columns - width) / 2 + 1;
+		const size_t left = (columns - dialog_width) / 2 + 1;
 		const size_t top  = (total > box.size() ? (total - box.size()) / 2 : 0) + 1;
 		for (size_t i = 0; i < box.size(); ++i)
 			frame += "\033[" + std::to_string(top + i) + ";" + std::to_string(left) + "H" + box[i];

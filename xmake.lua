@@ -7,6 +7,8 @@ if is_mode("release") then
 
     set_optimize("fastest")
 	add_defines("NDEBUG", "_NDEBUG")
+
+    set_strip("all")
 end
 
 if is_mode("debug") then

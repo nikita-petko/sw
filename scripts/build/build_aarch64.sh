@@ -172,7 +172,8 @@ if [[ $refresh -eq 1 || ! -f "$marker" ]]; then
 else
     echo "Using the existing sysroot $sysroot (--refresh recreates it)"
 fi
-[[ -f "$sysroot/usr/include/curl/curl.h" ]] || die "sysroot is incomplete: curl/curl.h is missing"
+[[ -f "$sysroot/usr/include/curl/curl.h" || -f "$sysroot/usr/include/aarch64-linux-gnu/curl/curl.h" ]] ||
+    die "sysroot is incomplete: curl/curl.h is missing"
 [[ $sysroot_only -eq 0 ]] || { echo "Sysroot ready: $sysroot"; exit 0; }
 
 # ---- Build ----

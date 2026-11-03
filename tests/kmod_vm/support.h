@@ -1,6 +1,6 @@
-// Helpers shared by the unit tests and the fuzz harness of the swdivert filter VM: a packet builder, random packet and filter generators and
-// a reference evaluator that reads a filter's syntax tree directly (no clauses, no sets, no instructions) so that it can be compared with the
-// compiled program.
+// Helpers shared by the unit tests and the fuzz harness of the swdivert filter VM: a packet builder, random packet and filter generators
+// and a reference evaluator that reads a filter's syntax tree directly (no clauses, no sets, no instructions) so that it can be compared
+// with the compiled program.
 #ifndef TESTS_KMOD_VM_SUPPORT_H_
 #define TESTS_KMOD_VM_SUPPORT_H_
 
@@ -62,7 +62,7 @@ struct PacketSpec
 // A well-formed packet for the spec (lengths consistent, no checksums: the VM does not look at them)
 inline Bytes build(const PacketSpec& s)
 {
-	const size_t ihl	= 20 + s.ip_options * 4;
+	const size_t ihl = 20 + s.ip_options * 4;
 	// A TCP header always occupies at least its 20 fixed bytes, whatever the data-offset nibble claims (a nibble below 5 is how the tests
 	// make a malformed header; it must not make the buffer too small to write the fixed fields into)
 	const size_t l4_len = s.proto == 6 ? 20 + (s.tcp_doff > 5 ? (s.tcp_doff - 5) * 4 : 0) : s.proto == 17 ? 8 : 0;
@@ -115,7 +115,11 @@ inline bool run(const kmodf::Program& program, const Bytes& packet, const Meta& 
 {
 	const std::vector<swdiv_vm_set> sets = kmodf::vm_sets(program);
 	const swdiv_vm_ctx				ctx	 = context(packet, meta);
-	return swdiv_vm_run(program.insns.data(), static_cast<uint32_t>(program.insns.size()), sets.data(), static_cast<uint32_t>(sets.size()), &ctx) != 0;
+	return swdiv_vm_run(program.insns.data(),
+						static_cast<uint32_t>(program.insns.size()),
+						sets.data(),
+						static_cast<uint32_t>(sets.size()),
+						&ctx) != 0;
 }
 
 // ---- random packets ----
@@ -137,12 +141,15 @@ inline std::vector<uint32_t>& if_pool()
 	static std::vector<uint32_t> pool = {1, 2, 3, 4};
 	return pool;
 }
-inline uint32_t pick(Rng& rng, const std::vector<uint32_t>& pool) { return pool[rng.below(static_cast<uint32_t>(pool.size()))]; }
+inline uint32_t pick(Rng& rng, const std::vector<uint32_t>& pool)
+{
+	return pool[rng.below(static_cast<uint32_t>(pool.size()))];
+}
 
 // A mostly valid IPv4 packet with the odd inconsistency: truncation, wrong total length, odd header lengths, later fragments.
 inline Bytes random_packet(Rng& rng)
 {
-	PacketSpec spec;
+	PacketSpec			 spec;
 	static const uint8_t protos[] = {6, 6, 6, 17, 17, 17, 1, 47};
 	spec.proto					  = protos[rng.below(8)];
 	spec.src					  = rng.chance(85) ? pick(rng, addr_pool()) : static_cast<uint32_t>(rng.next());
@@ -152,14 +159,14 @@ inline Bytes random_packet(Rng& rng)
 	spec.ttl					  = static_cast<uint8_t>(rng.below(256));
 	spec.ip_options				  = rng.chance(20) ? rng.below(4) : 0;
 	spec.tcp_flags				  = static_cast<uint8_t>(rng.below(64));
-	spec.tcp_doff				  = rng.chance(90) ? 5 + rng.below(3) : rng.below(5);	 // sometimes a header that is too short
+	spec.tcp_doff				  = rng.chance(90) ? 5 + rng.below(3) : rng.below(5);  // sometimes a header that is too short
 	spec.frag					  = rng.chance(85) ? 0 : (rng.chance(50) ? 0x2000 : rng.below(0x4000));
 	spec.payload.resize(rng.chance(80) ? rng.below(80) : rng.below(400));
 	for (uint8_t& byte : spec.payload)
 		byte = static_cast<uint8_t>(rng.next());
 	Bytes p = build(spec);
 	if (rng.chance(8) && p.size() > 20)
-		put16(p, 2, rng.below(static_cast<uint32_t>(p.size() + 40)));	 // a wrong total length
+		put16(p, 2, rng.below(static_cast<uint32_t>(p.size() + 40)));  // a wrong total length
 	if (rng.chance(8) && p.size() > 21)
 		p.resize(20 + rng.below(static_cast<uint32_t>(p.size() - 20)));	 // cut short
 	return p;
@@ -169,17 +176,22 @@ inline Bytes random_packet(Rng& rng)
 
 inline std::string address_text(uint32_t a)
 {
-	return std::to_string(a >> 24) + "." + std::to_string((a >> 16) & 255) + "." + std::to_string((a >> 8) & 255) + "." + std::to_string(a & 255);
+	return std::to_string(a >> 24) + "." + std::to_string((a >> 16) & 255) + "." + std::to_string((a >> 8) & 255) + "." +
+		   std::to_string(a & 255);
 }
 
 inline std::string random_term(Rng& rng)
 {
 	switch (rng.below(14))
 	{
-		case 0: return "tcp";
-		case 1: return "udp";
-		case 2: return rng.chance(80) ? "ip" : "ipv6";
-		case 3: return rng.chance(50) ? "outbound" : "inbound";
+		case 0:
+			return "tcp";
+		case 1:
+			return "udp";
+		case 2:
+			return rng.chance(80) ? "ip" : "ipv6";
+		case 3:
+			return rng.chance(50) ? "outbound" : "inbound";
 		case 4:
 			{
 				static const char* flags[] = {"tcp.Syn", "tcp.Ack", "tcp.Fin", "tcp.Rst", "tcp.Psh", "tcp.Urg"};
@@ -212,9 +224,12 @@ inline std::string random_term(Rng& rng)
 				static const char* names[] = {"tcp.SrcPort", "tcp.DstPort", "udp.SrcPort", "udp.DstPort"};
 				return std::string(names[rng.below(4)]) + (rng.chance(75) ? " == " : " != ") + std::to_string(pick(rng, port_pool()));
 			}
-		case 11: return std::string("ifIdx ") + (rng.chance(75) ? "== " : "!= ") + std::to_string(pick(rng, if_pool()));
-		case 12: return rng.chance(50) ? "true" : "false";
-		default: return "tcp.DstPort == " + std::to_string(rng.below(65536));
+		case 11:
+			return std::string("ifIdx ") + (rng.chance(75) ? "== " : "!= ") + std::to_string(pick(rng, if_pool()));
+		case 12:
+			return rng.chance(50) ? "true" : "false";
+		default:
+			return "tcp.DstPort == " + std::to_string(rng.below(65536));
 	}
 }
 
@@ -237,7 +252,7 @@ inline std::string random_filter(Rng& rng, unsigned depth)
 // The packet as the documented semantics see it (kmod/include/swdivert_abi.h): which fields exist and what they hold.
 struct Facts
 {
-	bool	 ipv4 = false;
+	bool	 ipv4  = false;
 	uint32_t proto = 0, src = 0, dst = 0;
 	bool	 has_ports = false, has_flags = false;
 	uint32_t sport = 0, dport = 0, flags = 0;
@@ -246,9 +261,9 @@ struct Facts
 
 inline Facts facts_of(const Bytes& packet, const Meta& meta)
 {
-	Facts		 f;
-	f.meta					  = meta;
-	const size_t available	  = std::min<size_t>(packet.size(), SWDIV_VM_PREFIX);
+	Facts f;
+	f.meta				   = meta;
+	const size_t available = std::min<size_t>(packet.size(), SWDIV_VM_PREFIX);
 	if (available < 20 || (packet[0] >> 4) != 4)
 		return f;
 	const size_t ihl = static_cast<size_t>(packet[0] & 15) * 4;
@@ -257,12 +272,14 @@ inline Facts facts_of(const Bytes& packet, const Meta& meta)
 	const size_t total = (static_cast<size_t>(packet[2]) << 8) | packet[3];
 	if (total < ihl)
 		return f;
-	f.ipv4				= true;
-	f.proto				= packet[9];
-	f.src				= (static_cast<uint32_t>(packet[12]) << 24) | (static_cast<uint32_t>(packet[13]) << 16) | (static_cast<uint32_t>(packet[14]) << 8) | packet[15];
-	f.dst				= (static_cast<uint32_t>(packet[16]) << 24) | (static_cast<uint32_t>(packet[17]) << 16) | (static_cast<uint32_t>(packet[18]) << 8) | packet[19];
-	const size_t end	= std::min(total, available);
-	const bool	 first	= (((static_cast<uint32_t>(packet[6]) << 8) | packet[7]) & 0x1FFF) == 0;
+	f.ipv4			   = true;
+	f.proto			   = packet[9];
+	f.src			   = (static_cast<uint32_t>(packet[12]) << 24) | (static_cast<uint32_t>(packet[13]) << 16) |
+						 (static_cast<uint32_t>(packet[14]) << 8) | packet[15];
+	f.dst			   = (static_cast<uint32_t>(packet[16]) << 24) | (static_cast<uint32_t>(packet[17]) << 16) |
+						 (static_cast<uint32_t>(packet[18]) << 8) | packet[19];
+	const size_t end   = std::min(total, available);
+	const bool	 first = (((static_cast<uint32_t>(packet[6]) << 8) | packet[7]) & 0x1FFF) == 0;
 	if ((f.proto == 6 || f.proto == 17) && first && end >= ihl + 4)
 	{
 		f.has_ports = true;
@@ -285,18 +302,28 @@ inline bool literal(const nfq::Leaf& leaf, bool negated, const Facts& f)
 		return false;
 	switch (leaf.kind)
 	{
-		case LeafKind::proto_tcp: return (f.proto == 6) != negated;
-		case LeafKind::proto_udp: return (f.proto == 17) != negated;
-		case LeafKind::proto_ip: return !negated;
-		case LeafKind::proto_ipv6: return negated;
-		case LeafKind::outbound: return !negated;	// on the forward path every packet is outbound
-		case LeafKind::inbound: return negated;
+		case LeafKind::proto_tcp:
+			return (f.proto == 6) != negated;
+		case LeafKind::proto_udp:
+			return (f.proto == 17) != negated;
+		case LeafKind::proto_ip:
+			return !negated;
+		case LeafKind::proto_ipv6:
+			return negated;
+		case LeafKind::outbound:
+			return !negated;  // on the forward path every packet is outbound
+		case LeafKind::inbound:
+			return negated;
 		case LeafKind::flag:
 			{
 				// A field of an absent protocol never matches, negated or not
 				if (!f.has_flags)
 					return false;
-				static const struct { const char* name; uint32_t bit; } table[] = {{"fin", 1}, {"syn", 2}, {"rst", 4}, {"psh", 8}, {"ack", 16}, {"urg", 32}};
+				static const struct
+				{
+					const char* name;
+					uint32_t	bit;
+				} table[]	 = {{"fin", 1}, {"syn", 2}, {"rst", 4}, {"psh", 8}, {"ack", 16}, {"urg", 32}};
 				uint32_t bit = 0;
 				for (const auto& entry : table)
 					if (std::string(leaf.flag_name) == entry.name)
@@ -330,9 +357,12 @@ inline bool reference(const nfq::Node& node, bool negated, const Facts& f)
 {
 	switch (node.type)
 	{
-		case nfq::Node::Type::constant: return node.value != negated;
-		case nfq::Node::Type::negation: return reference(node.kids.front(), !negated, f);
-		case nfq::Node::Type::leaf: return literal(node.leaf, negated, f);
+		case nfq::Node::Type::constant:
+			return node.value != negated;
+		case nfq::Node::Type::negation:
+			return reference(node.kids.front(), !negated, f);
+		case nfq::Node::Type::leaf:
+			return literal(node.leaf, negated, f);
 		case nfq::Node::Type::conjunction:
 		case nfq::Node::Type::disjunction:
 			{

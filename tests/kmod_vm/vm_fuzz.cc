@@ -28,7 +28,7 @@ struct Exact
 {
 	std::unique_ptr<T[]> data;
 	size_t				 size = 0;
-	Exact() = default;
+	Exact()					  = default;
 	explicit Exact(size_t n) : data(new T[n ? n : 1]()), size(n) {}
 	T* get() const { return data.get(); }
 };
@@ -42,11 +42,28 @@ Exact<uint8_t> exact_bytes(const Bytes& bytes)
 
 uint32_t pick_src(Rng& rng)
 {
-	static const uint16_t valid[] = {SWDIV_SRC_IP_PROTO, SWDIV_SRC_IP_SRC, SWDIV_SRC_IP_DST, SWDIV_SRC_IP_TTL, SWDIV_SRC_IP_TOTLEN, SWDIV_SRC_IP_FRAG,
-									 SWDIV_SRC_RAW_BYTE, SWDIV_SRC_TCP_SPORT, SWDIV_SRC_TCP_DPORT, SWDIV_SRC_UDP_SPORT, SWDIV_SRC_UDP_DPORT,
-									 SWDIV_SRC_TCP_FLAGS, SWDIV_SRC_TCP_PAYLOAD_BYTE, SWDIV_SRC_UDP_PAYLOAD_BYTE, SWDIV_SRC_TCP_PAYLOAD_LEN,
-									 SWDIV_SRC_UDP_PAYLOAD_LEN, SWDIV_SRC_IN_IFINDEX, SWDIV_SRC_OUT_IFINDEX, SWDIV_SRC_MARK, SWDIV_SRC_OUTBOUND,
-									 SWDIV_SRC_LOOPBACK, SWDIV_SRC_PKT_LEN};
+	static const uint16_t valid[] = {SWDIV_SRC_IP_PROTO,
+									 SWDIV_SRC_IP_SRC,
+									 SWDIV_SRC_IP_DST,
+									 SWDIV_SRC_IP_TTL,
+									 SWDIV_SRC_IP_TOTLEN,
+									 SWDIV_SRC_IP_FRAG,
+									 SWDIV_SRC_RAW_BYTE,
+									 SWDIV_SRC_TCP_SPORT,
+									 SWDIV_SRC_TCP_DPORT,
+									 SWDIV_SRC_UDP_SPORT,
+									 SWDIV_SRC_UDP_DPORT,
+									 SWDIV_SRC_TCP_FLAGS,
+									 SWDIV_SRC_TCP_PAYLOAD_BYTE,
+									 SWDIV_SRC_UDP_PAYLOAD_BYTE,
+									 SWDIV_SRC_TCP_PAYLOAD_LEN,
+									 SWDIV_SRC_UDP_PAYLOAD_LEN,
+									 SWDIV_SRC_IN_IFINDEX,
+									 SWDIV_SRC_OUT_IFINDEX,
+									 SWDIV_SRC_MARK,
+									 SWDIV_SRC_OUTBOUND,
+									 SWDIV_SRC_LOOPBACK,
+									 SWDIV_SRC_PKT_LEN};
 	return rng.chance(85) ? valid[rng.below(sizeof(valid) / sizeof(valid[0]))] : static_cast<uint32_t>(rng.next());
 }
 
@@ -64,13 +81,13 @@ struct RandomSets
 
 RandomSets random_sets(Rng& rng)
 {
-	RandomSets sets;
+	RandomSets	   sets;
 	const unsigned count = rng.below(5);
 	for (unsigned i = 0; i < count; ++i)
 	{
-		const uint32_t kind = rng.chance(90) ? 1 + rng.below(2) : static_cast<uint32_t>(rng.next());
-		const uint32_t n	= rng.chance(10) ? 0 : rng.below(40);
-		const uint32_t per	= kind == SWDIV_SET_PORTS ? 2 : 1;
+		const uint32_t	kind = rng.chance(90) ? 1 + rng.below(2) : static_cast<uint32_t>(rng.next());
+		const uint32_t	n	 = rng.chance(10) ? 0 : rng.below(40);
+		const uint32_t	per	 = kind == SWDIV_SET_PORTS ? 2 : 1;
 		Exact<uint32_t> block(static_cast<size_t>(n) * per);
 		for (size_t j = 0; j < block.size; ++j)
 			block.get()[j] = special(rng);
@@ -81,16 +98,16 @@ RandomSets random_sets(Rng& rng)
 			{
 				const uint32_t base = rng.below(5);
 				for (size_t j = 0; j < block.size; ++j)
-					block.get()[j] = static_cast<uint32_t>(j) * 3 + base;	 // strictly ascending
+					block.get()[j] = static_cast<uint32_t>(j) * 3 + base;  // strictly ascending
 			}
 			else
 			{
 				uint32_t at = rng.below(100);
 				for (uint32_t j = 0; j < n; ++j)
 				{
-					block.get()[2 * j]		= at;
-					block.get()[2 * j + 1]	= at + rng.below(50);
-					at						= block.get()[2 * j + 1] + 1 + rng.below(100);
+					block.get()[2 * j]	   = at;
+					block.get()[2 * j + 1] = at + rng.below(50);
+					at					   = block.get()[2 * j + 1] + 1 + rng.below(100);
 				}
 			}
 		}
@@ -107,7 +124,8 @@ std::vector<swdiv_insn> random_program(Rng& rng)
 	for (uint32_t i = 0; i < n; ++i)
 	{
 		swdiv_insn& insn = insns[i];
-		insn.op			 = rng.chance(10) ? static_cast<uint16_t>(rng.next()) : static_cast<uint16_t>(rng.chance(12) ? SWDIV_OP_ACCEPT : 2 + rng.below(10));
+		insn.op			 = rng.chance(10) ? static_cast<uint16_t>(rng.next())
+										  : static_cast<uint16_t>(rng.chance(12) ? SWDIV_OP_ACCEPT : 2 + rng.below(10));
 		insn.src		 = static_cast<uint16_t>(pick_src(rng));
 		insn.fail		 = rng.chance(75) ? static_cast<uint16_t>(i + 1 + rng.below(n - i + 1)) : static_cast<uint16_t>(rng.next());
 		insn.k			 = rng.chance(70) ? 0 : static_cast<uint16_t>(rng.chance(80) ? rng.below(300) : rng.next());
@@ -125,18 +143,21 @@ Bytes hostile_packet(Rng& rng)
 {
 	switch (rng.below(6))
 	{
-		case 0: return Bytes();
-		case 1: return Bytes(rng.below(20), static_cast<uint8_t>(rng.next()));	  // too short for an IP header
+		case 0:
+			return Bytes();
+		case 1:
+			return Bytes(rng.below(20), static_cast<uint8_t>(rng.next()));	// too short for an IP header
 		case 2:
 			{
 				Bytes b(rng.below(400));
 				for (uint8_t& byte : b)
 					byte = static_cast<uint8_t>(rng.next());
 				if (!b.empty() && rng.chance(60))
-					b[0] = static_cast<uint8_t>(0x40 | rng.below(16));	  // IPv4 with any header length
+					b[0] = static_cast<uint8_t>(0x40 | rng.below(16));	// IPv4 with any header length
 				return b;
 			}
-		default: return random_packet(rng);
+		default:
+			return random_packet(rng);
 	}
 }
 
@@ -144,24 +165,24 @@ unsigned long long g_runs = 0, g_matches = 0, g_verified = 0, g_programs = 0, g_
 
 void run_on_packets(Rng& rng, const std::vector<swdiv_insn>& program, const RandomSets& sets, bool verified, unsigned packets)
 {
-	const uint32_t n = static_cast<uint32_t>(program.size());
+	const uint32_t	  n = static_cast<uint32_t>(program.size());
 	Exact<swdiv_insn> insns(n);
 	std::copy(program.begin(), program.end(), insns.get());
 	for (unsigned i = 0; i < packets; ++i)
 	{
-		const Bytes			  packet = hostile_packet(rng);
+		const Bytes			 packet = hostile_packet(rng);
 		const Exact<uint8_t> block	= exact_bytes(packet);
-		swdiv_vm_ctx		  ctx	= {};
-		ctx.pkt					 = block.get();
-		ctx.len					 = static_cast<uint32_t>(std::min<size_t>(packet.size(), SWDIV_VM_PREFIX));
-		ctx.total_len			 = static_cast<uint32_t>(packet.size());
-		ctx.in_ifindex			 = rng.below(5);
-		ctx.out_ifindex			 = rng.below(5);
-		ctx.mark				 = static_cast<uint32_t>(rng.next());
-		ctx.outbound			 = 1;
+		swdiv_vm_ctx		 ctx	= {};
+		ctx.pkt						= block.get();
+		ctx.len						= static_cast<uint32_t>(std::min<size_t>(packet.size(), SWDIV_VM_PREFIX));
+		ctx.total_len				= static_cast<uint32_t>(packet.size());
+		ctx.in_ifindex				= rng.below(5);
+		ctx.out_ifindex				= rng.below(5);
+		ctx.mark					= static_cast<uint32_t>(rng.next());
+		ctx.outbound				= 1;
 		if (rng.chance(3))
-			ctx.len = static_cast<uint32_t>(packet.size());	// an oversized prefix is refused, not read
-		g_steps = 0;
+			ctx.len = static_cast<uint32_t>(packet.size());	 // an oversized prefix is refused, not read
+		g_steps			 = 0;
 		const int result = swdiv_vm_run(insns.get(), n, sets.views.data(), static_cast<uint32_t>(sets.views.size()), &ctx);
 		if (result != 0 && result != 1)
 			fail("the VM returned something other than 0 or 1");
@@ -184,7 +205,10 @@ void fuzz_programs(Rng& rng)
 	for (const swdiv_vm_set& set : sets.views)
 		if (swdiv_vm_verify_set(set.kind, set.n, set.elems) != 0)
 			sets_ok = false;
-	const bool verified = sets_ok && swdiv_vm_verify(program.data(), static_cast<uint32_t>(program.size()), sets.views.data(), static_cast<uint32_t>(sets.views.size())) == 0;
+	const bool verified = sets_ok && swdiv_vm_verify(program.data(),
+													 static_cast<uint32_t>(program.size()),
+													 sets.views.data(),
+													 static_cast<uint32_t>(sets.views.size())) == 0;
 	++g_programs;
 	g_verified += verified;
 	// Verified programs are the contract; unverified ones must not be able to hurt either (the interpreter does not trust the verifier)
@@ -208,12 +232,24 @@ void fuzz_mutated_real_programs(Rng& rng)
 		swdiv_insn& insn = mutated[rng.below(static_cast<uint32_t>(mutated.size()))];
 		switch (rng.below(6))
 		{
-			case 0: insn.op = static_cast<uint16_t>(rng.chance(50) ? 1 + rng.below(12) : rng.next()); break;
-			case 1: insn.src = static_cast<uint16_t>(pick_src(rng)); break;
-			case 2: insn.fail = static_cast<uint16_t>(rng.chance(50) ? rng.below(static_cast<uint32_t>(mutated.size() + 2)) : rng.next()); break;
-			case 3: insn.a = special(rng); break;
-			case 4: insn.b = special(rng); break;
-			default: insn.k = static_cast<uint16_t>(rng.below(300)); break;
+			case 0:
+				insn.op = static_cast<uint16_t>(rng.chance(50) ? 1 + rng.below(12) : rng.next());
+				break;
+			case 1:
+				insn.src = static_cast<uint16_t>(pick_src(rng));
+				break;
+			case 2:
+				insn.fail = static_cast<uint16_t>(rng.chance(50) ? rng.below(static_cast<uint32_t>(mutated.size() + 2)) : rng.next());
+				break;
+			case 3:
+				insn.a = special(rng);
+				break;
+			case 4:
+				insn.b = special(rng);
+				break;
+			default:
+				insn.k = static_cast<uint16_t>(rng.below(300));
+				break;
 		}
 	}
 	// The sets of the real program, as exact blocks
@@ -231,7 +267,10 @@ void fuzz_mutated_real_programs(Rng& rng)
 	}
 	if (!sets_ok)
 		fail("the compiler produced a set the verifier refuses");
-	const bool verified = swdiv_vm_verify(mutated.data(), static_cast<uint32_t>(mutated.size()), sets.views.data(), static_cast<uint32_t>(sets.views.size())) == 0;
+	const bool verified = swdiv_vm_verify(mutated.data(),
+										  static_cast<uint32_t>(mutated.size()),
+										  sets.views.data(),
+										  static_cast<uint32_t>(sets.views.size())) == 0;
 	++g_programs;
 	g_verified += verified;
 	run_on_packets(rng, mutated, sets, verified, 12);
@@ -240,9 +279,9 @@ void fuzz_mutated_real_programs(Rng& rng)
 // The set search against a linear scan, for valid sets of both kinds
 void fuzz_set_search(Rng& rng)
 {
-	const bool ports = rng.chance(50);
-	Exact<uint32_t> block(0);
-	uint32_t		n = rng.below(60);
+	const bool			  ports = rng.chance(50);
+	Exact<uint32_t>		  block(0);
+	uint32_t			  n = rng.below(60);
 	std::vector<uint32_t> elems;
 	if (!ports)
 	{
@@ -292,14 +331,28 @@ int main(int argc, char** argv)
 	{
 		switch (rng.below(10))
 		{
-			case 0: fuzz_set_search(rng); break;
+			case 0:
+				fuzz_set_search(rng);
+				break;
 			case 1:
 			case 2:
-			case 3: fuzz_mutated_real_programs(rng); break;
-			default: fuzz_programs(rng); break;
+			case 3:
+				fuzz_mutated_real_programs(rng);
+				break;
+			default:
+				fuzz_programs(rng);
+				break;
 		}
 	}
-	std::printf("kmod_vm_fuzz: %llu iterations (seed %llu), %llu programs of which %llu verified, %llu runs, %llu matches, at most %llu steps: no report\n", iterations,
-				seed, g_programs, g_verified, g_runs, g_matches, g_max_steps);
+	std::printf(
+		"kmod_vm_fuzz: %llu iterations (seed %llu), %llu programs of which %llu verified, %llu runs, %llu matches, at most %llu steps: no "
+		"report\n",
+		iterations,
+		seed,
+		g_programs,
+		g_verified,
+		g_runs,
+		g_matches,
+		g_max_steps);
 	return 0;
 }

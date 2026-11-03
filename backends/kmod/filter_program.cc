@@ -31,7 +31,7 @@ bool compile_program(const std::string& filter, Program& out, std::string& error
 	if (!nfq::compile_filter(filter, true, rules, error, position))
 		return false;
 
-	Program								  program;
+	Program									  program;
 	std::map<std::vector<uint32_t>, uint32_t> address_sets;
 	for (const nfq::CompiledRule& rule : rules)
 	{
@@ -43,14 +43,17 @@ bool compile_program(const std::string& filter, Program& out, std::string& error
 				case nfq::MatchKind::nfproto_ipv4:
 					break;	// every packet of the IPv4 hook is IPv4; the VM fails every field test of anything else
 				case nfq::MatchKind::ip_protocol:
-					program.insns.push_back(test(match.negated ? SWDIV_OP_NE : SWDIV_OP_EQ, SWDIV_SRC_IP_PROTO, match.transport == nfq::Transport::tcp ? 6 : 17));
+					program.insns.push_back(test(match.negated ? SWDIV_OP_NE : SWDIV_OP_EQ,
+												 SWDIV_SRC_IP_PROTO,
+												 match.transport == nfq::Transport::tcp ? 6 : 17));
 					break;
 				case nfq::MatchKind::tcp_flag:
-					program.insns.push_back(test(SWDIV_OP_MASK_EQ, SWDIV_SRC_TCP_FLAGS, match.tcp_flag, match.negated ? 0 : match.tcp_flag));
+					program.insns.push_back(
+						test(SWDIV_OP_MASK_EQ, SWDIV_SRC_TCP_FLAGS, match.tcp_flag, match.negated ? 0 : match.tcp_flag));
 					break;
 				case nfq::MatchKind::ip_addr:
 					{
-						const uint16_t src = match.endpoint == nfq::Endpoint::source ? SWDIV_SRC_IP_SRC : SWDIV_SRC_IP_DST;
+						const uint16_t		  src	= match.endpoint == nfq::Endpoint::source ? SWDIV_SRC_IP_SRC : SWDIV_SRC_IP_DST;
 						std::vector<uint32_t> addrs = match.addrs;
 						std::sort(addrs.begin(), addrs.end());
 						addrs.erase(std::unique(addrs.begin(), addrs.end()), addrs.end());
@@ -61,7 +64,8 @@ bool compile_program(const std::string& filter, Program& out, std::string& error
 						}
 						if (addrs.size() > SWDIV_MAX_SET_ELEMS)
 						{
-							error	 = "address list is too long for the kernel filter (more than " + std::to_string(SWDIV_MAX_SET_ELEMS) + " addresses)";
+							error	 = "address list is too long for the kernel filter (more than " + std::to_string(SWDIV_MAX_SET_ELEMS) +
+									   " addresses)";
 							position = 0;
 							return false;
 						}
@@ -70,7 +74,8 @@ bool compile_program(const std::string& filter, Program& out, std::string& error
 						{
 							if (program.sets.size() >= SWDIV_MAX_SETS)
 							{
-								error	 = "filter has too many different address lists for the kernel filter (more than " + std::to_string(SWDIV_MAX_SETS) + ")";
+								error	 = "filter has too many different address lists for the kernel filter (more than " +
+										   std::to_string(SWDIV_MAX_SETS) + ")";
 								position = 0;
 								return false;
 							}
@@ -84,7 +89,9 @@ bool compile_program(const std::string& filter, Program& out, std::string& error
 					program.insns.push_back(test(match.negated ? SWDIV_OP_NE : SWDIV_OP_EQ, port_source(match), match.port));
 					break;
 				case nfq::MatchKind::interface:
-					program.insns.push_back(test(match.negated ? SWDIV_OP_NE : SWDIV_OP_EQ, match.output ? SWDIV_SRC_OUT_IFINDEX : SWDIV_SRC_IN_IFINDEX, match.index));
+					program.insns.push_back(test(match.negated ? SWDIV_OP_NE : SWDIV_OP_EQ,
+												 match.output ? SWDIV_SRC_OUT_IFINDEX : SWDIV_SRC_IN_IFINDEX,
+												 match.index));
 					break;
 			}
 		}
@@ -132,7 +139,10 @@ std::string verify_program(const Program& program)
 	if (total > SWDIV_MAX_TOTAL_ELEMS)
 		return "the sets are too large together";
 	const std::vector<swdiv_vm_set> sets = vm_sets(program);
-	if (swdiv_vm_verify(program.insns.data(), static_cast<uint32_t>(program.insns.size()), sets.data(), static_cast<uint32_t>(sets.size())) != 0)
+	if (swdiv_vm_verify(program.insns.data(),
+						static_cast<uint32_t>(program.insns.size()),
+						sets.data(),
+						static_cast<uint32_t>(sets.size())) != 0)
 		return "the program was refused by the verifier";
 	return "";
 }

@@ -22,7 +22,10 @@ swdiv_insn I(uint16_t op, uint16_t src = 0, uint32_t a = 0, uint32_t b = 0, uint
 	insn.k			= k;
 	return insn;
 }
-swdiv_insn ACCEPT() { return I(SWDIV_OP_ACCEPT); }
+swdiv_insn ACCEPT()
+{
+	return I(SWDIV_OP_ACCEPT);
+}
 
 kmodf::Program program(std::vector<swdiv_insn> insns, std::vector<kmodf::SetData> sets = {})
 {
@@ -62,14 +65,22 @@ Bytes tcp(uint32_t sport, uint32_t dport, uint8_t flags = 0x10, size_t payload =
 void test_comparisons()
 {
 	const Bytes p = udp(1000, 9000);
-	for (const auto& [op, a, expected] : std::vector<std::tuple<uint16_t, uint32_t, bool>>{
-			 {SWDIV_OP_EQ, 9000, true}, {SWDIV_OP_EQ, 9001, false}, {SWDIV_OP_NE, 9001, true}, {SWDIV_OP_NE, 9000, false},
-			 {SWDIV_OP_LT, 9001, true}, {SWDIV_OP_LT, 9000, false}, {SWDIV_OP_LE, 9000, true}, {SWDIV_OP_LE, 8999, false},
-			 {SWDIV_OP_GT, 8999, true}, {SWDIV_OP_GT, 9000, false}, {SWDIV_OP_GE, 9000, true}, {SWDIV_OP_GE, 9001, false}})
+	for (const auto& [op, a, expected] : std::vector<std::tuple<uint16_t, uint32_t, bool>>{{SWDIV_OP_EQ, 9000, true},
+																						   {SWDIV_OP_EQ, 9001, false},
+																						   {SWDIV_OP_NE, 9001, true},
+																						   {SWDIV_OP_NE, 9000, false},
+																						   {SWDIV_OP_LT, 9001, true},
+																						   {SWDIV_OP_LT, 9000, false},
+																						   {SWDIV_OP_LE, 9000, true},
+																						   {SWDIV_OP_LE, 8999, false},
+																						   {SWDIV_OP_GT, 8999, true},
+																						   {SWDIV_OP_GT, 9000, false},
+																						   {SWDIV_OP_GE, 9000, true},
+																						   {SWDIV_OP_GE, 9001, false}})
 		CHECK(run(program({I(op, SWDIV_SRC_UDP_DPORT, a, 0, 2), ACCEPT()}), p) == expected);
 	CHECK(run(program({I(SWDIV_OP_RANGE, SWDIV_SRC_UDP_DPORT, 8000, 9000, 2), ACCEPT()}), p));
 	CHECK(!run(program({I(SWDIV_OP_RANGE, SWDIV_SRC_UDP_DPORT, 8000, 8999, 2), ACCEPT()}), p));
-	CHECK(run(program({I(SWDIV_OP_MASK_EQ, SWDIV_SRC_UDP_DPORT, 0xFF00, 0x2300, 2), ACCEPT()}), p));	// 9000 = 0x2328
+	CHECK(run(program({I(SWDIV_OP_MASK_EQ, SWDIV_SRC_UDP_DPORT, 0xFF00, 0x2300, 2), ACCEPT()}), p));  // 9000 = 0x2328
 	CHECK(!run(program({I(SWDIV_OP_MASK_EQ, SWDIV_SRC_UDP_DPORT, 0xFF00, 0x2400, 2), ACCEPT()}), p));
 }
 
@@ -77,14 +88,17 @@ void test_a_program_with_no_instructions_matches_nothing_and_accept_matches_ever
 {
 	CHECK(!run(program({}), udp(1, 2)));
 	CHECK(run(program({ACCEPT()}), udp(1, 2)));
-	CHECK(run(program({ACCEPT()}), Bytes{0x45}));	  // even a stump: there is no test to fail
+	CHECK(run(program({ACCEPT()}), Bytes{0x45}));  // even a stump: there is no test to fail
 }
 
 void test_clauses_fall_through_to_the_next()
 {
 	// (udp.DstPort == 53) or (udp.DstPort == 9000 and udp.SrcPort == 1000)
-	const kmodf::Program p = program({I(SWDIV_OP_EQ, SWDIV_SRC_UDP_DPORT, 53, 0, 2), ACCEPT(),
-									  I(SWDIV_OP_EQ, SWDIV_SRC_UDP_DPORT, 9000, 0, 5), I(SWDIV_OP_EQ, SWDIV_SRC_UDP_SPORT, 1000, 0, 5), ACCEPT()});
+	const kmodf::Program p = program({I(SWDIV_OP_EQ, SWDIV_SRC_UDP_DPORT, 53, 0, 2),
+									  ACCEPT(),
+									  I(SWDIV_OP_EQ, SWDIV_SRC_UDP_DPORT, 9000, 0, 5),
+									  I(SWDIV_OP_EQ, SWDIV_SRC_UDP_SPORT, 1000, 0, 5),
+									  ACCEPT()});
 	CHECK(run(p, udp(7, 53)));
 	CHECK(run(p, udp(1000, 9000)));
 	CHECK(!run(p, udp(1001, 9000)));
@@ -96,7 +110,7 @@ void test_fields_of_another_protocol_are_absent_even_for_not_equal()
 	const kmodf::Program ne = program({I(SWDIV_OP_NE, SWDIV_SRC_TCP_DPORT, 80, 0, 2), ACCEPT()});
 	CHECK(run(ne, tcp(1, 81)));
 	CHECK(!run(ne, tcp(1, 80)));
-	CHECK(!run(ne, udp(1, 81)));	// absent, not "not 80"
+	CHECK(!run(ne, udp(1, 81)));  // absent, not "not 80"
 	PacketSpec icmp;
 	icmp.proto = 1;
 	CHECK(!run(ne, build(icmp)));
@@ -110,23 +124,23 @@ void test_a_later_fragment_has_no_ports_and_a_first_fragment_does()
 	s.payload.assign(40, 'x');
 	const kmodf::Program p = program({I(SWDIV_OP_EQ, SWDIV_SRC_UDP_DPORT, 9000, 0, 2), ACCEPT()});
 	CHECK(run(p, build(s)));
-	s.frag = 0x2000;	  // more fragments, offset 0: the first fragment
+	s.frag = 0x2000;  // more fragments, offset 0: the first fragment
 	CHECK(run(p, build(s)));
-	s.frag = 0x0010;	  // offset 16: what follows the header is payload of something else
+	s.frag = 0x0010;  // offset 16: what follows the header is payload of something else
 	CHECK(!run(p, build(s)));
 }
 
 void test_truncated_headers_make_fields_absent_instead_of_reading_past_them()
 {
-	Bytes p = udp(1000, 9000, 0);	 // 28 bytes
+	Bytes				 p	   = udp(1000, 9000, 0);  // 28 bytes
 	const kmodf::Program ports = program({I(SWDIV_OP_EQ, SWDIV_SRC_UDP_DPORT, 9000, 0, 2), ACCEPT()});
 	CHECK(run(ports, p));
-	p.resize(23);	  // the ports end at byte 24
+	p.resize(23);  // the ports end at byte 24
 	CHECK(!run(ports, p));
 	const kmodf::Program flags = program({I(SWDIV_OP_MASK_EQ, SWDIV_SRC_TCP_FLAGS, 0x10, 0x10, 2), ACCEPT()});
-	Bytes t = tcp(1, 2, 0x10, 0);
+	Bytes				 t	   = tcp(1, 2, 0x10, 0);
 	CHECK(run(flags, t));
-	t.resize(33);	  // flags are byte 33 of a 20-byte-header packet
+	t.resize(33);  // flags are byte 33 of a 20-byte-header packet
 	CHECK(!run(flags, t));
 }
 
@@ -144,24 +158,24 @@ void test_a_wrong_total_length_hides_what_is_beyond_it()
 void test_payload_bytes_and_lengths()
 {
 	PacketSpec s;
-	s.proto = 17;
-	s.payload = {'a', 'b', 'c', 'd'};
+	s.proto		  = 17;
+	s.payload	  = {'a', 'b', 'c', 'd'};
 	const Bytes u = build(s);
 	CHECK(run(program({I(SWDIV_OP_EQ, SWDIV_SRC_UDP_PAYLOAD_BYTE, 'c', 0, 2, 2), ACCEPT()}), u));
-	CHECK(!run(program({I(SWDIV_OP_EQ, SWDIV_SRC_UDP_PAYLOAD_BYTE, 'x', 0, 2, 4), ACCEPT()}), u));	  // byte 4 does not exist
+	CHECK(!run(program({I(SWDIV_OP_EQ, SWDIV_SRC_UDP_PAYLOAD_BYTE, 'x', 0, 2, 4), ACCEPT()}), u));	// byte 4 does not exist
 	CHECK(run(program({I(SWDIV_OP_EQ, SWDIV_SRC_UDP_PAYLOAD_LEN, 4, 0, 2), ACCEPT()}), u));
-	s.proto		= 6;
-	s.tcp_doff	= 6;
+	s.proto		  = 6;
+	s.tcp_doff	  = 6;
 	const Bytes t = build(s);
-	CHECK(run(program({I(SWDIV_OP_EQ, SWDIV_SRC_TCP_PAYLOAD_BYTE, 'a', 0, 2, 0), ACCEPT()}), t));	  // after a 24-byte header
+	CHECK(run(program({I(SWDIV_OP_EQ, SWDIV_SRC_TCP_PAYLOAD_BYTE, 'a', 0, 2, 0), ACCEPT()}), t));  // after a 24-byte header
 	CHECK(run(program({I(SWDIV_OP_EQ, SWDIV_SRC_TCP_PAYLOAD_LEN, 4, 0, 2), ACCEPT()}), t));
 	// The prefix is 256 bytes: a payload byte beyond it is absent however long the packet is
 	PacketSpec big;
 	big.proto = 17;
 	big.payload.assign(400, 'z');
 	CHECK(run(program({I(SWDIV_OP_EQ, SWDIV_SRC_UDP_PAYLOAD_BYTE, 'z', 0, 2, 200), ACCEPT()}), build(big)));
-	CHECK(!run(program({I(SWDIV_OP_EQ, SWDIV_SRC_UDP_PAYLOAD_BYTE, 'z', 0, 2, 250), ACCEPT()}), build(big)));	  // 28 + 250 > 256
-	CHECK(run(program({I(SWDIV_OP_EQ, SWDIV_SRC_UDP_PAYLOAD_LEN, 400, 0, 2), ACCEPT()}), build(big)));	  // lengths come from the header
+	CHECK(!run(program({I(SWDIV_OP_EQ, SWDIV_SRC_UDP_PAYLOAD_BYTE, 'z', 0, 2, 250), ACCEPT()}), build(big)));  // 28 + 250 > 256
+	CHECK(run(program({I(SWDIV_OP_EQ, SWDIV_SRC_UDP_PAYLOAD_LEN, 400, 0, 2), ACCEPT()}), build(big)));	// lengths come from the header
 }
 
 void test_meta_sources()
@@ -193,7 +207,7 @@ void test_sets()
 		CHECK(run(in_src, build(s)) == (addr == 0x0A0A0102 || addr == 0x0A0A0202 || addr == 0x0A0A0303));
 	}
 	const kmodf::Program not_in = program({I(SWDIV_OP_NOT_IN_SET, SWDIV_SRC_IP_DST, 0, 0, 2), ACCEPT()}, {addrs});
-	s.dst = 0x0A0A0102;
+	s.dst						= 0x0A0A0102;
 	CHECK(!run(not_in, build(s)));
 	s.dst = 0x0A0A0105;
 	CHECK(run(not_in, build(s)));
@@ -204,7 +218,7 @@ void test_sets()
 		const bool expected = port == 80 || port == 443 || (port >= 9000 && port <= 9100);
 		CHECK(run(port_set, udp(1, port)) == expected);
 	}
-	CHECK(!run(port_set, tcp(1, 80)));	  // a UDP port set says nothing about TCP
+	CHECK(!run(port_set, tcp(1, 80)));	// a UDP port set says nothing about TCP
 	// A set test of an absent field fails even for NOT_IN_SET
 	CHECK(!run(program({I(SWDIV_OP_NOT_IN_SET, SWDIV_SRC_UDP_DPORT, 0, 0, 2), ACCEPT()}, {ports}), tcp(1, 80)));
 }
@@ -338,7 +352,8 @@ void test_a_filter_too_big_for_the_vm_is_refused_with_a_message()
 	// 70 different address lists: more sets than the kernel takes
 	std::string filter;
 	for (int i = 0; i < 70; ++i)
-		filter += std::string(i ? " and " : "") + "(ip.DstAddr == 10.0." + std::to_string(i) + ".1 or ip.DstAddr == 10.0." + std::to_string(i) + ".2)";
+		filter += std::string(i ? " and " : "") + "(ip.DstAddr == 10.0." + std::to_string(i) + ".1 or ip.DstAddr == 10.0." +
+				  std::to_string(i) + ".2)";
 	kmodf::Program p;
 	std::string	   error;
 	uint32_t	   position = 0;
@@ -349,9 +364,9 @@ void test_a_filter_too_big_for_the_vm_is_refused_with_a_message()
 // The compiled program and the reference evaluator must agree on every packet for every filter.
 void test_compiled_programs_agree_with_the_reference_on_random_filters_and_packets()
 {
-	Rng			   rng(2026);
-	int			   compiled = 0, mixed = 0, always = 0, never = 0;
-	uint64_t	   comparisons = 0;
+	Rng		 rng(2026);
+	int		 compiled = 0, mixed = 0, always = 0, never = 0;
+	uint64_t comparisons = 0;
 	for (int round = 0; round < 3000; ++round)
 	{
 		const std::string filter = random_filter(rng, 1 + rng.below(4));
@@ -359,22 +374,27 @@ void test_compiled_programs_agree_with_the_reference_on_random_filters_and_packe
 		std::string		  error;
 		uint32_t		  position = 0;
 		if (!kmodf::compile_program(filter, program, error, position))
-			continue;	  // too complex or a combination the compiler refuses: nothing to compare
+			continue;  // too complex or a combination the compiler refuses: nothing to compare
 		++compiled;
 		CHECK(kmodf::verify_program(program).empty());
 		const nfq::Node tree = nfq::parse_filter(filter);
-		int			   hits = 0, misses = 0;
+		int				hits = 0, misses = 0;
 		for (int p = 0; p < 120; ++p)
 		{
 			Meta meta;
-			meta.in_ifindex	 = 1 + rng.below(4);
-			meta.out_ifindex = 1 + rng.below(4);
-			const Bytes packet	  = random_packet(rng);
+			meta.in_ifindex		 = 1 + rng.below(4);
+			meta.out_ifindex	 = 1 + rng.below(4);
+			const Bytes packet	 = random_packet(rng);
 			const bool	expected = reference(tree, false, facts_of(packet, meta));
 			const bool	actual	 = run(program, packet, meta);
 			if (expected != actual)
 			{
-				std::fprintf(stderr, "MISMATCH filter: %s (reference %d, program %d, packet %zu bytes)\n", filter.c_str(), expected, actual, packet.size());
+				std::fprintf(stderr,
+							 "MISMATCH filter: %s (reference %d, program %d, packet %zu bytes)\n",
+							 filter.c_str(),
+							 expected,
+							 actual,
+							 packet.size());
 				CHECK(expected == actual);
 				return;
 			}
@@ -388,8 +408,12 @@ void test_compiled_programs_agree_with_the_reference_on_random_filters_and_packe
 		else
 			++never;
 	}
-	std::printf("  %d filters compiled, %llu comparisons: %d matched some packets and not others, %d matched all, %d none\n", compiled,
-				static_cast<unsigned long long>(comparisons), mixed, always, never);
+	std::printf("  %d filters compiled, %llu comparisons: %d matched some packets and not others, %d matched all, %d none\n",
+				compiled,
+				static_cast<unsigned long long>(comparisons),
+				mixed,
+				always,
+				never);
 	CHECK(compiled > 2000);
 	CHECK(mixed > 500);	 // the generator exercises both outcomes, not only trivial filters
 }
@@ -398,7 +422,10 @@ void test_compiled_programs_agree_with_the_reference_on_random_filters_and_packe
 void test_cost_per_packet()
 {
 	kmodf::Program server_list;
-	CHECK(compiles("udp and (ip.DstAddr == 10.10.2.2 or ip.DstAddr == 10.10.2.3 or ip.DstAddr == 10.10.2.4 or ip.DstAddr == 10.10.2.5) and udp.DstPort != 53", server_list));
+	CHECK(
+		compiles("udp and (ip.DstAddr == 10.10.2.2 or ip.DstAddr == 10.10.2.3 or ip.DstAddr == 10.10.2.4 or ip.DstAddr == 10.10.2.5) and "
+				 "udp.DstPort != 53",
+				 server_list));
 	kmodf::Program big_set;
 	{
 		std::string filter = "(ip.DstAddr == 1.0.0.1";
@@ -406,24 +433,35 @@ void test_cost_per_packet()
 			filter += " or ip.DstAddr == 1.0." + std::to_string(i / 256) + "." + std::to_string(i % 256);
 		CHECK(compiles(filter + ")", big_set));
 	}
-	Rng					rng(5);
-	std::vector<Bytes>	packets;
+	Rng				   rng(5);
+	std::vector<Bytes> packets;
 	for (int i = 0; i < 1000; ++i)
 		packets.push_back(random_packet(rng));
-	for (const auto& [name, program] : {std::pair<const char*, const kmodf::Program*>{"typical server filter", &server_list}, {"2000-address set", &big_set}})
+	for (const auto& [name, program] :
+		 {std::pair<const char*, const kmodf::Program*>{"typical server filter", &server_list}, {"2000-address set", &big_set}})
 	{
-		const std::vector<swdiv_vm_set> sets = kmodf::vm_sets(*program);
-		uint64_t						hits = 0;
-		const auto						begin = std::chrono::steady_clock::now();
+		const std::vector<swdiv_vm_set> sets   = kmodf::vm_sets(*program);
+		uint64_t						hits   = 0;
+		const auto						begin  = std::chrono::steady_clock::now();
 		constexpr int					rounds = 2000;
 		for (int round = 0; round < rounds; ++round)
 			for (const Bytes& packet : packets)
 			{
 				const swdiv_vm_ctx ctx = context(packet, Meta{});
-				hits += swdiv_vm_run(program->insns.data(), static_cast<uint32_t>(program->insns.size()), sets.data(), static_cast<uint32_t>(sets.size()), &ctx);
+				hits += swdiv_vm_run(program->insns.data(),
+									 static_cast<uint32_t>(program->insns.size()),
+									 sets.data(),
+									 static_cast<uint32_t>(sets.size()),
+									 &ctx);
 			}
-		const double ns = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - begin).count() / (static_cast<double>(rounds) * static_cast<double>(packets.size()));
-		std::printf("  %s: %.0f ns per packet (%zu instructions, %zu sets; %llu matches)\n", name, ns, program->insns.size(), program->sets.size(), static_cast<unsigned long long>(hits));
+		const double ns = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - begin).count() /
+						  (static_cast<double>(rounds) * static_cast<double>(packets.size()));
+		std::printf("  %s: %.0f ns per packet (%zu instructions, %zu sets; %llu matches)\n",
+					name,
+					ns,
+					program->insns.size(),
+					program->sets.size(),
+					static_cast<unsigned long long>(hits));
 	}
 }
 
@@ -433,11 +471,13 @@ int main(int argc, char** argv)
 {
 	static const test::TestCase cases[] = {
 		{"comparisons", test_comparisons},
-		{"a_program_with_no_instructions_matches_nothing_and_accept_matches_everything", test_a_program_with_no_instructions_matches_nothing_and_accept_matches_everything},
+		{"a_program_with_no_instructions_matches_nothing_and_accept_matches_everything",
+		 test_a_program_with_no_instructions_matches_nothing_and_accept_matches_everything},
 		{"clauses_fall_through_to_the_next", test_clauses_fall_through_to_the_next},
 		{"fields_of_another_protocol_are_absent_even_for_not_equal", test_fields_of_another_protocol_are_absent_even_for_not_equal},
 		{"a_later_fragment_has_no_ports_and_a_first_fragment_does", test_a_later_fragment_has_no_ports_and_a_first_fragment_does},
-		{"truncated_headers_make_fields_absent_instead_of_reading_past_them", test_truncated_headers_make_fields_absent_instead_of_reading_past_them},
+		{"truncated_headers_make_fields_absent_instead_of_reading_past_them",
+		 test_truncated_headers_make_fields_absent_instead_of_reading_past_them},
 		{"a_wrong_total_length_hides_what_is_beyond_it", test_a_wrong_total_length_hides_what_is_beyond_it},
 		{"payload_bytes_and_lengths", test_payload_bytes_and_lengths},
 		{"meta_sources", test_meta_sources},
@@ -447,7 +487,8 @@ int main(int argc, char** argv)
 		{"the_interpreter_stops_even_if_the_verifier_was_bypassed", test_the_interpreter_stops_even_if_the_verifier_was_bypassed},
 		{"the_compiler_output_has_the_expected_shape", test_the_compiler_output_has_the_expected_shape},
 		{"a_filter_too_big_for_the_vm_is_refused_with_a_message", test_a_filter_too_big_for_the_vm_is_refused_with_a_message},
-		{"compiled_programs_agree_with_the_reference_on_random_filters_and_packets", test_compiled_programs_agree_with_the_reference_on_random_filters_and_packets},
+		{"compiled_programs_agree_with_the_reference_on_random_filters_and_packets",
+		 test_compiled_programs_agree_with_the_reference_on_random_filters_and_packets},
 		{"cost_per_packet", test_cost_per_packet},
 	};
 	return test::run_tests("kmod_vm", cases, argc, argv);

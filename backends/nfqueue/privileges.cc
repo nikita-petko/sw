@@ -54,7 +54,8 @@ bool check_privileges(std::string& error)
 	{
 		LOG_DEBUG("privilege check: CAP_NET_ADMIN is not effective (euid = %u)", static_cast<unsigned>(::geteuid()));
 		error =
-			"lagsw needs CAP_NET_ADMIN to capture packets. Run it as root (for example `sudo ./lagsw ...` or scripts/package/linux/bootstrap.sh) "
+			"lagsw needs CAP_NET_ADMIN to capture packets. Run it as root (for example `sudo ./lagsw ...` or "
+			"scripts/package/linux/bootstrap.sh) "
 			"or grant the binary the capability (`sudo setcap cap_net_admin+ep ./lagsw`).";
 		return false;
 	}

@@ -7,12 +7,11 @@
 //   swbench sniff  --mode swdiv-hold|nfq-hold --port P [--proto udp|tcp] [--delay-ms D] [--drop-every K] [--batch yes] [--modify payload]
 //   swbench sniff  --mode swdiv-hold ... [--prio N] [--snap B] [--modify payload|grow|shrink|dport|dst|bad] [--to-port P] [--to-ip IP]
 //                                        [--twin yes --inject-if IF]   modify every held packet / inject a copy of it before resuming
-//   swbench sniff  ... [--filter "WinDivert-style filter"] [--filter2 F2 --swap-ms T]   filter program instead of --port/--proto; F2 replaces it after T ms
-//   swbench vmcheck [--filters N --packets M --seed S]   kernel against the reference evaluator, on packets injected through the rig
-//   swbench progcheck                       what SET_PROGRAM must accept and refuse
-//   swbench pktcheck --port P --iface IF   verifies IP and UDP checksums of the packets arriving on IF (AF_PACKET)
-//   swbench tcpsink --port P            one connection: prints bytes, an FNV-1a hash and the peer address
-//   swbench tcpsend --dst IP --port P --bytes N [--seed S]
+//   swbench sniff  ... [--filter "WinDivert-style filter"] [--filter2 F2 --swap-ms T]   filter program instead of --port/--proto; F2
+//   replaces it after T ms swbench vmcheck [--filters N --packets M --seed S]   kernel against the reference evaluator, on packets injected
+//   through the rig swbench progcheck                       what SET_PROGRAM must accept and refuse swbench pktcheck --port P --iface IF
+//   verifies IP and UDP checksums of the packets arriving on IF (AF_PACKET) swbench tcpsink --port P            one connection: prints
+//   bytes, an FNV-1a hash and the peer address swbench tcpsend --dst IP --port P --bytes N [--seed S]
 // sink and sniff run until SIGINT/SIGTERM and then print their result. The -hold modes give every packet a verdict D ms after it
 // was captured (0: at once; -1: never, so only the module's timeout or its close releases it) and drop every K-th packet.
 #include <algorithm>
@@ -125,7 +124,7 @@ int run_flood(const Args& args)
 	const long		  pps	  = args.num("--pps");
 	const long		  seconds = args.num("--seconds");
 	const long		  size	  = args.num("--size", "512");
-	const uint64_t	  stream  = static_cast<uint64_t>(args.num("--stream", "0")) & 7; // lets several floods share one sink
+	const uint64_t	  stream  = static_cast<uint64_t>(args.num("--stream", "0")) & 7;  // lets several floods share one sink
 
 	const int fd = socket(AF_INET, SOCK_DGRAM, 0);
 	if (fd < 0)
@@ -202,15 +201,15 @@ int run_sink(const Args& args)
 	install_signals();
 	announce_ready();
 
-	constexpr unsigned kBatch = 64;
-	static char		   buffers[kBatch][2048];
-	mmsghdr			   msgs[kBatch];
-	iovec			   iov[kBatch];
-	uint64_t		   received = 0, corrupt = 0, dups = 0, reordered = 0;
-	uint64_t			   max_seq[8] = {};
-	unsigned			   len_min = 0xFFFFFFFFu, len_max = 0;
+	constexpr unsigned	  kBatch = 64;
+	static char			  buffers[kBatch][2048];
+	mmsghdr				  msgs[kBatch];
+	iovec				  iov[kBatch];
+	uint64_t			  received = 0, corrupt = 0, dups = 0, reordered = 0;
+	uint64_t			  max_seq[8] = {};
+	unsigned			  len_min = 0xFFFFFFFFu, len_max = 0;
 	std::vector<uint32_t> latency_us;
-	std::vector<uint8_t>  seen[8]; // per flood stream (the high bits of the sequence number)
+	std::vector<uint8_t>  seen[8];	// per flood stream (the high bits of the sequence number)
 	latency_us.reserve(1 << 20);
 	while (!g_stop)
 	{
@@ -224,8 +223,8 @@ int run_sink(const Args& args)
 		pollfd pfd = {fd, POLLIN, 0};
 		if (poll(&pfd, 1, 100) <= 0)
 			continue;
-		const int count = recvmmsg(fd, msgs, kBatch, MSG_DONTWAIT, nullptr);
-		const uint64_t now = now_ns();
+		const int	   count = recvmmsg(fd, msgs, kBatch, MSG_DONTWAIT, nullptr);
+		const uint64_t now	 = now_ns();
 		for (int i = 0; i < count; ++i)
 		{
 			++received;
@@ -263,18 +262,21 @@ int run_sink(const Args& args)
 		}
 	}
 	std::sort(latency_us.begin(), latency_us.end());
-	auto pct = [&](double p) { return latency_us.empty() ? 0u : latency_us[static_cast<size_t>(p * static_cast<double>(latency_us.size() - 1))]; };
-	std::printf("received=%llu cpu_ms=%.1f lat_p50_us=%u lat_p99_us=%u lat_max_us=%u corrupt=%llu dups=%llu reordered=%llu len_min=%u len_max=%u\n",
-				static_cast<unsigned long long>(received),
-				cpu_ms_self(),
-				pct(0.50),
-				pct(0.99),
-				latency_us.empty() ? 0u : latency_us.back(),
-				static_cast<unsigned long long>(corrupt),
-				static_cast<unsigned long long>(dups),
-				static_cast<unsigned long long>(reordered),
-				received ? len_min : 0u,
-				len_max);
+	auto pct = [&](double p) {
+		return latency_us.empty() ? 0u : latency_us[static_cast<size_t>(p * static_cast<double>(latency_us.size() - 1))];
+	};
+	std::printf(
+		"received=%llu cpu_ms=%.1f lat_p50_us=%u lat_p99_us=%u lat_max_us=%u corrupt=%llu dups=%llu reordered=%llu len_min=%u len_max=%u\n",
+		static_cast<unsigned long long>(received),
+		cpu_ms_self(),
+		pct(0.50),
+		pct(0.99),
+		latency_us.empty() ? 0u : latency_us.back(),
+		static_cast<unsigned long long>(corrupt),
+		static_cast<unsigned long long>(dups),
+		static_cast<unsigned long long>(reordered),
+		received ? len_min : 0u,
+		len_max);
 	return 0;
 }
 
@@ -346,11 +348,11 @@ int open_counting_handle(int priority)
 vmtest::Bytes forwardable_packet(vmtest::Rng& rng)
 {
 	using vmtest::pick;
-	vmtest::PacketSpec spec;
+	vmtest::PacketSpec	 spec;
 	static const uint8_t protos[] = {6, 6, 6, 17, 17, 17, 1, 47};
 	spec.proto					  = protos[rng.below(8)];
 	spec.src					  = pick(rng, vmtest::addr_pool());
-	spec.dst					  = 0x0A0A0200 | (2 + rng.below(4));	// 10.10.2.2 .. 10.10.2.5
+	spec.dst					  = 0x0A0A0200 | (2 + rng.below(4));  // 10.10.2.2 .. 10.10.2.5
 	spec.sport					  = pick(rng, vmtest::port_pool());
 	spec.dport					  = pick(rng, vmtest::port_pool());
 	spec.ttl					  = static_cast<uint8_t>(2 + rng.below(60));
@@ -368,10 +370,10 @@ vmtest::Bytes forwardable_packet(vmtest::Rng& rng)
 // injected on the client link. A second handle injects (a handle never sees what it injects itself) and the handle under test counts.
 int run_vmcheck(const Args& args)
 {
-	const long		 filters	= args.num("--filters", "40");
-	const long		 per_filter = args.num("--packets", "100");
-	vmtest::Rng		 rng(static_cast<uint64_t>(args.num("--seed", "7")));
-	const unsigned	 vc = if_nametoindex("vc"), vs = if_nametoindex("vs");
+	const long	   filters	  = args.num("--filters", "40");
+	const long	   per_filter = args.num("--packets", "100");
+	vmtest::Rng	   rng(static_cast<uint64_t>(args.num("--seed", "7")));
+	const unsigned vc = if_nametoindex("vc"), vs = if_nametoindex("vs");
 	if (!vc || !vs)
 	{
 		std::fprintf(stderr, "swbench: vmcheck needs the client/server rig (interfaces vc and vs)\n");
@@ -381,7 +383,7 @@ int run_vmcheck(const Args& args)
 	vmtest::if_pool()	= {vc, vs, 999};
 
 	const int under_test = open_counting_handle(0);
-	const int injector	 = open_counting_handle(100);	// served first, so the handle under test sees its packets
+	const int injector	 = open_counting_handle(100);  // served first, so the handle under test sees its packets
 	uint64_t  compiled = 0, packets = 0, visited = 0, matched = 0, dropped_early = 0, odd = 0, mismatches = 0, user_mismatches = 0;
 
 	for (long f = 0; f < filters; ++f)
@@ -394,7 +396,10 @@ int run_vmcheck(const Args& args)
 			continue;
 		if (install_program(under_test, program) < 0)
 		{
-			std::fprintf(stderr, "vmcheck: the kernel refused a program the user-space verifier accepted: '%s': %s\n", text.c_str(), std::strerror(errno));
+			std::fprintf(stderr,
+						 "vmcheck: the kernel refused a program the user-space verifier accepted: '%s': %s\n",
+						 text.c_str(),
+						 std::strerror(errno));
 			return 1;
 		}
 		++compiled;
@@ -403,8 +408,8 @@ int run_vmcheck(const Args& args)
 		{
 			const vmtest::Bytes packet = forwardable_packet(rng);
 			vmtest::Meta		meta;
-			meta.in_ifindex	 = vc;
-			meta.out_ifindex = vs;
+			meta.in_ifindex		= vc;
+			meta.out_ifindex	= vs;
 			const bool expected = vmtest::reference(tree, false, vmtest::facts_of(packet, meta));
 			if (vmtest::run(program, packet, meta) != expected)
 				++user_mismatches;
@@ -426,7 +431,7 @@ int run_vmcheck(const Args& args)
 			const uint64_t seen = after.seen - before.seen, hit = after.matched - before.matched;
 			if (seen == 0)
 			{
-				++dropped_early;	// the stack dropped it before the hook (nothing to compare)
+				++dropped_early;  // the stack dropped it before the hook (nothing to compare)
 			}
 			else if (seen == 1)
 			{
@@ -435,8 +440,13 @@ int run_vmcheck(const Args& args)
 				if ((hit == 1) != expected)
 				{
 					if (++mismatches <= 5)
-						std::fprintf(stderr, "vmcheck MISMATCH: filter '%s': kernel %s, reference %s, packet of %zu bytes (proto %d)\n", text.c_str(),
-									 hit ? "matched" : "did not match", expected ? "matches" : "does not match", packet.size(), packet[9]);
+						std::fprintf(stderr,
+									 "vmcheck MISMATCH: filter '%s': kernel %s, reference %s, packet of %zu bytes (proto %d)\n",
+									 text.c_str(),
+									 hit ? "matched" : "did not match",
+									 expected ? "matches" : "does not match",
+									 packet.size(),
+									 packet[9]);
 				}
 			}
 			else
@@ -445,11 +455,18 @@ int run_vmcheck(const Args& args)
 			}
 		}
 	}
-	std::printf("vmcheck_filters=%llu vmcheck_packets=%llu vmcheck_visited=%llu vmcheck_matched=%llu vmcheck_dropped_early=%llu vmcheck_odd=%llu vmcheck_mismatches=%llu "
-				"vmcheck_user_mismatches=%llu\n",
-				static_cast<unsigned long long>(compiled), static_cast<unsigned long long>(packets), static_cast<unsigned long long>(visited),
-				static_cast<unsigned long long>(matched), static_cast<unsigned long long>(dropped_early), static_cast<unsigned long long>(odd),
-				static_cast<unsigned long long>(mismatches), static_cast<unsigned long long>(user_mismatches));
+	std::printf(
+		"vmcheck_filters=%llu vmcheck_packets=%llu vmcheck_visited=%llu vmcheck_matched=%llu vmcheck_dropped_early=%llu vmcheck_odd=%llu "
+		"vmcheck_mismatches=%llu "
+		"vmcheck_user_mismatches=%llu\n",
+		static_cast<unsigned long long>(compiled),
+		static_cast<unsigned long long>(packets),
+		static_cast<unsigned long long>(visited),
+		static_cast<unsigned long long>(matched),
+		static_cast<unsigned long long>(dropped_early),
+		static_cast<unsigned long long>(odd),
+		static_cast<unsigned long long>(mismatches),
+		static_cast<unsigned long long>(user_mismatches));
 	return mismatches == 0 && user_mismatches == 0 && odd == 0 ? 0 : 1;
 }
 
@@ -461,20 +478,20 @@ int run_progcheck(const Args&)
 		die("open /dev/" SWDIVERT_DEVICE_NAME);
 	struct Case
 	{
-		std::string					   what;
-		std::vector<swdiv_insn>		   insns;
-		std::vector<swdiv_set_desc>	   descs;
-		std::vector<std::vector<uint32_t>> arrays;	// the memory the descriptors point to
-		int							   expect_errno;	// 0: accepted
+		std::string						   what;
+		std::vector<swdiv_insn>			   insns;
+		std::vector<swdiv_set_desc>		   descs;
+		std::vector<std::vector<uint32_t>> arrays;		  // the memory the descriptors point to
+		int								   expect_errno;  // 0: accepted
 	};
 	std::vector<Case> cases;
-	auto insn = [](uint16_t op, uint16_t src, uint32_t a, uint32_t b, uint16_t fail, uint16_t k = 0) {
+	auto			  insn = [](uint16_t op, uint16_t src, uint32_t a, uint32_t b, uint16_t fail, uint16_t k = 0) {
 		swdiv_insn i = {};
 		i.op = op, i.src = src, i.a = a, i.b = b, i.fail = fail, i.k = k;
 		return i;
 	};
 	const swdiv_insn accept = insn(SWDIV_OP_ACCEPT, 0, 0, 0, 0);
-	auto add = [&](const std::string& what, std::vector<swdiv_insn> insns, int expect) {
+	auto			 add	= [&](const std::string& what, std::vector<swdiv_insn> insns, int expect) {
 		Case c;
 		c.what = what, c.insns = std::move(insns), c.expect_errno = expect;
 		cases.push_back(std::move(c));
@@ -501,15 +518,15 @@ int run_progcheck(const Args&)
 	}
 	{
 		Case c;
-		c.what = "a set that does not exist";
-		c.insns = {insn(SWDIV_OP_IN_SET, SWDIV_SRC_IP_SRC, 3, 0, 2), accept};
+		c.what		   = "a set that does not exist";
+		c.insns		   = {insn(SWDIV_OP_IN_SET, SWDIV_SRC_IP_SRC, 3, 0, 2), accept};
 		c.expect_errno = EINVAL;
 		cases.push_back(c);
 	}
 	{
 		Case c;
-		c.what = "an address set that is used";
-		c.insns = {insn(SWDIV_OP_IN_SET, SWDIV_SRC_IP_SRC, 0, 0, 2), accept};
+		c.what		   = "an address set that is used";
+		c.insns		   = {insn(SWDIV_OP_IN_SET, SWDIV_SRC_IP_SRC, 0, 0, 2), accept};
 		c.expect_errno = 0;
 		add_set(c, SWDIV_SET_IPV4, {1, 5, 9});
 		cases.push_back(c);
@@ -523,14 +540,14 @@ int run_progcheck(const Args&)
 			 {"an unknown set kind", 9, {1}}})
 	{
 		Case c;
-		c.what = what;
+		c.what		   = what;
 		c.expect_errno = EINVAL;
 		add_set(c, kind, elems);
 		cases.push_back(std::move(c));
 	}
 	{
 		Case c;
-		c.what = "the largest set (65536 addresses)";
+		c.what		   = "the largest set (65536 addresses)";
 		c.expect_errno = 0;
 		std::vector<uint32_t> big(SWDIV_MAX_SET_ELEMS);
 		for (uint32_t i = 0; i < big.size(); ++i)
@@ -538,7 +555,7 @@ int run_progcheck(const Args&)
 		add_set(c, SWDIV_SET_IPV4, big);
 		cases.push_back(std::move(c));
 		Case d;
-		d.what = "a set one element too large";
+		d.what		   = "a set one element too large";
 		d.expect_errno = EINVAL;
 		big.push_back(SWDIV_MAX_SET_ELEMS);
 		add_set(d, SWDIV_SET_IPV4, big);
@@ -546,13 +563,13 @@ int run_progcheck(const Args&)
 	}
 	{
 		Case c;
-		c.what = "64 sets (the limit)";
+		c.what		   = "64 sets (the limit)";
 		c.expect_errno = 0;
 		for (uint32_t i = 0; i < SWDIV_MAX_SETS; ++i)
 			add_set(c, SWDIV_SET_IPV4, {i});
 		cases.push_back(std::move(c));
 		Case d;
-		d.what = "65 sets";
+		d.what		   = "65 sets";
 		d.expect_errno = EINVAL;
 		for (uint32_t i = 0; i < SWDIV_MAX_SETS + 1; ++i)
 			add_set(d, SWDIV_SET_IPV4, {i});
@@ -561,7 +578,7 @@ int run_progcheck(const Args&)
 	{
 		// 16 sets of 65536 are exactly the total limit of 1 Mi elements; one more is over it
 		Case c;
-		c.what = "sets that add up to exactly the total limit";
+		c.what		   = "sets that add up to exactly the total limit";
 		c.expect_errno = 0;
 		std::vector<uint32_t> big(SWDIV_MAX_SET_ELEMS);
 		for (uint32_t i = 0; i < big.size(); ++i)
@@ -569,8 +586,8 @@ int run_progcheck(const Args&)
 		for (int i = 0; i < 16; ++i)
 			add_set(c, SWDIV_SET_IPV4, big);
 		cases.push_back(c);
-		Case d = c;
-		d.what = "sets that add up to more than the total limit";
+		Case d		   = c;
+		d.what		   = "sets that add up to more than the total limit";
 		d.expect_errno = EINVAL;
 		d.descs.clear();
 		d.arrays.clear();
@@ -595,7 +612,10 @@ int run_progcheck(const Args&)
 		const int got			= result == 0 ? 0 : errno;
 		if (got != c.expect_errno)
 		{
-			std::fprintf(stderr, "progcheck FAIL: %s: expected %s, got %s\n", c.what.c_str(), c.expect_errno ? std::strerror(c.expect_errno) : "success",
+			std::fprintf(stderr,
+						 "progcheck FAIL: %s: expected %s, got %s\n",
+						 c.what.c_str(),
+						 c.expect_errno ? std::strerror(c.expect_errno) : "success",
 						 got ? std::strerror(got) : "success");
 			++failed;
 		}
@@ -607,25 +627,29 @@ int run_progcheck(const Args&)
 		const int got	 = result == 0 ? 0 : errno;
 		if (got != expected)
 		{
-			std::fprintf(stderr, "progcheck FAIL: %s: expected %s, got %s\n", what, expected ? std::strerror(expected) : "success", got ? std::strerror(got) : "success");
+			std::fprintf(stderr,
+						 "progcheck FAIL: %s: expected %s, got %s\n",
+						 what,
+						 expected ? std::strerror(expected) : "success",
+						 got ? std::strerror(got) : "success");
 			++failed;
 		}
 	};
 	swdiv_program_args a = {};
 	a.reserved			 = 1;
 	expect("reserved field set", a, EINVAL);
-	a = {};
+	a		  = {};
 	a.n_insns = 5;	// no memory behind the pointer
 	expect("instructions at a null pointer", a, EFAULT);
 	a.insns = 0x1000;
 	expect("instructions at a wild pointer", a, EFAULT);
-	a = {};
+	a		 = {};
 	a.n_sets = 2;
 	expect("set descriptors at a null pointer", a, EFAULT);
-	a = {};
+	a		  = {};
 	a.n_insns = 0xFFFFFFFFu;
 	expect("an absurd instruction count", a, EINVAL);
-	a = {};
+	a		 = {};
 	a.n_sets = 0xFFFFFFFFu;
 	expect("an absurd set count", a, EINVAL);
 	std::printf("progcheck_cases=%zu progcheck_failed=%d\n", cases.size() + 6, failed);
@@ -639,10 +663,10 @@ int run_progcheck(const Args&)
 
 int run_fuzz(const Args& args)
 {
-	const long		   iterations = args.num("--iterations", "20000");
-	uint64_t		   rng		  = static_cast<uint64_t>(args.num("--seed", "12345")) * 2862933555777941757ull + 3037000493ull;
-	const unsigned	   ifindex	  = if_nametoindex(args.get("--inject-if", "vc").c_str());
-	auto next = [&]() {
+	const long	   iterations = args.num("--iterations", "20000");
+	uint64_t	   rng		  = static_cast<uint64_t>(args.num("--seed", "12345")) * 2862933555777941757ull + 3037000493ull;
+	const unsigned ifindex	  = if_nametoindex(args.get("--inject-if", "vc").c_str());
+	auto		   next		  = [&]() {
 		rng ^= rng << 13;
 		rng ^= rng >> 7;
 		rng ^= rng << 17;
@@ -672,15 +696,15 @@ int run_fuzz(const Args& args)
 		if (p.size() >= 28 && next() % 10 < 7)
 		{
 			// A plausible IPv4 packet with a few fields that are wrong
-			const size_t ihl = 5 + next() % 11;
-			p[0]			 = static_cast<unsigned char>(0x40 | (next() % 8 == 0 ? next() % 16 : ihl));
-			const size_t tot = next() % 6 == 0 ? next() % 4000 : p.size();
-			p[2]			 = static_cast<unsigned char>(tot >> 8);
-			p[3]			 = static_cast<unsigned char>(tot);
+			const size_t ihl					= 5 + next() % 11;
+			p[0]								= static_cast<unsigned char>(0x40 | (next() % 8 == 0 ? next() % 16 : ihl));
+			const size_t tot					= next() % 6 == 0 ? next() % 4000 : p.size();
+			p[2]								= static_cast<unsigned char>(tot >> 8);
+			p[3]								= static_cast<unsigned char>(tot);
 			static const unsigned char protos[] = {1, 6, 17, 17, 6, 47, 132};
-			p[9]			 = next() % 8 == 0 ? static_cast<unsigned char>(next()) : protos[next() % 7];
+			p[9]								= next() % 8 == 0 ? static_cast<unsigned char>(next()) : protos[next() % 7];
 			if (next() % 4 != 0)
-				p[6] = p[7] = 0; // mostly not a fragment
+				p[6] = p[7] = 0;  // mostly not a fragment
 			const unsigned char src[] = {10, 10, 1, 2}, dst[] = {10, 10, 2, 2};
 			std::memcpy(&p[12], src, 4);
 			if (next() % 3 != 0)
@@ -696,7 +720,7 @@ int run_fuzz(const Args& args)
 	};
 	const uint32_t flag_choices[] = {0, SWDIV_CALC_IP, SWDIV_CALC_L4, SWDIV_CALC_IP | SWDIV_CALC_L4, 0x8, 0xFFFFFFFFu};
 	uint64_t	   ok = 0, einval = 0, enoent = 0, other = 0, efault = 0;
-	auto count = [&](int result) {
+	auto		   count = [&](int result) {
 		if (result == 0)
 			++ok;
 		else if (errno == EINVAL)
@@ -714,122 +738,131 @@ int run_fuzz(const Args& args)
 		std::vector<unsigned char> p = packet();
 		switch (next() % 8)
 		{
-		case 0:
-		case 1:
-		{
-			swdiv_inject_args inject = {};
-			inject.data				 = static_cast<__u64>(reinterpret_cast<uintptr_t>(p.data()));
-			inject.len				 = static_cast<__u32>(p.size());
-			inject.flags			 = flag_choices[next() % 6];
-			inject.ifindex			 = ifindex;
-			count(ioctl(fd, SWDIVERT_IOC_INJECT, &inject));
-			break;
-		}
-		case 2:
-		{
-			swdiv_inject_args inject = {}; // odd arguments: a null or wild pointer, an absurd length, an interface that does not exist
-			inject.data				 = next() % 2 ? 0 : static_cast<__u64>(next());
-			inject.len				 = next() % 2 ? static_cast<__u32>(next()) : static_cast<__u32>(p.size());
-			inject.flags			 = flag_choices[next() % 6];
-			inject.ifindex			 = next() % 2 ? ifindex : static_cast<unsigned>(next() % 100000);
-			inject.reserved			 = next() % 8 == 0;
-			count(ioctl(fd, SWDIVERT_IOC_INJECT, &inject));
-			break;
-		}
-		case 3:
-		case 4:
-		{
-			swdiv_verdict verdict = make_verdict(next() % 64, SWDIV_V_RESUME_MOD);
-			verdict.data		  = static_cast<__u64>(reinterpret_cast<uintptr_t>(p.data()));
-			verdict.len			  = static_cast<__u32>(p.size());
-			verdict.flags		  = flag_choices[next() % 6];
-			swdiv_verdict_args args = {};
-			args.items				= static_cast<__u64>(reinterpret_cast<uintptr_t>(&verdict));
-			args.count				= 1;
-			const int result		= ioctl(fd, SWDIVERT_IOC_VERDICT, &args);
-			if (result == 0 && verdict.status != 0)
-			{
-				errno = static_cast<int>(verdict.status);
-				count(-1);
-			}
-			else
-			{
-				count(result);
-			}
-			break;
-		}
-		case 6:
-		{
-			// A program of random instructions, mostly plausible ones, with sets: the verifier decides
-			std::vector<swdiv_insn> insns(next() % 40);
-			static const uint16_t sources[] = {1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18, 30, 31, 32, 33, 34, 35};
-			for (size_t k = 0; k < insns.size(); ++k)
-			{
-				swdiv_insn& in = insns[k];
-				in.op		   = next() % 10 ? static_cast<uint16_t>(1 + next() % 11) : static_cast<uint16_t>(next());
-				in.src		   = next() % 6 ? sources[next() % 22] : static_cast<uint16_t>(next());
-				in.fail		   = next() % 4 ? static_cast<uint16_t>(k + 1 + next() % (insns.size() - k + 1)) : static_cast<uint16_t>(next());
-				in.k		   = next() % 3 ? 0 : static_cast<uint16_t>(next() % 300);
-				in.a		   = next() % 3 ? static_cast<uint32_t>(next() % 70) : static_cast<uint32_t>(next());
-				in.b		   = next() % 2 ? 0 : static_cast<uint32_t>(next() % 70);
-				if (in.op == SWDIV_OP_ACCEPT && next() % 4)
-					in.fail = in.src = in.k = 0, in.a = in.b = 0;
-			}
-			std::vector<std::vector<uint32_t>> arrays(next() % 4);
-			std::vector<swdiv_set_desc>		   descs(arrays.size());
-			for (size_t k = 0; k < arrays.size(); ++k)
-			{
-				descs[k].kind = next() % 8 ? 1 + next() % 2 : static_cast<uint32_t>(next());
-				const size_t n = next() % 30;
-				arrays[k].resize(n * (descs[k].kind == SWDIV_SET_PORTS ? 2 : 1));
-				uint32_t at = static_cast<uint32_t>(next() % 50);
-				for (uint32_t& v : arrays[k])
-					v = next() % 6 ? (at += 1 + static_cast<uint32_t>(next() % 9)) : static_cast<uint32_t>(next());
-				descs[k].n	   = static_cast<__u32>(n);
-				descs[k].elems = static_cast<__u64>(reinterpret_cast<uintptr_t>(arrays[k].data()));
-			}
-			swdiv_program_args pargs = {};
-			pargs.insns				 = static_cast<__u64>(reinterpret_cast<uintptr_t>(insns.data()));
-			pargs.n_insns			 = static_cast<__u32>(insns.size());
-			pargs.n_sets			 = static_cast<__u32>(descs.size());
-			pargs.sets				 = static_cast<__u64>(reinterpret_cast<uintptr_t>(descs.data()));
-			count(ioctl(fd, SWDIVERT_IOC_SET_PROGRAM, &pargs));
-			break;
-		}
-		case 7:
-		{
-			// Hostile arguments of the call itself
-			swdiv_program_args pargs = {};
-			pargs.insns				 = next() % 2 ? 0 : static_cast<__u64>(next());
-			pargs.n_insns			 = next() % 2 ? static_cast<__u32>(next() % 6000) : static_cast<__u32>(next());
-			pargs.sets				 = next() % 2 ? 0 : static_cast<__u64>(next());
-			pargs.n_sets			 = next() % 2 ? static_cast<__u32>(next() % 100) : static_cast<__u32>(next());
-			pargs.reserved			 = next() % 8 == 0;
-			count(ioctl(fd, SWDIVERT_IOC_SET_PROGRAM, &pargs));
-			break;
-		}
-		default:
-		{
-			swdiv_verdict verdict = make_verdict(next(), static_cast<uint32_t>(next() % 6));
-			verdict.data		  = next() % 2 ? 0 : static_cast<__u64>(next());
-			verdict.len			  = static_cast<__u32>(next());
-			verdict.flags		  = static_cast<__u32>(next());
-			swdiv_verdict_args args = {};
-			args.items				= next() % 8 ? static_cast<__u64>(reinterpret_cast<uintptr_t>(&verdict)) : static_cast<__u64>(next());
-			args.count				= next() % 8 ? 1 : static_cast<__u32>(next());
-			args.reserved			= next() % 16 == 0;
-			count(ioctl(fd, SWDIVERT_IOC_VERDICT, &args));
-			break;
-		}
+			case 0:
+			case 1:
+				{
+					swdiv_inject_args inject = {};
+					inject.data				 = static_cast<__u64>(reinterpret_cast<uintptr_t>(p.data()));
+					inject.len				 = static_cast<__u32>(p.size());
+					inject.flags			 = flag_choices[next() % 6];
+					inject.ifindex			 = ifindex;
+					count(ioctl(fd, SWDIVERT_IOC_INJECT, &inject));
+					break;
+				}
+			case 2:
+				{
+					swdiv_inject_args inject =
+						{};	 // odd arguments: a null or wild pointer, an absurd length, an interface that does not exist
+					inject.data		= next() % 2 ? 0 : static_cast<__u64>(next());
+					inject.len		= next() % 2 ? static_cast<__u32>(next()) : static_cast<__u32>(p.size());
+					inject.flags	= flag_choices[next() % 6];
+					inject.ifindex	= next() % 2 ? ifindex : static_cast<unsigned>(next() % 100000);
+					inject.reserved = next() % 8 == 0;
+					count(ioctl(fd, SWDIVERT_IOC_INJECT, &inject));
+					break;
+				}
+			case 3:
+			case 4:
+				{
+					swdiv_verdict verdict	= make_verdict(next() % 64, SWDIV_V_RESUME_MOD);
+					verdict.data			= static_cast<__u64>(reinterpret_cast<uintptr_t>(p.data()));
+					verdict.len				= static_cast<__u32>(p.size());
+					verdict.flags			= flag_choices[next() % 6];
+					swdiv_verdict_args args = {};
+					args.items				= static_cast<__u64>(reinterpret_cast<uintptr_t>(&verdict));
+					args.count				= 1;
+					const int result		= ioctl(fd, SWDIVERT_IOC_VERDICT, &args);
+					if (result == 0 && verdict.status != 0)
+					{
+						errno = static_cast<int>(verdict.status);
+						count(-1);
+					}
+					else
+					{
+						count(result);
+					}
+					break;
+				}
+			case 6:
+				{
+					// A program of random instructions, mostly plausible ones, with sets: the verifier decides
+					std::vector<swdiv_insn> insns(next() % 40);
+					static const uint16_t	sources[] = {1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18, 30, 31, 32, 33, 34, 35};
+					for (size_t k = 0; k < insns.size(); ++k)
+					{
+						swdiv_insn& in = insns[k];
+						in.op		   = next() % 10 ? static_cast<uint16_t>(1 + next() % 11) : static_cast<uint16_t>(next());
+						in.src		   = next() % 6 ? sources[next() % 22] : static_cast<uint16_t>(next());
+						in.fail =
+							next() % 4 ? static_cast<uint16_t>(k + 1 + next() % (insns.size() - k + 1)) : static_cast<uint16_t>(next());
+						in.k = next() % 3 ? 0 : static_cast<uint16_t>(next() % 300);
+						in.a = next() % 3 ? static_cast<uint32_t>(next() % 70) : static_cast<uint32_t>(next());
+						in.b = next() % 2 ? 0 : static_cast<uint32_t>(next() % 70);
+						if (in.op == SWDIV_OP_ACCEPT && next() % 4)
+							in.fail = in.src = in.k = 0, in.a = in.b = 0;
+					}
+					std::vector<std::vector<uint32_t>> arrays(next() % 4);
+					std::vector<swdiv_set_desc>		   descs(arrays.size());
+					for (size_t k = 0; k < arrays.size(); ++k)
+					{
+						descs[k].kind  = next() % 8 ? 1 + next() % 2 : static_cast<uint32_t>(next());
+						const size_t n = next() % 30;
+						arrays[k].resize(n * (descs[k].kind == SWDIV_SET_PORTS ? 2 : 1));
+						uint32_t at = static_cast<uint32_t>(next() % 50);
+						for (uint32_t& v : arrays[k])
+							v = next() % 6 ? (at += 1 + static_cast<uint32_t>(next() % 9)) : static_cast<uint32_t>(next());
+						descs[k].n	   = static_cast<__u32>(n);
+						descs[k].elems = static_cast<__u64>(reinterpret_cast<uintptr_t>(arrays[k].data()));
+					}
+					swdiv_program_args pargs = {};
+					pargs.insns				 = static_cast<__u64>(reinterpret_cast<uintptr_t>(insns.data()));
+					pargs.n_insns			 = static_cast<__u32>(insns.size());
+					pargs.n_sets			 = static_cast<__u32>(descs.size());
+					pargs.sets				 = static_cast<__u64>(reinterpret_cast<uintptr_t>(descs.data()));
+					count(ioctl(fd, SWDIVERT_IOC_SET_PROGRAM, &pargs));
+					break;
+				}
+			case 7:
+				{
+					// Hostile arguments of the call itself
+					swdiv_program_args pargs = {};
+					pargs.insns				 = next() % 2 ? 0 : static_cast<__u64>(next());
+					pargs.n_insns			 = next() % 2 ? static_cast<__u32>(next() % 6000) : static_cast<__u32>(next());
+					pargs.sets				 = next() % 2 ? 0 : static_cast<__u64>(next());
+					pargs.n_sets			 = next() % 2 ? static_cast<__u32>(next() % 100) : static_cast<__u32>(next());
+					pargs.reserved			 = next() % 8 == 0;
+					count(ioctl(fd, SWDIVERT_IOC_SET_PROGRAM, &pargs));
+					break;
+				}
+			default:
+				{
+					swdiv_verdict verdict	= make_verdict(next(), static_cast<uint32_t>(next() % 6));
+					verdict.data			= next() % 2 ? 0 : static_cast<__u64>(next());
+					verdict.len				= static_cast<__u32>(next());
+					verdict.flags			= static_cast<__u32>(next());
+					swdiv_verdict_args args = {};
+					args.items	  = next() % 8 ? static_cast<__u64>(reinterpret_cast<uintptr_t>(&verdict)) : static_cast<__u64>(next());
+					args.count	  = next() % 8 ? 1 : static_cast<__u32>(next());
+					args.reserved = next() % 16 == 0;
+					count(ioctl(fd, SWDIVERT_IOC_VERDICT, &args));
+					break;
+				}
 		}
 	}
 	ioctl(fd, SWDIVERT_IOC_STOP);
 	swdiv_stats stats = {};
 	ioctl(fd, SWDIVERT_IOC_STATS, &stats);
-	std::printf("fuzz_iterations=%ld fuzz_ok=%llu fuzz_einval=%llu fuzz_enoent=%llu fuzz_efault=%llu fuzz_other=%llu injected=%llu inject_failed=%llu\n",
-				iterations, static_cast<unsigned long long>(ok), static_cast<unsigned long long>(einval), static_cast<unsigned long long>(enoent),
-				static_cast<unsigned long long>(efault), static_cast<unsigned long long>(other), static_cast<unsigned long long>(stats.injected),
-				static_cast<unsigned long long>(stats.inject_failed));
+	std::printf(
+		"fuzz_iterations=%ld fuzz_ok=%llu fuzz_einval=%llu fuzz_enoent=%llu fuzz_efault=%llu fuzz_other=%llu injected=%llu "
+		"inject_failed=%llu\n",
+		iterations,
+		static_cast<unsigned long long>(ok),
+		static_cast<unsigned long long>(einval),
+		static_cast<unsigned long long>(enoent),
+		static_cast<unsigned long long>(efault),
+		static_cast<unsigned long long>(other),
+		static_cast<unsigned long long>(stats.injected),
+		static_cast<unsigned long long>(stats.inject_failed));
 	return 0;
 }
 
@@ -874,7 +907,7 @@ int run_pktcheck(const Args& args)
 	install_signals();
 	announce_ready();
 
-	uint64_t good = 0, bad_ip = 0, bad_l4 = 0, partial = 0, no_l4_sum = 0, total = 0;
+	uint64_t	  good = 0, bad_ip = 0, bad_l4 = 0, partial = 0, no_l4_sum = 0, total = 0;
 	unsigned char buffer[65536];
 	while (!g_stop)
 	{
@@ -883,16 +916,16 @@ int run_pktcheck(const Args& args)
 			continue;
 		for (;;)
 		{
-			char		 control[256];
-			iovec		 iov  = {buffer, sizeof(buffer)};
-			msghdr		 msg  = {};
-			sockaddr_ll	 from = {};
-			msg.msg_name	  = &from;
-			msg.msg_namelen	  = sizeof(from);
-			msg.msg_iov		  = &iov;
-			msg.msg_iovlen	  = 1;
-			msg.msg_control	  = control;
-			msg.msg_controllen = sizeof(control);
+			char		control[256];
+			iovec		iov		= {buffer, sizeof(buffer)};
+			msghdr		msg		= {};
+			sockaddr_ll from	= {};
+			msg.msg_name		= &from;
+			msg.msg_namelen		= sizeof(from);
+			msg.msg_iov			= &iov;
+			msg.msg_iovlen		= 1;
+			msg.msg_control		= control;
+			msg.msg_controllen	= sizeof(control);
 			const ssize_t count = recvmsg(fd, &msg, MSG_DONTWAIT);
 			if (count <= 0)
 				break;
@@ -914,9 +947,9 @@ int run_pktcheck(const Args& args)
 				++partial;
 				continue;
 			}
-			const size_t   tot	 = (static_cast<size_t>(buffer[2]) << 8) | buffer[3];
-			const size_t   ulen	 = tot - ihl;
-			bool		   ok	 = true;
+			const size_t tot  = (static_cast<size_t>(buffer[2]) << 8) | buffer[3];
+			const size_t ulen = tot - ihl;
+			bool		 ok	  = true;
 			if (fold(sum16(buffer, ihl, 0)) != 0xFFFF)
 			{
 				++bad_ip;
@@ -941,9 +974,13 @@ int run_pktcheck(const Args& args)
 				++good;
 		}
 	}
-	std::printf("pk_total=%llu pk_good=%llu pk_bad_ip=%llu pk_bad_l4=%llu pk_partial=%llu pk_no_l4_sum=%llu\n", static_cast<unsigned long long>(total),
-				static_cast<unsigned long long>(good), static_cast<unsigned long long>(bad_ip), static_cast<unsigned long long>(bad_l4),
-				static_cast<unsigned long long>(partial), static_cast<unsigned long long>(no_l4_sum));
+	std::printf("pk_total=%llu pk_good=%llu pk_bad_ip=%llu pk_bad_l4=%llu pk_partial=%llu pk_no_l4_sum=%llu\n",
+				static_cast<unsigned long long>(total),
+				static_cast<unsigned long long>(good),
+				static_cast<unsigned long long>(bad_ip),
+				static_cast<unsigned long long>(bad_l4),
+				static_cast<unsigned long long>(partial),
+				static_cast<unsigned long long>(no_l4_sum));
 	return 0;
 }
 
@@ -1033,8 +1070,13 @@ int run_tcpsend(const Args& args)
 	shutdown(fd, SHUT_WR);
 	// Wait for the peer to close, so the time covers delivery of everything
 	char drain[16];
-	while (recv(fd, drain, sizeof(drain), 0) > 0) {}
-	std::printf("sent=%llu hash=%llu elapsed_ms=%.0f\n", static_cast<unsigned long long>(sent), static_cast<unsigned long long>(hash), static_cast<double>(now_ns() - started) / 1e6);
+	while (recv(fd, drain, sizeof(drain), 0) > 0)
+	{
+	}
+	std::printf("sent=%llu hash=%llu elapsed_ms=%.0f\n",
+				static_cast<unsigned long long>(sent),
+				static_cast<unsigned long long>(hash),
+				static_cast<double>(now_ns() - started) / 1e6);
 	return 0;
 }
 
@@ -1045,8 +1087,8 @@ struct SniffResult
 	uint64_t captured = 0;
 	uint64_t dropped  = 0;
 	uint64_t bytes	  = 0;
-	uint64_t polls	  = 0; // poll() calls that had to wait, i.e. how often the reader went to sleep
-	uint64_t wakeups  = 0; // kernel-side wake_up() calls (swdivert only)
+	uint64_t polls	  = 0;	// poll() calls that had to wait, i.e. how often the reader went to sleep
+	uint64_t wakeups  = 0;	// kernel-side wake_up() calls (swdivert only)
 };
 
 void print_result(const SniffResult& result, double cpu_ms)
@@ -1071,9 +1113,9 @@ swdiv_verdict make_verdict(uint64_t id, uint32_t verdict)
 // What the hold modes do to a packet before they resume it
 struct ModifyPlan
 {
-	std::string mode; // empty: resume unchanged
+	std::string mode;  // empty: resume unchanged
 	uint16_t	to_port = 9001;
-	uint32_t	to_ip	= 0; // network order
+	uint32_t	to_ip	= 0;  // network order
 };
 
 void put16(std::vector<unsigned char>& p, size_t offset, uint16_t value)
@@ -1089,8 +1131,8 @@ std::vector<unsigned char> build_modified(const unsigned char* pkt, uint32_t len
 	std::vector<unsigned char> out;
 	if (plan.mode.empty() || len < 28)
 		return out;
-	const size_t ihl	= static_cast<size_t>(pkt[0] & 0x0F) * 4;
-	const size_t total	= (static_cast<size_t>(pkt[2]) << 8) | pkt[3];
+	const size_t ihl   = static_cast<size_t>(pkt[0] & 0x0F) * 4;
+	const size_t total = (static_cast<size_t>(pkt[2]) << 8) | pkt[3];
 	if (plan.mode == "tcp-flip")
 	{
 		// Flips the last byte of every TCP segment that carries data. The receiver only accepts the segment if the checksum the
@@ -1143,13 +1185,14 @@ std::vector<unsigned char> build_modified(const unsigned char* pkt, uint32_t len
 	}
 	else if (plan.mode == "bad")
 	{
-		out[0] = 0x55; // IP version 5: the module must refuse it and keep the packet held
+		out[0] = 0x55;	// IP version 5: the module must refuse it and keep the packet held
 		flags  = 0;
 	}
 	return out;
 }
 
-// A copy of a packet of flood stream 0-4 as stream 5-9... (stream + 5, so that it is told apart and no copy of a copy is made), to be injected
+// A copy of a packet of flood stream 0-4 as stream 5-9... (stream + 5, so that it is told apart and no copy of a copy is made), to be
+// injected
 std::vector<unsigned char> build_twin(const unsigned char* pkt, uint32_t len)
 {
 	std::vector<unsigned char> out;
@@ -1164,7 +1207,7 @@ std::vector<unsigned char> build_twin(const unsigned char* pkt, uint32_t len)
 	if (stream >= 5)
 		return out;
 	out.assign(pkt, pkt + total);
-	const uint32_t twin = stream + 5; // a stream of its own per original stream, so twins of different floods never collide
+	const uint32_t twin = stream + 5;  // a stream of its own per original stream, so twins of different floods never collide
 	std::memcpy(&out[ihl + 8 + 12], &twin, sizeof(twin));
 	return out;
 }
@@ -1181,11 +1224,11 @@ struct Pending
 // Verdicts of the hold modes, sent in batches (one ioctl per drain of the ring)
 struct HoldState
 {
-	int								 fd = -1;
-	std::deque<Pending>				 pending;	  // in due order because the delay is constant
-	std::vector<swdiv_verdict>		 batch;
-	std::deque<std::vector<unsigned char>> batch_data; // the bytes the RESUME_MOD items of `batch` point to
-	uint64_t						 seen = 0, resumed = 0, dropped = 0, enoent = 0, errors = 0, injected = 0, inject_errors = 0;
+	int									   fd = -1;
+	std::deque<Pending>					   pending;	 // in due order because the delay is constant
+	std::vector<swdiv_verdict>			   batch;
+	std::deque<std::vector<unsigned char>> batch_data;	// the bytes the RESUME_MOD items of `batch` point to
+	uint64_t							   seen = 0, resumed = 0, dropped = 0, enoent = 0, errors = 0, injected = 0, inject_errors = 0;
 
 	void add_resume(uint64_t id, std::vector<unsigned char>&& bytes, uint32_t flags)
 	{
@@ -1206,10 +1249,10 @@ void flush_verdicts(HoldState& hold)
 	size_t offset = 0;
 	while (offset < hold.batch.size())
 	{
-		const size_t		count = std::min<size_t>(SWDIV_MAX_VERDICTS, hold.batch.size() - offset);
-		swdiv_verdict_args	args  = {};
-		args.items				  = static_cast<__u64>(reinterpret_cast<uintptr_t>(hold.batch.data() + offset));
-		args.count				  = static_cast<__u32>(count);
+		const size_t	   count = std::min<size_t>(SWDIV_MAX_VERDICTS, hold.batch.size() - offset);
+		swdiv_verdict_args args	 = {};
+		args.items				 = static_cast<__u64>(reinterpret_cast<uintptr_t>(hold.batch.data() + offset));
+		args.count				 = static_cast<__u32>(count);
 		if (ioctl(hold.fd, SWDIVERT_IOC_VERDICT, &args) < 0)
 		{
 			++hold.errors;
@@ -1241,15 +1284,15 @@ int sniff_swdiv(const Args& args, bool hold_mode)
 	const long delay_ms	  = args.num("--delay-ms", "0");
 	const long drop_every = args.num("--drop-every", "0");
 	ModifyPlan plan;
-	plan.mode = args.get("--modify", "");
+	plan.mode	 = args.get("--modify", "");
 	plan.to_port = static_cast<uint16_t>(args.num("--to-port", "9001"));
 	if (!args.get("--to-ip", "").empty())
 		inet_pton(AF_INET, args.get("--to-ip").c_str(), &plan.to_ip);
-	const bool		  twin		= args.get("--twin", "no") != "no";
-	const unsigned	  inject_if = if_nametoindex(args.get("--inject-if", "vc").c_str());
-	const long port	 = args.num("--port", "0");
-	const long snap	 = args.num("--snap", "224");
-	const long slots = args.num("--slots", "16384");
+	const bool	   twin		 = args.get("--twin", "no") != "no";
+	const unsigned inject_if = if_nametoindex(args.get("--inject-if", "vc").c_str());
+	const long	   port		 = args.num("--port", "0");
+	const long	   snap		 = args.num("--snap", "224");
+	const long	   slots	 = args.num("--slots", "16384");
 
 	const int fd = open("/dev/" SWDIVERT_DEVICE_NAME, O_RDWR | O_CLOEXEC);
 	if (fd < 0)
@@ -1392,17 +1435,29 @@ int sniff_swdiv(const Args& args, bool hold_mode)
 	result.wakeups = stats.wakeups;
 	print_result(result, cpu_ms_self());
 	if (hold_mode)
-		std::printf("held=%llu resumed=%llu vdropped=%llu expired=%llu flushed=%llu dev_dropped=%llu resume_lost=%llu pass_unsupported=%llu pass_limit=%llu "
-					"enoent=%llu verr=%llu modified=%llu mod_dropped=%llu ct_detached=%llu injected=%llu inject_failed=%llu tool_injected=%llu tool_inject_errors=%llu\n",
-					static_cast<unsigned long long>(stats.held), static_cast<unsigned long long>(stats.resumed),
-					static_cast<unsigned long long>(stats.verdict_dropped), static_cast<unsigned long long>(stats.expired),
-					static_cast<unsigned long long>(stats.flushed), static_cast<unsigned long long>(stats.dev_dropped),
-					static_cast<unsigned long long>(stats.resume_lost), static_cast<unsigned long long>(stats.pass_unsupported),
-					static_cast<unsigned long long>(stats.pass_limit), static_cast<unsigned long long>(hold.enoent),
-					static_cast<unsigned long long>(hold.errors), static_cast<unsigned long long>(stats.modified),
-					static_cast<unsigned long long>(stats.mod_dropped), static_cast<unsigned long long>(stats.ct_detached),
-					static_cast<unsigned long long>(stats.injected), static_cast<unsigned long long>(stats.inject_failed),
-					static_cast<unsigned long long>(hold.injected), static_cast<unsigned long long>(hold.inject_errors));
+		std::printf(
+			"held=%llu resumed=%llu vdropped=%llu expired=%llu flushed=%llu dev_dropped=%llu resume_lost=%llu pass_unsupported=%llu "
+			"pass_limit=%llu "
+			"enoent=%llu verr=%llu modified=%llu mod_dropped=%llu ct_detached=%llu injected=%llu inject_failed=%llu tool_injected=%llu "
+			"tool_inject_errors=%llu\n",
+			static_cast<unsigned long long>(stats.held),
+			static_cast<unsigned long long>(stats.resumed),
+			static_cast<unsigned long long>(stats.verdict_dropped),
+			static_cast<unsigned long long>(stats.expired),
+			static_cast<unsigned long long>(stats.flushed),
+			static_cast<unsigned long long>(stats.dev_dropped),
+			static_cast<unsigned long long>(stats.resume_lost),
+			static_cast<unsigned long long>(stats.pass_unsupported),
+			static_cast<unsigned long long>(stats.pass_limit),
+			static_cast<unsigned long long>(hold.enoent),
+			static_cast<unsigned long long>(hold.errors),
+			static_cast<unsigned long long>(stats.modified),
+			static_cast<unsigned long long>(stats.mod_dropped),
+			static_cast<unsigned long long>(stats.ct_detached),
+			static_cast<unsigned long long>(stats.injected),
+			static_cast<unsigned long long>(stats.inject_failed),
+			static_cast<unsigned long long>(hold.injected),
+			static_cast<unsigned long long>(hold.inject_errors));
 	return 0;
 }
 
@@ -1502,10 +1557,10 @@ void calc_checksums_user(std::vector<unsigned char>& p, uint32_t flags)
 	const size_t ulen = p.size() - ihl;
 	if ((flags & SWDIV_CALC_L4) && p[9] == 17 && ulen >= 8)
 	{
-		p[ihl + 6]	 = p[ihl + 7] = 0;
-		uint32_t sum = sum16(p.data() + 12, 8, 0) + 17 + static_cast<uint32_t>(ulen);
-		sum			 = sum16(p.data() + ihl, ulen, sum);
-		uint16_t csum = static_cast<uint16_t>(~fold(sum));
+		p[ihl + 6] = p[ihl + 7] = 0;
+		uint32_t sum			= sum16(p.data() + 12, 8, 0) + 17 + static_cast<uint32_t>(ulen);
+		sum						= sum16(p.data() + ihl, ulen, sum);
+		uint16_t csum			= static_cast<uint16_t>(~fold(sum));
 		if (csum == 0)
 			csum = 0xFFFF;
 		p[ihl + 6] = static_cast<unsigned char>(csum >> 8);
@@ -1513,7 +1568,7 @@ void calc_checksums_user(std::vector<unsigned char>& p, uint32_t flags)
 	}
 	if (flags & SWDIV_CALC_IP)
 	{
-		p[10] = p[11] = 0;
+		p[10] = p[11]		= 0;
 		const uint16_t csum = static_cast<uint16_t>(~fold(sum16(p.data(), ihl, 0)));
 		p[10]				= static_cast<unsigned char>(csum >> 8);
 		p[11]				= static_cast<unsigned char>(csum);
@@ -1522,16 +1577,16 @@ void calc_checksums_user(std::vector<unsigned char>& p, uint32_t flags)
 
 struct NfqState
 {
-	ModifyPlan							plan;
-	SniffResult							result;
-	bool								hold		= false;
-	long								delay_ms	= 0;
-	long								drop_every	= 0;
-	bool								batch		= false; // one verdict for all packets of a receive, as the shipped backend does
-	bool								batch_open	= false;
-	uint32_t							batch_last	= 0;
-	uint64_t							seen		= 0;
-	std::deque<std::pair<uint32_t, uint64_t>> pending; // (packet id, due time in ns)
+	ModifyPlan								  plan;
+	SniffResult								  result;
+	bool									  hold		 = false;
+	long									  delay_ms	 = 0;
+	long									  drop_every = 0;
+	bool									  batch		 = false;  // one verdict for all packets of a receive, as the shipped backend does
+	bool									  batch_open = false;
+	uint32_t								  batch_last = 0;
+	uint64_t								  seen		 = 0;
+	std::deque<std::pair<uint32_t, uint64_t>> pending;	// (packet id, due time in ns)
 };
 
 int nfq_callback(nfq_q_handle* queue, nfgenmsg*, nfq_data* packet, void* data)
@@ -1556,7 +1611,7 @@ int nfq_callback(nfq_q_handle* queue, nfgenmsg*, nfq_data* packet, void* data)
 		std::vector<unsigned char> bytes = build_modified(payload, static_cast<uint32_t>(length), state->plan, flags);
 		if (!bytes.empty())
 		{
-			calc_checksums_user(bytes, flags | SWDIV_CALC_IP); // an NFQUEUE engine recomputes both, whatever it changed
+			calc_checksums_user(bytes, flags | SWDIV_CALC_IP);	// an NFQUEUE engine recomputes both, whatever it changed
 			return nfq_set_verdict(queue, id, NF_ACCEPT, static_cast<uint32_t>(bytes.size()), bytes.data());
 		}
 	}
@@ -1571,7 +1626,7 @@ int nfq_callback(nfq_q_handle* queue, nfgenmsg*, nfq_data* packet, void* data)
 			return 0;
 		}
 		if (state->delay_ms < 0)
-			return 0; // never: the kernel drops it when the listener goes away
+			return 0;  // never: the kernel drops it when the listener goes away
 		if (state->batch && state->drop_every == 0)
 		{
 			state->batch_open = true;
@@ -1590,12 +1645,12 @@ int sniff_nfq(const Args& args, bool hold_mode)
 	nfq_handle* handle = nfq_open();
 	if (!handle)
 		die("nfq_open");
-	NfqState	  state;
-	state.hold		= hold_mode;
-	state.delay_ms	= args.num("--delay-ms", "0");
-	state.drop_every = args.num("--drop-every", "0");
-	state.batch		 = args.get("--batch", "no") != "no";
-	state.plan.mode	 = args.get("--modify", "");
+	NfqState state;
+	state.hold			= hold_mode;
+	state.delay_ms		= args.num("--delay-ms", "0");
+	state.drop_every	= args.num("--drop-every", "0");
+	state.batch			= args.get("--batch", "no") != "no";
+	state.plan.mode		= args.get("--modify", "");
 	nfq_q_handle* queue = nfq_create_queue(handle, 0, &nfq_callback, &state);
 	if (!queue)
 		die("nfq_create_queue");
