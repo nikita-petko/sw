@@ -35,7 +35,8 @@ namespace {
 	mnl_socket* netlink		  = nullptr;
 	uint32_t	next_seq	  = 0;
 	bool		table_created = false;
-	bool		table_owned	  = false;
+	// Only read by debug logging, which release builds compile out
+	[[maybe_unused]] bool table_owned = false;
 
 	struct SendResult
 	{
