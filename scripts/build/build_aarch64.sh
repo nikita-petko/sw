@@ -160,6 +160,15 @@ deb [arch=arm64 signed-by=$keyring] http://deb.debian.org/debian-security $coden
     for deb in "$work"/cache/archives/*.deb; do
         dpkg-deb -x "$deb" "$sysroot"
     done
+
+    # glibc's linker scripts (libm.so, libc.so) name /lib/aarch64-linux-gnu/..., while current packages ship into usr/lib.
+    # Recreate the usr-merge symlink so those absolute paths resolve inside the sysroot.
+    if [[ -d "$sysroot/lib" && ! -L "$sysroot/lib" ]]; then
+        mkdir -p "$sysroot/usr/lib"
+        cp -a "$sysroot/lib/." "$sysroot/usr/lib/"
+        rm -rf "$sysroot/lib"
+    fi
+    [[ -e "$sysroot/lib" ]] || ln -s usr/lib "$sysroot/lib"
 }
 
 marker="$sysroot/.lagsw-sysroot"
