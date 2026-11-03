@@ -449,10 +449,10 @@ namespace {
 #else
 				{"forwarded_address_discovery", disabled},
 #endif
-#ifdef LAGSW_FEATURE_NETFILTER_MONITOR
-				{"netfilter_monitor", {&ProfilesParser::parse_netfilter_monitor, true}},
+#ifdef LAGSW_FEATURE_BACKEND_MONITOR
+				{"backend_monitor", {&ProfilesParser::parse_backend_monitor, true}},
 #else
-				{"netfilter_monitor", disabled},
+				{"backend_monitor", disabled},
 #endif
 #ifdef LAGSW_FEATURE_NET_MONITOR
 				{"net_monitor", {&ProfilesParser::parse_net_monitor, true}},
@@ -684,22 +684,22 @@ namespace {
 		}
 #endif
 
-#ifdef LAGSW_FEATURE_NETFILTER_MONITOR
-		Status parse_netfilter_monitor(const std::string& key, const std::string& value, int)
+#ifdef LAGSW_FEATURE_BACKEND_MONITOR
+		Status parse_backend_monitor(const std::string& key, const std::string& value, int)
 		{
-			NetfilterMonitorOptions& monitor = options_.features.netfilter_monitor;
+			BackendMonitorOptions& monitor = options_.features.backend_monitor;
 			if (key == "enabled")
 				return to_status(assign_bool(context_, value, monitor.enabled));
 			if (key == "interval")
 				return to_status(assign_number<uint64_t>(context_,
 														 parse_ullong(unquote(value), 100),
 														 monitor.interval_ms,
-														 "netfilter_monitor interval"));
+														 "backend_monitor interval"));
 			if (key == "backlog_threshold")
 				return to_status(assign_number<uint32_t>(context_,
 														 parse_ulong(unquote(value), 1, 1000000),
 														 monitor.backlog_threshold,
-														 "netfilter_monitor backlog_threshold"));
+														 "backend_monitor backlog_threshold"));
 			return Status::unhandled;
 		}
 #endif

@@ -147,10 +147,10 @@ void StatusLine::run()
 	while (!shutdown_.load())
 	{
 		std::string extra_line;
-#ifdef LAGSW_FEATURE_NETFILTER_MONITOR
-		if (options_.features.netfilter_monitor.enabled)
-			extra_line = backend::monitor_status(options_.features.netfilter_monitor.interval_ms,
-												 options_.features.netfilter_monitor.backlog_threshold);
+#ifdef LAGSW_FEATURE_BACKEND_MONITOR
+		if (options_.features.backend_monitor.enabled)
+			extra_line = backend::monitor_status(options_.features.backend_monitor.interval_ms,
+												 options_.features.backend_monitor.backlog_threshold);
 #endif
 #ifdef LAGSW_FEATURE_PASSIVE_LATENCY
 		if (engine_.is_passive_latency_enabled())

@@ -55,7 +55,7 @@ features:
     direction: both
     pause_key: p
 
-  netfilter_monitor:
+  backend_monitor:
     enabled: true
 
   net_monitor:

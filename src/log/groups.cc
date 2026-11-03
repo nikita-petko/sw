@@ -53,6 +53,7 @@ const std::vector<group_info>& groups()
 		{group::kmod_packet, "Every packet held, resumed, or dropped by the swdivert module (Linux)", false},
 		{group::kmod_filter, "Capture filter compilation to filter programs (Linux)"},
 		{group::kmod_monitor, "swdivert module health sampling (Linux)"},
+		{group::windivert_monitor, "WinDivert handle and driver health sampling (Windows)"},
 		{group::backend, "Packet backend internals"},
 		{group::http, "HTTPS requests"},
 		{group::packet, "All per-packet profile traffic"},

@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "log.h"
+#include "monitor.h"
 #include "runtime.h"
 
 LOG_DEFAULT_GROUP(logging::group::backend)
@@ -67,7 +68,13 @@ namespace {
 			WINDIVERT_ADDRESS address = {};
 			length					  = 0;
 			if (!WinDivertRecv(handle_, buffer, capacity, &length, &address))
-				return classify_failure(error);
+			{
+				const IoStatus status = classify_failure(error);
+				if (status == IoStatus::error)
+					stats_.recv_failed();
+				return status;
+			}
+			stats_.received(address.Timestamp);
 			meta		   = {};
 			meta.outbound  = address.Outbound != 0;
 			meta.if_index  = address.Network.IfIdx;
@@ -82,7 +89,13 @@ namespace {
 			std::memcpy(&address, meta.native, sizeof(address));
 			sent = 0;
 			if (!WinDivertSend(handle_, packet, length, &sent, &address))
-				return classify_failure(error);
+			{
+				const IoStatus status = classify_failure(error);
+				if (status == IoStatus::error)
+					stats_.send_failed();
+				return status;
+			}
+			stats_.sent();
 			return IoStatus::ok;
 		}
 
@@ -102,8 +115,9 @@ namespace {
 		}
 
 	private:
-		HANDLE		handle_;
-		std::string description_;
+		HANDLE			 handle_;
+		std::string		 description_;
+		wd::ChannelStats stats_;
 	};
 
 	/// Combines a local-traffic channel and a forwarded-traffic channel into one. WinDivert handles are bound to a single
@@ -132,6 +146,7 @@ namespace {
 				return IoStatus::closed;
 			Item item = std::move(queue_.front());
 			queue_.pop_front();
+			stats_.set_queued(queue_.size());
 			lock.unlock();
 			space_.notify_all();
 
@@ -211,6 +226,7 @@ namespace {
 					break;
 				const bool failed = item.status == IoStatus::error;
 				queue_.push_back(std::move(item));
+				stats_.set_queued(queue_.size());
 				lock.unlock();
 				ready_.notify_one();
 				if (failed)
@@ -230,6 +246,7 @@ namespace {
 		std::condition_variable		   ready_;
 		std::condition_variable		   space_;
 		std::deque<Item>			   queue_;
+		wd::ChannelStats			   stats_{false};
 		int							   running_	 = 0;
 		bool						   shutdown_ = false;
 	};
@@ -407,10 +424,10 @@ namespace filters {
 	}
 #endif
 }  // namespace filters
-#ifdef LAGSW_FEATURE_NETFILTER_MONITOR
-std::string monitor_status(uint64_t, uint32_t)
+#ifdef LAGSW_FEATURE_BACKEND_MONITOR
+std::string monitor_status(uint64_t interval_ms, uint32_t backlog_threshold)
 {
-	return {};
+	return wd::monitor_status(interval_ms, backlog_threshold);
 }
 #endif
 

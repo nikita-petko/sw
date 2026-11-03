@@ -309,15 +309,15 @@ struct ForwardedAddressDiscoveryOptions
 };
 #endif
 
-#ifdef LAGSW_FEATURE_NETFILTER_MONITOR
-/// Settings for the NFQUEUE/nftables health line (only reported by the Linux nfqueue backend).
-struct NetfilterMonitorOptions
+#ifdef LAGSW_FEATURE_BACKEND_MONITOR
+/// Settings for the packet backend health line (NFQUEUE/nftables, swdivert module or WinDivert, depending on the backend).
+struct BackendMonitorOptions
 {
 	/// Enables the extra status line.
 	bool enabled = false;
-	/// Minimum time between samples of the kernel queue state and the nftables table, in milliseconds.
+	/// Minimum time between samples of the backend's kernel-side state, in milliseconds.
 	uint64_t interval_ms = 1000;
-	/// Queue depth (packets waiting in the kernel for a verdict) at which the line is flagged as backlogged.
+	/// Number of packets waiting (in the kernel, or in user space for WinDivert) at which the line is flagged as backlogged.
 	uint32_t backlog_threshold = 1000;
 };
 #endif
@@ -412,9 +412,9 @@ struct FeaturesOptions
 	/// Forwarded-address-discovery feature settings.
 	ForwardedAddressDiscoveryOptions forwarded_address_discovery;
 #endif
-#ifdef LAGSW_FEATURE_NETFILTER_MONITOR
-	/// Netfilter-monitor feature settings.
-	NetfilterMonitorOptions netfilter_monitor;
+#ifdef LAGSW_FEATURE_BACKEND_MONITOR
+	/// Backend-monitor feature settings.
+	BackendMonitorOptions backend_monitor;
 #endif
 #ifdef LAGSW_FEATURE_NET_MONITOR
 	/// Net-monitor feature settings.

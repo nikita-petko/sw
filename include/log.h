@@ -92,6 +92,7 @@ inline constexpr const char* kmod				 = "kmod";				  ///< swdivert kernel-module
 inline constexpr const char* kmod_packet		 = "kmod.packet";		  ///< Every packet held, resumed, or dropped by the swdivert module (Linux).
 inline constexpr const char* kmod_filter		 = "kmod.filter";		  ///< Capture filter compilation to filter programs (Linux).
 inline constexpr const char* kmod_monitor		 = "kmod.monitor";		  ///< swdivert module health sampling (Linux).
+inline constexpr const char* windivert_monitor	 = "windivert.monitor";	  ///< WinDivert handle and driver health sampling (Windows).
 inline constexpr const char* backend			 = "backend";			  ///< Packet backend internals.
 inline constexpr const char* http				 = "http";				  ///< HTTPS requests.
 inline constexpr const char* packet				 = "packet";			  ///< All per-packet profile traffic.

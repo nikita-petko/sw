@@ -97,7 +97,7 @@ profiles file is skipped with a warning. Toggle them when configuring:
 | `pcap_files` | `--pcap_files=y\|n` | `n` |
 | `desync_countdown` | `--desync_countdown=y\|n` | `y` |
 | `forwarded_address_discovery` | `--forwarded_address_discovery=y\|n` | `y` |
-| `netfilter_monitor` | `--netfilter_monitor=y\|n` | `y` |
+| `backend_monitor` | `--backend_monitor=y\|n` | `y` |
 | `net_monitor` | `--net_monitor=y\|n` | `y` |
 | `config_tui` | `--config_tui=y\|n` | `y` |
 
@@ -384,7 +384,7 @@ Requirements and behaviour:
 - `fq` limits: 262144 packets in total and 65536 per flow, so *delay × packet rate* must fit; a delay may be up to
   600000 ms and the total stamped delay is capped at 890 s (`fq`'s horizon is 900 s and caps instead of dropping).
 - Pausing the passive latency stops delaying new packets at once; packets already stamped still leave on their schedule.
-- With `netfilter_monitor` enabled the extra status line also shows the kernel counters (stages, packets matched, delayed and
+- With `backend_monitor` enabled the extra status line also shows the kernel counters (stages, packets matched, delayed and
   dropped).
 
 ### Kernel module backend (experimental)
@@ -659,18 +659,34 @@ features:
 | `duration_percent` | No | Estimated desync duration as a percentage of the selected profile's active duration. Defaults to `80`; valid values are `1`-`100`. |
 | `enabled_for` | Yes when enabled | `"*"` for every profile, or a non-empty list of configured profile names. |
 
-The optional `netfilter_monitor` feature shows an extra status line, below the
-main one, with the health of the Linux nfqueue backend: for each bound queue the
-packets waiting in the kernel, the kernel-queue and netlink-socket drop counters
-(from `/proc/net/netfilter/nfnetlink_queue`), and whether the `inet lagsw`
-nftables table is still installed. The line ends with `[!]` when a queue is
-backlogged, drops increased since the last sample, or the table disappeared
-(for example after a firewall reload; capture rules use `bypass`, so traffic
-then flows unmanaged). Other backends show nothing. It is disabled by default.
+The optional `backend_monitor` feature shows an extra status line, below the
+main one, with the health of the packet backend. The stub backend shows nothing.
+
+- **nfqueue (Linux):** for each bound queue the packets waiting in the kernel,
+  the kernel-queue and netlink-socket drop counters (from
+  `/proc/net/netfilter/nfnetlink_queue`), and whether the `inet lagsw` nftables
+  table is still installed. The line ends with `[!]` when a queue is
+  backlogged, drops increased since the last sample, or the table disappeared
+  (for example after a firewall reload; capture rules use `bypass`, so traffic
+  then flows unmanaged).
+- **kmod (Linux):** the swdivert module's handle count and held, unheld,
+  expired, passed-through and late packet counters. The line is flagged when
+  packets went through unheld, expired on their own, or the held backlog
+  reached the threshold.
+- **WinDivert (Windows):** the number of open handles, packets received and
+  sent, receive/send errors, packets waiting in user space (only non-zero when
+  forwarded traffic is captured too), the longest time a packet waited in the
+  driver queue since the last sample, and whether the WinDivert driver service
+  is still running. The line is flagged when errors occur, the user-space
+  backlog reaches the threshold, packets wait 250 ms or more in the driver
+  queue (the driver drops packets that wait longer than about one second), or
+  the driver stops (capture has then ended).
+
+It is disabled by default.
 
 ```yaml
 features:
-  netfilter_monitor:
+  backend_monitor:
     enabled: true
     interval: 1000
     backlog_threshold: 1000
@@ -680,7 +696,7 @@ features:
 | --- | --- | --- |
 | `enabled` | No | Shows the extra status line. Defaults to `false`. |
 | `interval` | No | Minimum time between samples in milliseconds. Defaults to `1000`; minimum `100`. |
-| `backlog_threshold` | No | Waiting packets in the kernel queue at which the line is flagged. Defaults to `1000`. |
+| `backlog_threshold` | No | Waiting packets (in the kernel, or in user space for WinDivert) at which the line is flagged. Defaults to `1000`. |
 
 The optional `net_monitor` feature adds a full-screen network statistics view
 (packets/s and throughput up/down, latency, jitter, retransmits, per-server
@@ -755,7 +771,7 @@ precise, directly configured value instead of an indirect and only loosely
 tunable side effect of routing, and it has no recurring cost. It runs on its
 own capture channel that is processed before profiles and region enforcement,
 so a profile's own delay (if any) is added on top. The delay can be fixed or
-jittered, set per direction, and is shown on the extra status line below the main one, after the netfilter monitor text. See
+jittered, set per direction, and is shown on the extra status line below the main one, after the backend monitor text. See
 [`pocs/passive_latency.md`](pocs/passive_latency.md) for the full design and
 the remaining planned work (pause key, capture options, adaptive target RTT).
 

@@ -100,7 +100,7 @@ namespace filters {
 	}
 #endif
 }  // namespace filters
-#ifdef LAGSW_FEATURE_NETFILTER_MONITOR
+#ifdef LAGSW_FEATURE_BACKEND_MONITOR
 std::string monitor_status(uint64_t, uint32_t)
 {
 	return {};

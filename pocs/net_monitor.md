@@ -120,7 +120,7 @@ Measured without extra traffic:
 - **Throughput**: 95th percentile rate, goodput versus retransmitted bytes, protocol-overhead share.
 - **Heatmap of RTT per server over the last few minutes** for spotting a server that degrades at certain times.
 - **Engine overlay**: the measured RTT with and without the passive-latency delay.
-- **Interface and system**: NFQUEUE backlog and drop counters from the netfilter monitor, capture thread lag so you can
+- **Interface and system**: NFQUEUE backlog and drop counters from the backend monitor, capture thread lag so you can
   tell when the monitor itself is the bottleneck.
 
 Needs extra traffic (opt-in):

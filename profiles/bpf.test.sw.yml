@@ -7,7 +7,7 @@ features:
   linux_bpf:
     tier: auto
     interfaces: [vc, vs]
-  netfilter_monitor:
+  backend_monitor:
     enabled: true
     interval: 200
 

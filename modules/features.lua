@@ -8,7 +8,7 @@ local features = {
     {name = "pcap_files",                  default = false, description = "Write per-activation PCAP capture files (debugging aid)"},
     {name = "desync_countdown",            default = true,  description = "Show the estimated post-deactivation desync countdown"},
     {name = "forwarded_address_discovery", default = true,  description = "Discover client addresses of forwarded (shared) traffic"},
-    {name = "netfilter_monitor",           default = true,  description = "Show NFQUEUE/nftables health on an extra status line (Linux nfqueue backend)"},
+    {name = "backend_monitor",             default = true,  description = "Show packet backend health (NFQUEUE/nftables, swdivert module or WinDivert) on an extra status line"},
     {name = "net_monitor",                 default = true,  description = "Full-screen network statistics view (packets/s, latency, retransmits, charts) opened with a key"},
     {name = "config_tui",                  default = true,  description = "Terminal UI to create and edit profile files, shown when --config is missing and reopened with a key"},
 }

@@ -500,7 +500,7 @@ bool validate_filter(const std::string& filter, bool forward, std::string& error
 	return true;
 }
 
-#ifdef LAGSW_FEATURE_NETFILTER_MONITOR
+#ifdef LAGSW_FEATURE_BACKEND_MONITOR
 std::string monitor_status(uint64_t /*interval_ms*/, uint32_t backlog_threshold)
 {
 	static std::mutex mutex;

@@ -556,7 +556,7 @@ bool validate_filter(const std::string& filter, bool forward, std::string& error
 	return linux_shared::compile_filter(filter, forward, rules, error, position);
 }
 
-#ifdef LAGSW_FEATURE_NETFILTER_MONITOR
+#ifdef LAGSW_FEATURE_BACKEND_MONITOR
 std::string monitor_status(uint64_t interval_ms, uint32_t backlog_threshold)
 {
 	std::string line = nfq::monitor_status(kFirstQueueNumber, next_channel_id.load(), interval_ms, backlog_threshold);

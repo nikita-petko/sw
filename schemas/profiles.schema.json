@@ -309,9 +309,9 @@
           ],
           "additionalProperties": false
         },
-        "netfilter_monitor": {
+        "backend_monitor": {
           "type": "object",
-          "description": "Extra status line with NFQUEUE/nftables health (kernel queue depth and drops, table presence). Only reported by the Linux nfqueue backend.",
+          "description": "Extra status line with the health of the packet backend: NFQUEUE/nftables (kernel queue depth and drops, table presence), the swdivert module, or WinDivert (handle counters, receive backlog, driver queue delay, driver service state).",
           "properties": {
             "enabled": {
               "type": "boolean",
@@ -328,7 +328,7 @@
               "type": "integer",
               "minimum": 1,
               "default": 1000,
-              "description": "Number of packets waiting in the kernel queue at which the line is flagged as backlogged."
+              "description": "Number of waiting packets (in the kernel queue, or in user space for WinDivert) at which the line is flagged as backlogged."
             }
           },
           "additionalProperties": false
