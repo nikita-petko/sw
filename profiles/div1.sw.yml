@@ -79,7 +79,7 @@ profiles:
   - name: "Trickle"
     key: x
     mode: toggle
-    disables: "*"
+#   disables: "*"
     delay_mode: from_timestamp
     filter: "tcp.SrcPort == 55000 or tcp.DstPort == 55000"
     delay_ms: 500
@@ -123,7 +123,7 @@ profiles:
     retransmission_mode: none
     ack_restoration: false
     disables: 
-      - "Trickle"
+      #- "Trickle"
       - "Long (Send - Release Delay)"
     respect_disable_wait: false
     filter: "tcp.Psh and tcp.DstPort == 55000"
