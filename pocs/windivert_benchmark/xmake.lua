@@ -1,5 +1,5 @@
 -- WinDivert benchmark tool, the Windows counterpart of pocs/linux_kernel_module_backend (swbench). Not built by default:
--- `xmake build wdbench`. Run it through bench.ps1 (see its header).
+-- `xmake build wdbench`. Run it through bench.py (see its header).
 if is_plat("windows") then
     target("wdbench")
         set_kind("binary")

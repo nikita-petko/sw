@@ -1,11 +1,12 @@
 // WinDivert counterpart of pocs/linux_kernel_module_backend/swbench.cc: a paced UDP sender, a latency-recording sink and a
 // divert-and-resume "hold" reader that gives every captured packet a verdict D ms after it was captured, as the engine does.
 // Run the same traffic with and without the hold reader to tell the cost of the driver and of the user-space interface apart.
-// Results are printed as one `key=value` line per role, parsed by bench.ps1.
+// Results are printed as one `key=value` line per role, parsed by bench.py.
 //   wdbench flood --dst IP --port P --pps N --seconds S [--size B] [--stream 0-7]
 //   wdbench sink  --port P [--seconds S]
-//   wdbench hold  --port P [--layer network|forward] [--filter F] [--delay-ms D] [--drop-every K] [--batch N]
+//   wdbench hold  --port P [--layer network|forward] [--filter F] [--delay-ms D] [--drop-every K] [--batch N] [--sniff yes]
 //                 [--priority N] [--queue-length N] [--queue-time-ms N] [--seconds S]
+//                 --sniff yes: copy only (WINDIVERT_FLAG_SNIFF), the packets are not held; only cap_* is measured
 // Timestamps are QueryPerformanceCounter (one clock per machine), so one-way latency needs the sender, the hold reader and the
 // sink on ONE machine (loopback or a local interface address). For a real client -> host -> VPN path run only `hold` on the host
 // (--layer forward) and compare loss, reordering and the cap_/over_/send_ numbers with and without it.
@@ -319,12 +320,14 @@ int run_hold(const Args& args)
 	const long		  delay_ms	 = args.num("--delay-ms", "0");
 	const long		  drop_every = args.num("--drop-every", "0");
 	const long		  batch		 = std::max(1L, std::min(args.num("--batch", "1"), static_cast<long>(WINDIVERT_BATCH_MAX)));
+	const bool		  sniff		 = args.get("--sniff", "no") != "no";
 	// Locally generated packets, loopback included, are only seen once, as outbound
 	std::string filter = args.get("--filter", "");
 	if (filter.empty())
 		filter = "udp.DstPort == " + std::to_string(port) + (forward ? "" : " and outbound");
 
-	HANDLE handle = WinDivertOpen(filter.c_str(), forward ? WINDIVERT_LAYER_NETWORK_FORWARD : WINDIVERT_LAYER_NETWORK, static_cast<INT16>(args.num("--priority", "0")), 0);
+	HANDLE handle = WinDivertOpen(filter.c_str(), forward ? WINDIVERT_LAYER_NETWORK_FORWARD : WINDIVERT_LAYER_NETWORK, static_cast<INT16>(args.num("--priority", "0")),
+								  sniff ? (WINDIVERT_FLAG_SNIFF | WINDIVERT_FLAG_RECV_ONLY) : 0);
 	if (handle == INVALID_HANDLE_VALUE)
 	{
 		const DWORD code = GetLastError();
@@ -422,7 +425,11 @@ int run_hold(const Args& args)
 			uint64_t stamp;
 			if (stamp_of(packet, packet_size, stamp))
 				stats.cap.add(stamp, recv_ns);
-			if (drop_every > 0 && ++counter % static_cast<uint64_t>(drop_every) == 0)
+			if (sniff)
+			{
+				// copy only: the original continues on its way, there is nothing to resume
+			}
+			else if (drop_every > 0 && ++counter % static_cast<uint64_t>(drop_every) == 0)
 				++stats.dropped;
 			else
 			{

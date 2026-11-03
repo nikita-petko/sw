@@ -5,9 +5,10 @@ covers both ends (see research/packet_backend_comparison.md):
     Windows (elevated shell):  python pocs/run_benchmarks.py
     Linux:                     python3 pocs/run_benchmarks.py        (sudo for the swdivert kernel module rows)
 
-Windows runs pocs/windivert_benchmark/bench.ps1 (WinDivert). Linux runs pocs/linux_kernel_module_backend/bench.py
-(baseline, AF_PACKET, NFQUEUE and, when run as root with swdivert.ko loaded, the kernel module). The sweep matches the
-Linux defaults: rates 20000,100000, payloads 64,1200, 5 s per run, 3 runs.
+Windows runs pocs/windivert_benchmark/bench.py (WinDivert). Linux runs pocs/linux_kernel_module_backend/bench.py
+(AF_PACKET, NFQUEUE and, when run as root with swdivert.ko loaded, the kernel module). Both run the same scenarios (baseline,
+sniff, hold0, hold0-batch, hold2ms) over the same sweep, take the same measurements and print the same table, defined in
+pocs/bench_common.py: rates 20000,100000, payloads 64,1200, 5 s per run, 3 runs, median.
 
     python3 pocs/run_benchmarks.py --quick        # 20000 pps, 64 B, 1 run: a short check of the whole chain
     python3 pocs/run_benchmarks.py --dry-run      # only print what would run
@@ -25,6 +26,8 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bench_common as common  # noqa: E402
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 IS_WINDOWS = os.name == "nt"
@@ -101,14 +104,11 @@ def windows_suite(log, args):
     if not args.no_build and not build(log, ["wdbench"], args.dry_run):
         log.line("build of wdbench failed")
         return 1
-    script = os.path.join(ROOT, "pocs", "windivert_benchmark", "bench.ps1")
-    failed = 0
-    for size in args.sizes:
-        for repeat in range(1, args.runs + 1):
-            log.line(f"\n=== WinDivert: payload {size} B, run {repeat}/{args.runs} ===")
-            command = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Pps", ",".join(map(str, args.pps)), "-Size", str(size), "-Seconds", str(args.seconds)]
-            failed += run(log, command, args.dry_run) != 0
-    return failed
+    script = os.path.join(ROOT, "pocs", "windivert_benchmark", "bench.py")
+    command = [sys.executable, script, "--pps", ",".join(map(str, args.pps)), "--sizes", ",".join(map(str, args.sizes)), "--seconds", str(args.seconds),
+               "--runs", str(args.runs), "--scenarios", args.scenarios, "--json", args.json_out]
+    log.line("\n=== WinDivert ===")
+    return run(log, command, args.dry_run) != 0
 
 
 def linux_suite(log, args):
@@ -118,7 +118,7 @@ def linux_suite(log, args):
             log.line("build failed")
             return 1
     script = os.path.join(ROOT, "pocs", "linux_kernel_module_backend", "bench.py")
-    modes = ["baseline", "afpacket", "nfq"]
+    modes = ["afpacket", "nfq"]
     if is_elevated() and module_loaded():
         modes.append("swdiv")
     elif is_elevated():
@@ -126,7 +126,8 @@ def linux_suite(log, args):
     else:
         log.line("not root: skipping the kernel module rows (they need real root and the module loaded)")
     log.line("modes: " + ",".join(modes))
-    command = [sys.executable, script, "--modes", ",".join(modes), "--pps", ",".join(map(str, args.pps)), "--sizes", ",".join(map(str, args.sizes)), "--seconds", str(args.seconds), "--runs", str(args.runs)]
+    command = [sys.executable, script, "--modes", ",".join(modes), "--pps", ",".join(map(str, args.pps)), "--sizes", ",".join(map(str, args.sizes)), "--seconds", str(args.seconds),
+               "--runs", str(args.runs), "--scenarios", args.scenarios, "--json", args.json_out]
     log.line("\n=== Linux: functional check ===")
     failed = run(log, command[:2] + ["--check", "--modes", ",".join(modes)], args.dry_run) != 0
     log.line("\n=== Linux: benchmark ===")
@@ -136,10 +137,11 @@ def linux_suite(log, args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--pps", default="20000,100000")
-    parser.add_argument("--sizes", default="64,1200", help="UDP payload bytes")
-    parser.add_argument("--seconds", type=int, default=5)
-    parser.add_argument("--runs", type=int, default=3)
+    parser.add_argument("--pps", default=",".join(map(str, common.DEFAULT_PPS)))
+    parser.add_argument("--sizes", default=",".join(map(str, common.DEFAULT_SIZES)), help="UDP payload bytes")
+    parser.add_argument("--seconds", type=int, default=common.DEFAULT_SECONDS)
+    parser.add_argument("--runs", type=int, default=common.DEFAULT_RUNS)
+    parser.add_argument("--scenarios", default=",".join(common.SCENARIOS), help="comma separated subset of: " + ", ".join(common.SCENARIOS))
     parser.add_argument("--quick", action="store_true", help="20000 pps, 64 B, 1 run, 3 s")
     parser.add_argument("--egress", action="store_true", help="also probe the latency of every egress interface (pocs/egress_benchmark/egress.py), with the diverter when elevated")
     parser.add_argument("--no-build", action="store_true")
@@ -157,11 +159,12 @@ def main():
         os.makedirs(folder, exist_ok=True)
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         out = os.path.join(folder, f"{platform.node()}-{'windows' if IS_WINDOWS else 'linux'}-{stamp}.log")
+    args.json_out = os.path.splitext(out)[0] + ".json"
     log = Log(out)
     log.line("# packet backend benchmarks")
     for key, value in machine_details():
         log.line(f"{key}: {value}")
-    log.line(f"parameters: pps={args.pps} sizes={args.sizes} seconds={args.seconds} runs={args.runs}")
+    log.line(f"parameters: pps={args.pps} sizes={args.sizes} seconds={args.seconds} runs={args.runs} scenarios={args.scenarios}")
 
     failed = windows_suite(log, args) if IS_WINDOWS else linux_suite(log, args)
     if args.egress:
@@ -170,7 +173,7 @@ def main():
         if is_elevated():
             egress += ["--hold", "0", "--hold", "2"]
         failed += run(log, egress, args.dry_run) != 0
-    log.line(f"\nlog: {out}")
+    log.line(f"\nlog: {out}\nrows: {args.json_out} (merge several machines: python pocs/bench_common.py report <file>.json ...)")
     log.line("all benchmarks finished" if not failed else f"{failed} step(s) failed, see above")
     return 1 if failed else 0
 

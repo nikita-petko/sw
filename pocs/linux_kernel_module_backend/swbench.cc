@@ -123,6 +123,36 @@ void announce_ready()
 	std::fflush(stdout);
 }
 
+// Microsecond samples printed as <prefix>_p50_us, _p99_us, _p999_us, _max_us: the same keys and percentiles as wdbench, because
+// both tools feed one report (pocs/bench_common.py)
+struct Samples
+{
+	std::vector<uint32_t> us;
+	void				  add(uint64_t from_ns, uint64_t to_ns)
+	{
+		us.push_back(static_cast<uint32_t>(std::min<uint64_t>(to_ns > from_ns ? (to_ns - from_ns) / 1000 : 0, 0xFFFFFFFFull)));
+	}
+	void print(const char* prefix)
+	{
+		std::sort(us.begin(), us.end());
+		auto pct = [&](double p) { return us.empty() ? 0u : us[static_cast<size_t>(p * static_cast<double>(us.size() - 1))]; };
+		std::printf(" %s_p50_us=%u %s_p99_us=%u %s_p999_us=%u %s_max_us=%u", prefix, pct(0.50), prefix, pct(0.99), prefix, pct(0.999), prefix, us.empty() ? 0u : us.back());
+	}
+};
+
+// The benchmark payload (flood): bytes 0-7 the sender's CLOCK_MONOTONIC stamp, after the IPv4 and UDP headers. False when the
+// packet is not UDP or the copy is too short to hold the stamp.
+bool stamp_of_ip(const unsigned char* ip, uint32_t len, uint64_t& stamp)
+{
+	if (len < 20 || (ip[0] >> 4) != 4 || ip[9] != 17)
+		return false;
+	const size_t offset = static_cast<size_t>(ip[0] & 0x0F) * 4 + 8;
+	if (len < offset + 8)
+		return false;
+	std::memcpy(&stamp, ip + offset, sizeof(stamp));
+	return true;
+}
+
 // ---- flood and sink ----
 
 int run_flood(const Args& args)
@@ -216,9 +246,9 @@ int run_sink(const Args& args)
 	uint64_t			  received = 0, corrupt = 0, dups = 0, reordered = 0;
 	uint64_t			  max_seq[8] = {};
 	unsigned			  len_min = 0xFFFFFFFFu, len_max = 0;
-	std::vector<uint32_t> latency_us;
+	Samples				  latency;
 	std::vector<uint8_t>  seen[8];	// per flood stream (the high bits of the sequence number)
-	latency_us.reserve(1 << 20);
+	latency.us.reserve(1 << 20);
 	while (!g_stop)
 	{
 		for (unsigned i = 0; i < kBatch; ++i)
@@ -247,7 +277,7 @@ int run_sink(const Args& args)
 			uint64_t stamp, seq;
 			std::memcpy(&stamp, buffers[i], sizeof(stamp));
 			std::memcpy(&seq, buffers[i] + 8, sizeof(seq));
-			latency_us.push_back(static_cast<uint32_t>(std::min<uint64_t>((now - stamp) / 1000, 0xFFFFFFFFull)));
+			latency.add(stamp, now);
 			if (verify)
 				for (unsigned b = 16; b < len; ++b)
 					if (buffers[i][b] != fill)
@@ -269,22 +299,16 @@ int run_sink(const Args& args)
 			max_seq[stream] = std::max(max_seq[stream], n);
 		}
 	}
-	std::sort(latency_us.begin(), latency_us.end());
-	auto pct = [&](double p) {
-		return latency_us.empty() ? 0u : latency_us[static_cast<size_t>(p * static_cast<double>(latency_us.size() - 1))];
-	};
-	std::printf(
-		"received=%llu cpu_ms=%.1f lat_p50_us=%u lat_p99_us=%u lat_max_us=%u corrupt=%llu dups=%llu reordered=%llu len_min=%u len_max=%u\n",
-		static_cast<unsigned long long>(received),
-		cpu_ms_self(),
-		pct(0.50),
-		pct(0.99),
-		latency_us.empty() ? 0u : latency_us.back(),
-		static_cast<unsigned long long>(corrupt),
-		static_cast<unsigned long long>(dups),
-		static_cast<unsigned long long>(reordered),
-		received ? len_min : 0u,
-		len_max);
+	std::printf("received=%llu cpu_ms=%.1f corrupt=%llu dups=%llu reordered=%llu len_min=%u len_max=%u",
+				static_cast<unsigned long long>(received),
+				cpu_ms_self(),
+				static_cast<unsigned long long>(corrupt),
+				static_cast<unsigned long long>(dups),
+				static_cast<unsigned long long>(reordered),
+				received ? len_min : 0u,
+				len_max);
+	latency.print("lat");
+	std::printf("\n");
 	return 0;
 }
 
@@ -1078,17 +1102,25 @@ struct SniffResult
 	uint64_t bytes	  = 0;
 	uint64_t polls	  = 0;	// poll() calls that had to wait, i.e. how often the reader went to sleep
 	uint64_t wakeups  = 0;	// kernel-side wake_up() calls (swdivert only)
+	// The same split as wdbench hold, so the backends can be compared part by part:
+	Samples cap;   // sender stamp -> the reader saw the packet
+	Samples over;  // verdict due time -> verdict call made (only when the hold has a delay)
+	Samples send;  // duration of one verdict call (one packet, or one batch when verdicts are batched)
 };
 
-void print_result(const SniffResult& result, double cpu_ms)
+void print_result(SniffResult& result, double cpu_ms)
 {
-	std::printf("captured=%llu dropped=%llu bytes=%llu cpu_ms=%.1f polls=%llu wakeups=%llu\n",
+	std::printf("captured=%llu dropped=%llu bytes=%llu cpu_ms=%.1f polls=%llu wakeups=%llu",
 				static_cast<unsigned long long>(result.captured),
 				static_cast<unsigned long long>(result.dropped),
 				static_cast<unsigned long long>(result.bytes),
 				cpu_ms,
 				static_cast<unsigned long long>(result.polls),
 				static_cast<unsigned long long>(result.wakeups));
+	result.cap.print("cap");
+	result.over.print("over");
+	result.send.print("send");
+	std::printf("\n");
 }
 
 swdiv_verdict make_verdict(uint64_t id, uint32_t verdict)
@@ -1233,7 +1265,7 @@ struct HoldState
 	}
 };
 
-void flush_verdicts(HoldState& hold)
+void flush_verdicts(HoldState& hold, Samples* send = nullptr)
 {
 	size_t offset = 0;
 	while (offset < hold.batch.size())
@@ -1242,7 +1274,11 @@ void flush_verdicts(HoldState& hold)
 		swdiv_verdict_args args	 = {};
 		args.items				 = static_cast<__u64>(reinterpret_cast<uintptr_t>(hold.batch.data() + offset));
 		args.count				 = static_cast<__u32>(count);
-		if (ioctl(hold.fd, SWDIVERT_IOC_VERDICT, &args) < 0)
+		const uint64_t before	 = now_ns();
+		const int	   rc		 = ioctl(hold.fd, SWDIVERT_IOC_VERDICT, &args);
+		if (send)
+			send->add(before, now_ns());
+		if (rc < 0)
 		{
 			++hold.errors;
 		}
@@ -1272,6 +1308,8 @@ int sniff_swdiv(const Args& args, bool hold_mode)
 {
 	const long delay_ms	  = args.num("--delay-ms", "0");
 	const long drop_every = args.num("--drop-every", "0");
+	// --batch no: one verdict ioctl per packet (the bench's hold0 and hold2ms); anything else keeps the verdicts of one drain together
+	const bool batch_verdicts = args.get("--batch", "") != "no";
 	ModifyPlan plan;
 	plan.mode	 = args.get("--modify", "");
 	plan.to_port = static_cast<uint16_t>(args.num("--to-port", "9001"));
@@ -1352,12 +1390,15 @@ int sniff_swdiv(const Args& args, bool hold_mode)
 		if (avail != 0)
 		{
 			volatile unsigned char sink = 0;
-			const uint64_t		   now	= hold_mode ? now_ns() : 0;
+			const uint64_t		   now	= now_ns();
 			for (__u32 i = 0; i < avail; ++i)
 			{
 				const swdiv_slot_hdr* slot = swdiv_ring_slot(&view, i);
 				result.bytes += slot->len;
 				sink = sink + swdiv_slot_data(slot)[0];	 // touch the packet like a real consumer would
+				uint64_t stamp;
+				if (stamp_of_ip(swdiv_slot_data(slot), slot->caplen, stamp))
+					result.cap.add(stamp, now);
 				if (!hold_mode || !(slot->flags & SWDIV_SLOT_F_HELD))
 					continue;
 				++hold.seen;
@@ -1381,7 +1422,11 @@ int sniff_swdiv(const Args& args, bool hold_mode)
 				if (drop_every > 0 && hold.seen % static_cast<uint64_t>(drop_every) == 0)
 					hold.batch.push_back(make_verdict(slot->id, SWDIV_V_DROP));
 				else if (delay_ms == 0)
+				{
 					hold.add_resume(slot->id, std::move(bytes), flags);
+					if (!batch_verdicts)
+						flush_verdicts(hold, &result.send);
+				}
 				else if (delay_ms > 0)
 					hold.pending.push_back({slot->id, now + static_cast<uint64_t>(delay_ms) * 1000000ull, std::move(bytes), flags});
 				// delay_ms < 0: no verdict, ever
@@ -1397,10 +1442,13 @@ int sniff_swdiv(const Args& args, bool hold_mode)
 			while (!hold.pending.empty() && hold.pending.front().due <= now)
 			{
 				Pending& due = hold.pending.front();
+				result.over.add(due.due, now);
 				hold.add_resume(due.id, std::move(due.bytes), due.flags);
 				hold.pending.pop_front();
+				if (!batch_verdicts)
+					flush_verdicts(hold, &result.send);
 			}
-			flush_verdicts(hold);
+			flush_verdicts(hold, &result.send);
 			if (!hold.pending.empty())
 				timeout_ms = static_cast<int>(std::min<uint64_t>(100, (hold.pending.front().due - now) / 1000000ull + 1));
 		}
@@ -1510,11 +1558,16 @@ int sniff_afpacket(const Args& args)
 			if (!(__atomic_load_n(&desc->hdr.bh1.block_status, __ATOMIC_ACQUIRE) & TP_STATUS_USER))
 				return;
 			auto* packet = reinterpret_cast<tpacket3_hdr*>(reinterpret_cast<unsigned char*>(desc) + desc->hdr.bh1.offset_to_first_pkt);
+			const uint64_t now = now_ns();
 			for (uint32_t i = 0; i < desc->hdr.bh1.num_pkts; ++i)
 			{
 				result.bytes += packet->tp_len;
-				volatile unsigned char sink = *(reinterpret_cast<unsigned char*>(packet) + packet->tp_mac);
+				const unsigned char* frame = reinterpret_cast<unsigned char*>(packet) + packet->tp_mac;
+				volatile unsigned char sink = *frame;
 				(void)sink;
+				uint64_t stamp;
+				if (packet->tp_snaplen > 14 && stamp_of_ip(frame + 14, packet->tp_snaplen - 14, stamp))
+					result.cap.add(stamp, now);
 				packet = reinterpret_cast<tpacket3_hdr*>(reinterpret_cast<unsigned char*>(packet) + packet->tp_next_offset);
 			}
 			result.captured += desc->hdr.bh1.num_pkts;
@@ -1591,6 +1644,9 @@ int nfq_callback(nfq_q_handle* queue, nfgenmsg*, nfq_data* packet, void* data)
 		volatile unsigned char sink = payload[0];
 		(void)sink;
 		state->result.bytes += static_cast<uint64_t>(length);
+		uint64_t stamp;
+		if (stamp_of_ip(payload, static_cast<uint32_t>(length), stamp))
+			state->result.cap.add(stamp, now_ns());
 	}
 	++state->result.captured;
 	const uint32_t id = ntohl(header->packet_id);
@@ -1624,7 +1680,10 @@ int nfq_callback(nfq_q_handle* queue, nfgenmsg*, nfq_data* packet, void* data)
 		}
 	}
 	// A sniffer on NFQUEUE has to give a verdict for every packet: this is the round trip the module removes
-	return nfq_set_verdict(queue, id, NF_ACCEPT, 0, nullptr);
+	const uint64_t before = now_ns();
+	const int	   rc	  = nfq_set_verdict(queue, id, NF_ACCEPT, 0, nullptr);
+	state->result.send.add(before, now_ns());
+	return rc;
 }
 
 // NFQUEUE: the nft rule (installed by bench.py) queues matching packets to queue 0 with `bypass`
@@ -1662,7 +1721,9 @@ int sniff_nfq(const Args& args, bool hold_mode)
 			const uint64_t now = now_ns();
 			while (!state.pending.empty() && state.pending.front().second <= now)
 			{
+				state.result.over.add(state.pending.front().second, now);
 				nfq_set_verdict(queue, state.pending.front().first, NF_ACCEPT, 0, nullptr);
+				state.result.send.add(now, now_ns());
 				state.pending.pop_front();
 			}
 			if (!state.pending.empty())
@@ -1679,7 +1740,9 @@ int sniff_nfq(const Args& args, bool hold_mode)
 			if (state.batch_open)
 			{
 				// Accepts every packet up to the last id of this receive in one message
+				const uint64_t before = now_ns();
 				nfq_set_verdict_batch(queue, state.batch_last, NF_ACCEPT);
+				state.result.send.add(before, now_ns());
 				state.batch_open = false;
 			}
 		}

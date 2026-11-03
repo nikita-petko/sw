@@ -26,7 +26,7 @@ These are anecdotal and have not been measured with the same setup on both platf
 
 | Backend | Location | Platform | Mechanism | Benchmark |
 |---|---|---|---|---|
-| WinDivert | `backends/windivert` | Windows | WinDivert 2.2.2 driver, network and forward layers, one receive thread per layer, user-space scheduling | `pocs/windivert_benchmark` (`wdbench`, `bench.ps1`) |
+| WinDivert | `backends/windivert` | Windows | WinDivert 2.2.2 driver, network and forward layers, one receive thread per layer, user-space scheduling | `pocs/windivert_benchmark` (`wdbench`, `bench.py`) |
 | NFQUEUE | `backends/nfqueue` | Linux | nftables rules (in-process netlink) queue packets to `libnetfilter_queue`; verdict per packet | `pocs/linux_kernel_module_backend` (`swbench`, `bench.py`, modes `nfq`, `nfq-hold`) |
 | swdivert (kmod) | `backends/kmod`, `kmod/` | Linux, out of tree | kernel module with a shared ring, steal-and-resume verdicts, in-kernel checksums | same (`swdiv`, `swdiv-hold`, `backend` modes) |
 | AF_PACKET | none (benchmark reference only) | Linux | TPACKET_V3 capture, no hold | `swbench` mode `afpacket`; sniff-only reference |
@@ -79,46 +79,49 @@ network with no gateway. The forwarded-path `hold` and the `--hold` variants wer
 | `wdbench flood` | Paced UDP sender. Each payload carries a send timestamp (bytes 0-7) and a sequence number (8-15, stream in the high 32 bits). |
 | `wdbench sink` | Records one-way latency, loss, duplicates and reordering. |
 | `wdbench hold` | WinDivert divert-and-resume reader. Every packet gets a verdict D ms after capture, like the engine. Options: `--delay-ms`, `--drop-every`, `--batch`, `--layer network\|forward`, `--priority`, `--queue-length`, `--queue-time-ms` (queue defaults match `backends/windivert/backend.cc`). |
-| `bench.ps1` | Runs baseline, `hold0`, `hold0-batch` (16) and `hold2ms` at each rate and prints one table. Needs an elevated shell. |
+| `bench.py` | Runs the common scenarios (`baseline`, `sniff`, `hold0`, `hold0-batch` (16), `hold2ms`) at each rate and prints the common table. Needs an elevated shell. |
 
-Build and run (elevated PowerShell, lagsw closed):
+The scenarios, sweep, measurements and report are shared with every other backend: see
+[benchmark_strategy.md](benchmark_strategy.md).
+
+Build and run (elevated shell, lagsw closed):
 
 ```powershell
 xmake build wdbench
-.\pocs\windivert_benchmark\bench.ps1 -Pps 20000,100000 -Size 64 -Seconds 5
-.\pocs\windivert_benchmark\bench.ps1 -Pps 20000,100000 -Size 1200 -Seconds 5
+python pocs\windivert_benchmark\bench.py --json build\benchmarks\windows.json
 ```
 
 ### Linux: `pocs/linux_kernel_module_backend`
 
 `swbench` (flood, sink, sniff and hold modes) driven by `bench.py` in throw-away user and network namespaces
-(client, gateway, server over `veth`). Same payload layout as `wdbench` (timestamp, then sequence number). Defaults:
-`--pps 20000,100000`, `--sizes 64,1200`, `--seconds 5`, `--runs 3`. `swdiv` needs the module loaded and real root.
+(client, gateway, server over `veth`). Same payload layout as `wdbench` (timestamp, then sequence number). Defaults are the
+common ones (`--pps 20000,100000`, `--sizes 64,1200`, `--seconds 5`, `--runs 3`). `swdiv` needs the module loaded and real root.
 
 ```
 xmake build swbench swdivert
 python3 pocs/linux_kernel_module_backend/bench.py --check
-python3 pocs/linux_kernel_module_backend/bench.py --modes baseline,afpacket,nfq --pps 20000,100000
+python3 pocs/linux_kernel_module_backend/bench.py --modes afpacket,nfq --pps 20000,100000
 sudo python3 pocs/linux_kernel_module_backend/bench.py --pps 20000,100000      # includes swdiv
 ```
 
 ### Reading driver vs. interface
 
-| Column (Windows) | Meaning | Points at |
+| Column | Meaning | Points at |
 |---|---|---|
-| `cap_*` | sender stamp to `WinDivertRecv` returning | driver: stack, filter, queue, wake-up |
-| `send_*` | duration of the `WinDivertSend` call | driver: re-injection |
-| `over_*` | verdict due time to `WinDivertSend` called | interface: our scheduling and queueing of the hold |
+| `cap_*` | sender stamp to the reader seeing the packet (`WinDivertRecv` returning on Windows) | driver/kernel: stack, filter, queue, wake-up |
+| `send_*` | duration of one verdict call | driver/kernel: re-injection |
+| `over_*` | verdict due time to verdict call made | interface: our scheduling and queueing of the hold |
 | `lat_*` | sender stamp to sink received | everything; compare with baseline |
 | `reordered` | packets arriving after a later packet of the same stream | diversion side effect |
 | `lost` | sent minus received | queue overflow or drop |
 
-The Linux harness reports sink latency (p50, p99, max), loss, duplicates, reordering and the reader's CPU per packet.
-It has no `cap_`/`over_`/`send_` split yet; adding one to `swbench` would make the driver-versus-interface split
-comparable. Timestamps use `QueryPerformanceCounter` on Windows and `CLOCK_MONOTONIC` on Linux; both need sender and sink
-on one machine.
+Both harnesses report all of these (and the reader's CPU per packet) in the same table. Timestamps use
+`QueryPerformanceCounter` on Windows and `CLOCK_MONOTONIC` on Linux; both need sender and sink on one machine.
 
 ## Differences between the two measurements (why they are not comparable yet)
+
+The harnesses now share one definition ([benchmark_strategy.md](benchmark_strategy.md)); the table below describes the
+results quoted in this note, which were taken before that and have to be re-measured with `pocs/run_benchmarks.py`.
 
 | | Windows run | Linux results quoted below |
 |---|---|---|
@@ -248,5 +251,5 @@ These findings are hypotheses to test, not conclusions.
 - Linux numbers are quoted from another document with different payload, rates, duration and metrics.
 - The tc/netem and eBPF/netlink backends are proposals or only partly built and have no latency data.
 - The in-game symptoms are anecdotal.
-- The `pps` column glitch and table truncation in the first printed Windows output were display bugs in `bench.ps1`
-  (fixed afterwards); the values themselves were unaffected.
+- The `pps` column glitch and table truncation in the first printed Windows output were display bugs in the old `bench.ps1`
+  (fixed afterwards, since replaced by `bench.py`); the values themselves were unaffected.
