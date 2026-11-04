@@ -42,7 +42,8 @@ private:
 
 /// Summarizes the WinDivert handles opened by this process and checks that the WinDivert driver is still running, then returns
 /// a one-line summary. The sample is reused until `interval_ms` has elapsed, so the service query stays cheap when called
-/// often. `backlog_threshold` is the number of packets waiting in user space at which the summary is flagged. Not thread-safe.
+/// often. `backlog_threshold` is the number of packets waiting in the user-space merge queue at which the summary is flagged;
+/// the count is unavailable when no merge queue exists. Not thread-safe.
 std::string monitor_status(uint64_t interval_ms, uint32_t backlog_threshold);
 #else
 class ChannelStats

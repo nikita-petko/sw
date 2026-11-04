@@ -46,10 +46,10 @@ namespace {
 	}
 
 	/// Maps the Win32 error left by a failed WinDivert call to a status, filling `error` for real failures.
-	IoStatus classify_failure(std::string& error)
+	IoStatus classify_failure(std::string& error, bool receive)
 	{
 		const DWORD code = GetLastError();
-		if (code == ERROR_INVALID_HANDLE || code == ERROR_OPERATION_ABORTED)
+		if (code == ERROR_INVALID_HANDLE || code == ERROR_OPERATION_ABORTED || (receive && code == ERROR_NO_DATA))
 			return IoStatus::closed;
 		error = format_error(code);
 		return IoStatus::error;
@@ -69,7 +69,7 @@ namespace {
 			length					  = 0;
 			if (!WinDivertRecv(handle_, buffer, capacity, &length, &address))
 			{
-				const IoStatus status = classify_failure(error);
+				const IoStatus status = classify_failure(error, true);
 				if (status == IoStatus::error)
 					stats_.recv_failed();
 				return status;
@@ -90,7 +90,7 @@ namespace {
 			sent = 0;
 			if (!WinDivertSend(handle_, packet, length, &sent, &address))
 			{
-				const IoStatus status = classify_failure(error);
+				const IoStatus status = classify_failure(error, false);
 				if (status == IoStatus::error)
 					stats_.send_failed();
 				return status;

@@ -674,13 +674,14 @@ main one, with the health of the packet backend. The stub backend shows nothing.
   packets went through unheld, expired on their own, or the held backlog
   reached the threshold.
 - **WinDivert (Windows):** the number of open handles, packets received and
-  sent, receive/send errors, packets waiting in user space (only non-zero when
-  forwarded traffic is captured too), the longest time a packet waited in the
-  driver queue since the last sample, and whether the WinDivert driver service
-  is still running. The line is flagged when errors occur, the user-space
-  backlog reaches the threshold, packets wait 250 ms or more in the driver
-  queue (the driver drops packets that wait longer than about one second), or
-  the driver stops (capture has then ended).
+  sent, receive/send errors, packets waiting in the user-space merge queue
+  (shown as `n/a` when no merge queue exists), the peak observed
+  driver-queue delay since the last sample (sub-millisecond delays are shown
+  in microseconds), and whether the WinDivert driver service is still running.
+  The line is flagged when errors occur, the user-space backlog reaches the
+  threshold, packets wait 250 ms or more in the driver queue (the driver drops
+  packets that wait longer than about one second), or the driver stops (capture
+  has then ended).
 
 It is disabled by default.
 

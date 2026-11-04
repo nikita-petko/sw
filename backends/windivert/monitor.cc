@@ -22,6 +22,7 @@ struct Totals
 {
 	uint64_t handles = 0, received = 0, sent = 0, recv_errors = 0, send_errors = 0, queued = 0;
 	int64_t	 max_lag_us = 0;
+	bool	 queue_available = false;
 };
 
 /// The live channels and the totals of the ones that are gone.
@@ -51,7 +52,12 @@ struct Registry
 			totals.sent += channel->sent_.load();
 			totals.recv_errors += channel->recv_errors_.load();
 			totals.send_errors += channel->send_errors_.load();
-			totals.queued += channel->queued_.load();
+			// WinDivert does not expose driver queue occupancy; only the app-side merge queue is measurable.
+			if (!channel->is_handle_)
+			{
+				totals.queue_available = true;
+				totals.queued += channel->queued_.load();
+			}
 			// Only the peak since the previous sample is of interest
 			totals.max_lag_us = std::max(totals.max_lag_us, channel->max_lag_us_.exchange(0));
 			if (channel->is_handle_)
@@ -150,6 +156,13 @@ namespace {
 		return state;
 	}
 
+	std::string format_lag(int64_t lag_us)
+	{
+		if (lag_us < 1000)
+			return std::to_string(lag_us) + "us";
+		return std::to_string(lag_us / 1000) + "." + std::to_string((lag_us % 1000) / 100) + "ms";
+	}
+
 	Totals								  previous;
 	std::string							  cached;
 	std::chrono::steady_clock::time_point last_sample;
@@ -166,7 +179,7 @@ namespace {
 
 		const bool receive_errors = totals.recv_errors > previous.recv_errors;
 		const bool send_errors	  = totals.send_errors > previous.send_errors;
-		const bool backlog		  = totals.queued >= backlog_threshold;
+		const bool	 backlog		  = totals.queue_available && totals.queued >= backlog_threshold;
 		const bool lagging		  = totals.max_lag_us / 1000 >= kLagWarnMs;
 		if (receive_errors)
 			LOG_WARN("WinDivert failed to receive %llu time(s)", static_cast<unsigned long long>(totals.recv_errors - previous.recv_errors));
@@ -178,10 +191,10 @@ namespace {
 		else if (!backlog && previous_backlog)
 			LOG_INFO("the receive backlog cleared (%llu waiting)", static_cast<unsigned long long>(totals.queued));
 		if (lagging && !previous_lagging)
-			LOG_WARN("packets wait %lld ms in the WinDivert driver queue, which drops packets that wait too long",
-					 static_cast<long long>(totals.max_lag_us / 1000));
+			LOG_WARN("packets wait %s in the WinDivert driver queue, which drops packets that wait too long",
+					 format_lag(totals.max_lag_us).c_str());
 		else if (!lagging && previous_lagging)
-			LOG_INFO("the WinDivert driver queue delay is back to %lld ms", static_cast<long long>(totals.max_lag_us / 1000));
+			LOG_INFO("the WinDivert driver queue delay is back to %s", format_lag(totals.max_lag_us).c_str());
 		if (driver != previous_driver)
 		{
 			const bool was_healthy = previous_driver == Driver::running || previous_driver == Driver::unknown;
@@ -199,8 +212,8 @@ namespace {
 
 		std::string line = "windivert: " + std::to_string(totals.handles) + " handle(s) recv " + std::to_string(totals.received) + " sent " +
 						   std::to_string(totals.sent) + " errors " + std::to_string(totals.recv_errors) + "/" +
-						   std::to_string(totals.send_errors) + " waiting " + std::to_string(totals.queued) + " lag " +
-						   std::to_string(totals.max_lag_us / 1000) + "ms";
+						   std::to_string(totals.send_errors) + " waiting " +
+						   (totals.queue_available ? std::to_string(totals.queued) : "n/a") + " lag " + format_lag(totals.max_lag_us);
 		switch (driver)
 		{
 			case Driver::running:
