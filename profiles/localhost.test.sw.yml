@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=../schemas/profiles.schema.json
+
 # Feature test profile for the localhost.
 #
 # Every configuration field, delay mode and feature is used at least once, and every capture targets

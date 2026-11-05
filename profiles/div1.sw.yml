@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../schemas/profiles.schema.json
 default_view: net_monitor
 
 servers:
@@ -49,11 +50,11 @@ features:
   # of a delayed packet is passive + profile. delay_ms 60 on both directions raises the observed RTT by 120 ms; use
   # outbound_delay_ms / inbound_delay_ms to place it on one side. Region-probe traffic is never delayed.
   passive_latency:
-    enabled: false
+    enabled: true
     mode: fixed
-    delay_ms: 30
+    delay_ms: 12
     direction: both
-    pause_key: p
+    pause_key: l
 
   backend_monitor:
     enabled: true

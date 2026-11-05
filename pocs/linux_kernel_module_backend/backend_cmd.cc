@@ -2,7 +2,7 @@
 // receive packets, hold them for a while, optionally rewrite or drop them, and send them back. Used by scripts/tests/test_kmod_hold.sh.
 //
 //   swbench backend --filter F [--forward yes] [--include-forward yes] [--sniff yes] [--priority N] [--delay-ms D]
-//                   [--batch yes] [--discard-every K] [--modify dport --to-port P] [--seconds S]
+//                   [--batch yes] [--discard-every K] [--modify dport --to-port P] [--inline yes] [--seconds S]
 //   swbench backend-load [--priority N]     checks check_privileges() (which loads the module) and opens and closes one channel
 //   swbench backend-api                      the parts of the backend contract that need no traffic
 #include <sys/resource.h>
@@ -102,6 +102,7 @@ int run_backend(const std::vector<std::string>& arguments)
 	const long	   delay_ms		 = options.num("--delay-ms", "0");
 	const long	   discard_every = options.num("--discard-every", "0");
 	const bool	   batch		 = options.yes("--batch");
+	const bool	   send_inline	 = options.yes("--inline") && delay_ms == 0 && options.get("--modify", "none") == "none";
 	const bool	   rewrite		 = options.get("--modify", "none") == "dport";
 	const uint16_t to_port		 = static_cast<uint16_t>(options.num("--to-port", "0"));
 	const long	   seconds		 = options.num("--seconds", "0");
@@ -210,6 +211,15 @@ int run_backend(const std::vector<std::string>& arguments)
 		const uint64_t number = ++counters.seen;
 		(meta.outbound ? counters.outbound : counters.inbound)++;
 		counters.bytes += length;
+		// --inline yes: an unchanged packet is sent straight from the receive buffer, with none of this tool's own per-packet copies and
+		// allocations, so that the cost measured is the backend's
+		if (send_inline && !open_options.sniff && !(discard_every > 0 && number % static_cast<uint64_t>(discard_every) == 0))
+		{
+			uint32_t	sent = 0;
+			std::string send_error;
+			(channel->send(buffer.data(), length, meta, sent, send_error) == backend::IoStatus::ok ? counters.sent : counters.errors)++;
+			continue;
+		}
 		Pending packet;
 		packet.data.assign(buffer.begin(), buffer.begin() + length);
 		packet.meta	   = meta;

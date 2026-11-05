@@ -32,3 +32,5 @@ build.ninja
 pcap_files/
 misc/
 dist/
+
+*.bak

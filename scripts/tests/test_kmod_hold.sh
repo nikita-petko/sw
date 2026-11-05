@@ -1099,6 +1099,13 @@ RULES
 		bench_row "lagsw backend (swdivert), verdict at once" "$pps"
 		rig_down
 
+		# The same without the tool's own per-packet copies and allocations: the cost of the backend alone
+		rig_up || return
+		start_bg sink server "$swbench" sink --port $PORT
+		start_bg reader "$swbench" backend --forward yes --filter "udp.DstPort == $PORT" --delay-ms 0 --inline yes
+		bench_row "lagsw backend (swdivert), verdict at once, no tool copies" "$pps"
+		rig_down
+
 		# The same with every packet modified (payload bytes rewritten, checksums fixed): NFQUEUE sends the whole packet back and
 		# the engine recomputes the checksums; the module takes the bytes and a flag. Both read the whole packet.
 		export BENCH_FILL=y

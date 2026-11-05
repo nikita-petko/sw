@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdio>
 
+#include "payload_hash.h"
 #include "support.h"
 #include "support/test.h"
 
@@ -430,7 +431,7 @@ void test_compiled_programs_agree_with_the_reference_on_random_filters_and_packe
 		++compiled;
 		CHECK(kmodf::verify_program(program).empty());
 		const linux_shared::Node tree = linux_shared::parse_filter(filter);
-		int				hits = 0, misses = 0;
+		int						 hits = 0, misses = 0;
 		for (int p = 0; p < 120; ++p)
 		{
 			Meta meta;
@@ -471,6 +472,68 @@ void test_compiled_programs_agree_with_the_reference_on_random_filters_and_packe
 }
 
 // Not a pass/fail test: the cost of one run of a typical program on this machine (information for the design document).
+// The fingerprint that decides whether a packet is resumed as it is or as new bytes
+void test_the_payload_fingerprint_sees_every_edit()
+{
+	Rng rng(77);
+	// Sizes around every loop boundary of the hash: empty, the 8-byte and 32-byte steps, their remainders, a full MTU, a jumbo packet
+	const uint32_t sizes[] = {0, 1, 7, 8, 9, 31, 32, 33, 39, 40, 41, 63, 64, 65, 228, 1240, 1500, 9000};
+	for (uint32_t size : sizes)
+	{
+		std::vector<uint8_t> bytes(size);
+		for (uint8_t& byte : bytes)
+			byte = static_cast<uint8_t>(rng.next());
+		const uint64_t original = kmodb::hash_payload(bytes.data(), size);
+		CHECK(kmodb::hash_payload(bytes.data(), size) == original);	 // deterministic
+		// Every single-bit edit changes it, at every position: this is the engine's case (it edits, it does not forge)
+		bool all_seen = true;
+		for (uint32_t bit = 0; bit < size * 8; ++bit)
+		{
+			bytes[bit / 8] ^= static_cast<uint8_t>(1u << (bit % 8));
+			all_seen = all_seen && kmodb::hash_payload(bytes.data(), size) != original;
+			bytes[bit / 8] ^= static_cast<uint8_t>(1u << (bit % 8));
+		}
+		CHECK(all_seen);
+		// A shorter or longer packet with the same leading bytes is another packet (a trimmed or grown payload)
+		if (size > 0)
+			CHECK(kmodb::hash_payload(bytes.data(), size - 1) != original);
+		std::vector<uint8_t> longer = bytes;
+		longer.push_back(0);
+		CHECK(kmodb::hash_payload(longer.data(), size + 1) != original);
+	}
+	// Swapping two words of one packet is an edit too, and zero bytes of different counts differ
+	std::vector<uint8_t> a(64, 0), b(64, 0);
+	a[0] = 1;
+	b[8] = 1;
+	CHECK(kmodb::hash_payload(a.data(), 64) != kmodb::hash_payload(b.data(), 64));
+	CHECK(kmodb::hash_payload(a.data(), 40) != kmodb::hash_payload(a.data(), 41));
+	// No collisions among 200000 random packets of one size (a 64-bit hash: expected none)
+	std::vector<uint64_t> seen;
+	std::vector<uint8_t>  packet(228);
+	for (int i = 0; i < 200000; ++i)
+	{
+		for (uint8_t& byte : packet)
+			byte = static_cast<uint8_t>(rng.next());
+		seen.push_back(kmodb::hash_payload(packet.data(), 228));
+	}
+	std::sort(seen.begin(), seen.end());
+	CHECK(std::adjacent_find(seen.begin(), seen.end()) == seen.end());
+
+	// Speed: it runs twice per packet, so it has to be far below the cost of the rest of a packet (FNV-1a took 384 ns at 228 bytes)
+	std::vector<uint8_t> frame(228, 0x5A);
+	volatile uint64_t	 sink  = 0;
+	const auto			 t0	   = std::chrono::steady_clock::now();
+	constexpr int		 kRuns = 2000000;
+	for (int i = 0; i < kRuns; ++i)
+	{
+		frame[0] = static_cast<uint8_t>(i);
+		sink	 = sink + kmodb::hash_payload(frame.data(), 228);
+	}
+	const double ns = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t0).count() / kRuns;
+	std::printf("  payload fingerprint: %.0f ns per 228-byte packet\n", ns);
+	CHECK(ns < 150);
+}
+
 void test_cost_per_packet()
 {
 	kmodf::Program server_list;
@@ -542,6 +605,7 @@ int main(int argc, char** argv)
 		{"a_filter_too_big_for_the_vm_is_refused_with_a_message", test_a_filter_too_big_for_the_vm_is_refused_with_a_message},
 		{"compiled_programs_agree_with_the_reference_on_random_filters_and_packets",
 		 test_compiled_programs_agree_with_the_reference_on_random_filters_and_packets},
+		{"the_payload_fingerprint_sees_every_edit", test_the_payload_fingerprint_sees_every_edit},
 		{"cost_per_packet", test_cost_per_packet},
 	};
 	return test::run_tests("kmod_vm", cases, argc, argv);

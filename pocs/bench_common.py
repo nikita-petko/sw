@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """The one definition of the packet-backend benchmark, shared by every platform driver.
 
 Every backend is run through the same scenarios, with the same traffic, the same measurements and the same report, so that rows

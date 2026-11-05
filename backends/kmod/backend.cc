@@ -21,6 +21,7 @@
 #include "log.h"
 #include "module.h"
 #include "packet_backend.h"
+#include "payload_hash.h"
 #include "swdivert_abi.h"
 #include "swdivert_ring.h"
 
@@ -49,13 +50,7 @@ namespace {
 	};
 	static_assert(sizeof(NativeMeta) <= sizeof(PacketMeta::native), "PacketMeta::native is too small");
 
-	uint64_t hash_payload(const uint8_t* data, uint32_t length)
-	{
-		uint64_t hash = 1469598103934665603ull;
-		for (uint32_t index = 0; index < length; ++index)
-			hash = (hash ^ data[index]) * 1099511628211ull;
-		return hash;
-	}
+	using kmodb::hash_payload;
 
 	std::string describe_layers(uint32_t layers)
 	{
