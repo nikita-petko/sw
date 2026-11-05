@@ -769,10 +769,88 @@ t_backend_load() {
 	rmmod swdivert 2> /dev/null
 	rm -f "$extra/swdivert.ko"; depmod "$release" 2> /dev/null
 
+	# An explicit path is used alone: swdivert.ko sits next to swbench here, and must not be loaded instead of the one asked for
 	LAGSW_KMOD_PATH=/nonexistent/swdivert.ko "$swbench" backend-load > "$tmp/load.out" 2> "$tmp/load.err"
 	local rc=$?
 	check "a module that cannot be loaded is a startup error (exit $rc) that says what to run" eq "$rc" 3
 	check "... and the message names modprobe and insmod ($(kv "$tmp/load.out" backend_privileges): $(grep -o 'backend_error=.*' "$tmp/load.out" | head -c 160))" grep -q 'modprobe swdivert.*insmod' "$tmp/load.out"
+	insmod "$ko" 2> "$tmp/load.err" || bad "could not load the module again: $(cat "$tmp/load.err")"
+}
+
+# The loader the embedded module goes through (init_module(2) from memory), on variants of the module that test_kmod_hold_vm.sh prepares next
+# to swbench: as the build embeds it (stripped), signed with a key this kernel has never heard of, built for another kernel release, cut
+# short, and not a module at all. Nothing but the first two may load, and a refusal must leave no module behind.
+t_backend_image() {
+	local dir loaded v
+	dir="$(dirname "$swbench")"
+	loaded() { lsmod | awk '$1 == "swdivert" {found = 1} END {exit !found}'; }
+	rmmod swdivert 2> /dev/null
+	check "the module is not loaded (precondition)" test ! -e /dev/swdivert
+
+	if [ -f "$dir/stripped.ko" ]; then
+		"$swbench" backend-image "$dir/stripped.ko" > "$tmp/image.out" 2> "$tmp/image.err"
+		check "stripped module (what the build embeds): loaded from memory ($(cat "$tmp/image.out"))" eq "$?/$(kv "$tmp/image.out" image_status)" "0/loaded"
+		for v in $(seq 1 60); do [ -c /dev/swdivert ] && break; sleep 0.05; done
+		check "... and its device appears" test -c /dev/swdivert
+		"$swbench" backend-image "$dir/stripped.ko" > "$tmp/image.out" 2> "$tmp/image.err"
+		check "loading it again is reported as already loaded, not as a failure" eq "$?/$(kv "$tmp/image.out" image_status)" "0/already"
+		"$swbench" backend-load > "$tmp/load.out" 2> "$tmp/load.err"
+		check "the loaded module works: a channel opens through the backend" eq "$?/$(kv "$tmp/load.out" backend_opened)" "0/1"
+		rmmod swdivert 2> "$tmp/rmmod.err" || bad "rmmod failed: $(cat "$tmp/rmmod.err")"
+	else
+		bad "no stripped module variant prepared"
+	fi
+
+	if [ -f "$dir/signed.ko" ]; then
+		"$swbench" backend-image "$dir/signed.ko" > "$tmp/image.out" 2> "$tmp/image.err"
+		check "module signed with an unknown key: loads where signatures are not enforced ($(kv "$tmp/image.out" image_status): $(kv "$tmp/image.out" image_error))" eq "$?/$(kv "$tmp/image.out" image_status)" "0/loaded"
+		rmmod swdivert 2> /dev/null
+	else
+		echo "  (no signed variant: the host has no kernel signing tool or openssl)"
+	fi
+
+	for v in other_kernel truncated not_a_module; do
+		[ -f "$dir/$v.ko" ] || { bad "no $v module variant prepared"; continue; }
+		"$swbench" backend-image "$dir/$v.ko" > "$tmp/image.out" 2> "$tmp/image.err"
+		local rc=$?
+		check "$v: refused with an explanation ($(kv "$tmp/image.out" image_status): $(grep -o 'image_error=.*' "$tmp/image.out" | head -c 150))" eq "$rc/$(kv "$tmp/image.out" image_status)" "1/failed"
+		check "$v: nothing was left loaded" test ! -e /dev/swdivert -a -z "$(lsmod | awk '$1 == "swdivert"')"
+	done
+	"$swbench" backend-image "$dir/other_kernel.ko" > "$tmp/image.out" 2> /dev/null
+	check "a module built for another kernel says so and where to look" grep -q 'built for kernel .*not for the running kernel.*dmesg' "$tmp/image.out"
+	check "... and the image's own release is shown next to the kernel's ($(kv "$tmp/image.out" image_release) against $(kv "$tmp/image.out" kernel_release))" test -n "$(kv "$tmp/image.out" image_release)" -a "$(kv "$tmp/image.out" image_release)" != "$(kv "$tmp/image.out" kernel_release)"
+	"$swbench" backend-image "$dir/not_a_module.ko" > "$tmp/image.out" 2> /dev/null
+	check "something that is not a module is called that" grep -q 'not a kernel module' "$tmp/image.out"
+	insmod "$ko" 2> "$tmp/load.err" || bad "could not load the module again: $(cat "$tmp/load.err")"
+}
+
+# Loading a module takes CAP_SYS_MODULE, not root: a lagsw with `setcap cap_net_admin,cap_sys_module+ep` loads the module it carries and
+# runs as an ordinary user. Tested with setpriv standing in for file capabilities (CAP_DAC_OVERRIDE stands in for a udev rule that makes
+# /dev/swdivert accessible: the device is root-only otherwise).
+t_backend_caps() {
+	local user=(setpriv --reuid=1000 --regid=1000 --clear-groups) rc
+	rmmod swdivert 2> /dev/null
+	chmod 755 "$(dirname "$swbench")" 2> /dev/null
+
+	"${user[@]}" --inh-caps=+net_admin,+sys_module,+dac_override --ambient-caps=+net_admin,+sys_module,+dac_override \
+		env LAGSW_KMOD_PATH="$ko" LAGSW_KMOD_UNLOAD_ON_EXIT=1 "$swbench" backend-load > "$tmp/caps.out" 2> "$tmp/caps.err"
+	rc=$?
+	check "a user without root but with CAP_NET_ADMIN and CAP_SYS_MODULE loads the module and opens a channel (exit $rc: $(cat "$tmp/caps.out") $(head -c 150 "$tmp/caps.err"))" eq "$rc/$(kv "$tmp/caps.out" backend_opened)" "0/1"
+	check "... and unloads it again on exit, which needs the same capability" test -z "$(lsmod | awk '$1 == "swdivert"')"
+
+	"${user[@]}" --inh-caps=+net_admin,+dac_override --ambient-caps=+net_admin,+dac_override \
+		env LAGSW_KMOD_PATH="$ko" "$swbench" backend-load > "$tmp/caps.out" 2> "$tmp/caps.err"
+	rc=$?
+	check "a user without CAP_SYS_MODULE is told what is missing and nothing is loaded (exit $rc)" eq "$rc" 3
+	check "... the message names the capability and how to grant it ($(grep -o 'backend_error=.*' "$tmp/caps.out" | head -c 170))" grep -q 'CAP_SYS_MODULE.*setcap' "$tmp/caps.out"
+	check "... and the module is still not loaded" test -z "$(lsmod | awk '$1 == "swdivert"')"
+
+	# Root whose bounding set lacks the capability (a container, a hardened service): the kernel's refusal is explained
+	setpriv --bounding-set=-sys_module env LAGSW_KMOD_PATH="$ko" "$swbench" backend-load > "$tmp/caps.out" 2> "$tmp/caps.err"
+	rc=$?
+	check "root without CAP_SYS_MODULE in its bounding set: refused with the reason (exit $rc: $(grep -o 'backend_error=.*' "$tmp/caps.out" | head -c 200))" eq "$rc" 3
+	check "... which names the missing capability" grep -q 'CAP_SYS_MODULE' "$tmp/caps.out"
+	check "... and nothing was loaded" test -z "$(lsmod | awk '$1 == "swdivert"')"
 	insmod "$ko" 2> "$tmp/load.err" || bad "could not load the module again: $(cat "$tmp/load.err")"
 }
 
@@ -1141,9 +1219,9 @@ insmod "$ko" || { echo "insmod failed"; exit 1; }
 dmesg_before="$(dmesg | wc -l)"
 [ -c /dev/swdivert ] || { echo "/dev/swdivert did not appear"; exit 1; }
 
-default_tests=(sniff filter_string filter_set filter_swap filter_bad vmcheck progcheck backend_api backend_load backend_local_out backend_local_in backend_forward backend_all backend_direction backend_modify backend_loopback backend_tcp backend_sigkill mod_payload mod_grow mod_shrink mod_tcp mod_tcp_nat mod_bad mod_dst chain_order priority_equal inject_twin inject_chain race_mod fuzz resume_now delay drop_verdict tcp tcp_nat sigkill_hold graceful_stop hold_timeout max_held device_removal rate race)
+default_tests=(sniff filter_string filter_set filter_swap filter_bad vmcheck progcheck backend_api backend_load backend_image backend_caps backend_local_out backend_local_in backend_forward backend_all backend_direction backend_modify backend_loopback backend_tcp backend_sigkill mod_payload mod_grow mod_shrink mod_tcp mod_tcp_nat mod_bad mod_dst chain_order priority_equal inject_twin inject_chain race_mod fuzz resume_now delay drop_verdict tcp tcp_nat sigkill_hold graceful_stop hold_timeout max_held device_removal rate race)
 [ "${#only[@]}" -eq 0 ] && only=("${default_tests[@]}")
-for t in sniff filter_string filter_set filter_swap filter_bad vmcheck progcheck backend_api backend_load backend_local_out backend_local_in backend_forward backend_all backend_direction backend_modify backend_loopback backend_tcp backend_sigkill mod_payload mod_grow mod_shrink mod_tcp mod_tcp_nat mod_bad mod_dst chain_order priority_equal inject_twin inject_chain race_mod fuzz resume_now delay drop_verdict tcp tcp_nat sigkill_hold graceful_stop hold_timeout max_held device_removal rate race bench; do
+for t in sniff filter_string filter_set filter_swap filter_bad vmcheck progcheck backend_api backend_load backend_image backend_caps backend_local_out backend_local_in backend_forward backend_all backend_direction backend_modify backend_loopback backend_tcp backend_sigkill mod_payload mod_grow mod_shrink mod_tcp mod_tcp_nat mod_bad mod_dst chain_order priority_equal inject_twin inject_chain race_mod fuzz resume_now delay drop_verdict tcp tcp_nat sigkill_hold graceful_stop hold_timeout max_held device_removal rate race bench; do
 	want_test "$t" || continue
 	echo "== $t"
 	"t_$t"

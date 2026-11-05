@@ -48,6 +48,11 @@ namespace {
 	}
 }  // namespace
 
+bool has_capability(int capability)
+{
+	return has_effective_capability(capability);
+}
+
 bool check_privileges(std::string& error)
 {
 	if (!has_effective_capability(CAP_NET_ADMIN))

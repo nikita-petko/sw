@@ -3,13 +3,22 @@
 # itself (LAGSW_KMOD_PATH), which is the load policy of the PoC document's section 9.3 as it runs in production.
 #
 # usage: test_kmod_localhost.sh LAGSW HARNESS PROFILE KO [ONLY]
+#   KO is "-" when lagsw carries the module itself (built with the kmod backend and the embedded module): then there is no .ko file in the
+#   VM and no LAGSW_KMOD_PATH, so the only way the module can get loaded is from the image inside the executable.
 lagsw="$1"; harness="$2"; profile="$3"; ko="$4"
 [ -n "${5:-}" ] && export ONLY="$5"
 
 # lagsw runs on a pseudo-terminal, as it does for a user
 mkdir -p /dev/pts
 mount -t devpts devpts /dev/pts
-export LAGSW_KMOD_PATH="$ko"
+if [ "$ko" != "-" ]; then
+	export LAGSW_KMOD_PATH="$ko"
+elif ! grep -qa "vermagic=$(uname -r)" "$lagsw"; then
+	echo "FAIL $lagsw has no embedded module for this kernel ($(uname -r))"; exit 1
+else
+	echo "ok   lagsw carries a module for this kernel and nothing else can provide one (no .ko file, no LAGSW_KMOD_PATH, nothing installed)"
+	if [ -e /dev/swdivert ] || lsmod | grep -q "^swdivert"; then echo "FAIL the module is loaded before lagsw started"; exit 1; fi
+fi
 dmesg_before="$(dmesg | wc -l)"
 python3 "$harness" "$lagsw" "$profile"
 code=$?

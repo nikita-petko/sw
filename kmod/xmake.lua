@@ -13,6 +13,23 @@ option("kmod_kdir")
     set_description("Kernel build directory for kernel modules (default: $KDIR, else /lib/modules/<running kernel>/build)")
 option_end()
 
+-- Signing of the modules this build produces, for kernels that only load signed modules (Secure Boot):
+--     xmake f --kmod_sign_key=signing_key.pem --kmod_sign_cert=signing_cert.der
+-- The certificate has to be trusted by the kernel: the key the distribution built it with, or one enrolled with `mokutil --import`.
+option("kmod_sign_key")
+    set_showmenu(true)
+    set_description("Private key (file or PKCS#11 URI) that signs the kernel modules; with --kmod_sign_cert")
+option_end()
+option("kmod_sign_cert")
+    set_showmenu(true)
+    set_description("X.509 certificate that belongs to --kmod_sign_key")
+option_end()
+option("kmod_sign_hash")
+    set_default("sha256")
+    set_showmenu(true)
+    set_description("Hash algorithm of the module signature (default sha256)")
+option_end()
+
 if is_plat("linux") and is_host("linux") then
     add_moduledirs(path.join(os.scriptdir(), "modules"))
 

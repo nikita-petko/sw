@@ -36,6 +36,28 @@ local function kernel_arch(kdir)
     return os.isdir(path.join(kdir, "arch", name)) and name or nil
 end
 
+-- Whether modules can be built for the configured target architecture against `kdir` (the tree is prepared and has that architecture)
+function can_build(kdir)
+    kdir = kdir or kernel_dir()
+    return is_prepared(kdir) and kernel_arch(kdir) ~= nil
+end
+
+-- Appends the signature the kernel checks when it enforces module signatures (Secure Boot, lockdown, module.sig_enforce) with the kernel's
+-- own tool. The key and certificate come from `xmake f --kmod_sign_key=<private key or pkcs11 URI> --kmod_sign_cert=<x509 certificate>`;
+-- the certificate has to be trusted by the kernel (the build key of a distribution kernel, or one enrolled with `mokutil --import`).
+-- Returns the arguments of the command, or nil when signing is not configured.
+function sign_command(kdir, file)
+    local key, cert = config.get("kmod_sign_key"), config.get("kmod_sign_cert")
+    if not key or #key == 0 or not cert or #cert == 0 then
+        return nil
+    end
+    local tool = path.join(kdir, "scripts", "sign-file")
+    if not os.isfile(tool) then
+        raise("module signing needs %s (it is part of the kernel headers package or of a prepared kernel tree)", tool)
+    end
+    return tool, {config.get("kmod_sign_hash") or "sha256", key, cert, file}
+end
+
 -- Flags that make a source file parse the way kbuild compiles it. This is NOT the kbuild command line (which the kernel build
 -- owns and which carries compiler-specific flags that clangd and cpptools reject); it only has to be enough for diagnostics,
 -- navigation and completion.
@@ -171,11 +193,16 @@ function build_commands(target, batchcmds, opt)
     batchcmds:vrunv("make", argv)
     batchcmds:mkdir(path.directory(ko))
     batchcmds:cp(path.join(stage, name .. ".ko"), ko)
+    -- With a signing key configured the module that is installed or loaded from a file carries a signature
+    local sign_tool, sign_args = sign_command(kdir, ko)
+    if sign_tool then
+        batchcmds:vrunv(sign_tool, sign_args)
+    end
 
     -- Inputs: every source and header of the target, the generated Kbuild, and the kernel it is built against
     local release = try { function () return io.readfile(path.join(kdir, "include/config/kernel.release")) end } or kdir
     batchcmds:add_depfiles(sources, target:headerfiles() or {})
-    batchcmds:add_depvalues(kbuild_text, kdir, release)
+    batchcmds:add_depvalues(kbuild_text, kdir, release, config.get("kmod_sign_key"), config.get("kmod_sign_cert"), config.get("kmod_sign_hash"))
     batchcmds:set_depmtime(os.mtime(ko))
     batchcmds:set_depcache(target:dependfile(ko))
 end

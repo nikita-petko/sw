@@ -397,26 +397,49 @@ chosen when `lagsw` is built:
 
 ```sh
 xmake f -m release --linux_backend=kmod       # the default is nfqueue
-xmake build lagsw swdivert                    # the module needs the kernel headers of the running kernel
+xmake build lagsw                             # also builds the module: needs the kernel headers of the running kernel
 sudo ./build/linux/x86_64/release/lagsw --config profiles/localhost.test.sw.yml
 ```
 
-This build needs none of the netfilter libraries. At startup, as root, `lagsw` loads the module when `/dev/swdivert` is missing:
-`modprobe swdivert` for an installed module, else `insmod` of `swdivert.ko` from `$LAGSW_KMOD_PATH` or from next to the
-executable (copy it there, or set the variable, for a development build). It never unloads the module,
-since closing the handles already releases everything it held; `LAGSW_KMOD_UNLOAD_ON_EXIT=1` unloads it on a normal exit
-when this process loaded it. Without root nothing is loaded and the error says which command to run. A module of another ABI
-version is refused.
+This build needs none of the netfilter libraries, and **the executable carries the module** (as the Windows build carries
+WinDivert's driver): the build compiles `swdivert.ko`, strips it (107 KB) and embeds it. At startup `lagsw` loads the module when
+`/dev/swdivert` is missing, from memory with `init_module(2)`, so nothing else has to be installed or copied. That takes root or
+`CAP_SYS_MODULE` (`sudo setcap cap_net_admin,cap_sys_module+ep ./lagsw` is enough; the device node is root-only, so a non-root user
+also needs a udev rule for `/dev/swdivert`). The module is taken from the first of these that works: `$LAGSW_KMOD_PATH` (a `.ko`;
+used alone, for a development build), the embedded module for the running kernel, an installed module (`modprobe swdivert`), a
+`swdivert.ko` next to the executable. `lagsw` never unloads the module (closing the handles releases everything it held);
+`LAGSW_KMOD_UNLOAD_ON_EXIT=1` unloads it on a normal exit when this process loaded it. A module of another ABI version is refused.
+
+A kernel module is built for **one kernel**, so the executable runs on the kernels it carries a module for, and on another one it
+says which kernels those are. To cover several, build the module against each kernel's headers and embed them together:
+
+```sh
+xmake f --kmod_kdir=/usr/src/linux-headers-6.8.0-generic && xmake build swdivert && cp build/linux/x86_64/release/swdivert.ko swdivert-6.8.ko && strip --strip-debug swdivert-6.8.ko
+xmake f --kmod_kdir=                                       && xmake build swdivert && cp build/linux/x86_64/release/swdivert.ko swdivert-host.ko && strip --strip-debug swdivert-host.ko
+xmake f --linux_backend=kmod --linux_kmod_extra="swdivert-6.8.ko swdivert-host.ko" --linux_kmod_embed=n && xmake build lagsw
+```
+
+Build options: `--linux_kmod_embed=n` builds `lagsw` without a module (no kernel headers needed; it then expects an installed one),
+`--linux_kmod_extra` embeds prebuilt modules, `--kmod_kdir` chooses the kernel the embedded module is built for. **Secure Boot**
+(or any kernel that only loads signed modules) refuses an unsigned module: sign the build with a key whose certificate the kernel
+trusts, for example one enrolled with `mokutil --import`:
+
+```sh
+xmake f --linux_backend=kmod --kmod_sign_key=signing_key.pem --kmod_sign_cert=signing_cert.der
+```
+
+Extra modules are embedded as they are (strip and sign them yourself). The signature is made with the kernel's own `scripts/sign-file` and covers the embedded copy as well as `swdivert.ko`. If the embedded
+module is refused, `lagsw` goes on to an installed one and otherwise explains why (unsigned, untrusted key, another kernel, lockdown).
 
 What is different from the NFQUEUE backend: a packet nobody answered for 60 s is released by the module itself (a stuck or
 killed `lagsw` never blackholes traffic, as with `bypass`), so a delay beyond that is not applied; up to 16384 packets are held
 per channel; packets larger than about 4000 bytes (loopback, jumbo frames) are let through undelayed; IPv4 only; there is no kernel
 shaping tier (profiles run through the channel as usual); no nftables table is created. Loopback traffic is held once, not once
-per hook. The module is GPL, host-wide and needs to be rebuilt for each kernel; a Secure Boot system needs it signed.
+per hook. The module is GPL and host-wide.
 
 Its tests run in a throw-away VM that boots the host's kernel, without root (`/dev/kvm` and QEMU needed):
-`scripts/tests/test_kmod_hold_vm.sh` (module and backend contract) and `scripts/tests/test_kmod_localhost_vm.sh` (the real
-`lagsw` binary against the localhost feature profile).
+`scripts/tests/test_kmod_hold_vm.sh` (module, backend contract and the module loader) and
+`scripts/tests/test_kmod_localhost_vm.sh --embedded` (the real `lagsw` binary, loading its own module, against the localhost feature profile).
 
 ### Testing
 

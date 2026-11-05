@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdio>
 
+#include "module_image.h"
 #include "payload_hash.h"
 #include "support.h"
 #include "support/test.h"
@@ -472,6 +473,63 @@ void test_compiled_programs_agree_with_the_reference_on_random_filters_and_packe
 }
 
 // Not a pass/fail test: the cost of one run of a typical program on this machine (information for the design document).
+// Which embedded module belongs to the running kernel
+std::vector<uint8_t> fake_module(const std::string& vermagic, bool elf = true)
+{
+	std::vector<uint8_t> image(64, 0);
+	if (elf)
+		std::memcpy(image.data(),
+					"\x7f"
+					"ELF",
+					4);
+	const std::string info = std::string("license=GPL") + '\0' + "vermagic=" + vermagic + '\0' + "name=swdivert" + '\0';
+	// .modinfo is a run of NUL-terminated strings, the first one preceded by the NUL that ends the section before it
+	image.push_back(0);
+	image.insert(image.end(), info.begin(), info.end());
+	image.resize(image.size() + 40, 0xAA);
+	return image;
+}
+
+void test_the_embedded_module_for_the_running_kernel_is_chosen_by_its_vermagic()
+{
+	using kmodb::ModuleImage;
+	const std::vector<uint8_t> older = fake_module("6.1.0-test SMP preempt mod_unload "),
+							   newer = fake_module("7.2.11-arch1-1 SMP preempt mod_unload ");
+	CHECK(kmodb::image_vermagic(newer.data(), newer.size()) == "7.2.11-arch1-1 SMP preempt mod_unload ");
+	CHECK(kmodb::image_release(newer.data(), newer.size()) == "7.2.11-arch1-1");
+	CHECK(kmodb::image_release(older.data(), older.size()) == "6.1.0-test");
+
+	// Not a module: no ELF header, too short, nothing, a "vermagic=" that is not at the start of a modinfo string
+	const std::vector<uint8_t> not_elf = fake_module("7.2.11-arch1-1 SMP ", false);
+	CHECK(kmodb::image_release(not_elf.data(), not_elf.size()).empty());
+	const uint8_t tiny[] = {0x7f, 'E', 'L', 'F'};
+	CHECK(kmodb::image_release(tiny, sizeof(tiny)).empty());
+	CHECK(kmodb::image_release(nullptr, 0).empty());
+	std::vector<uint8_t> inside = fake_module("7.2.11-arch1-1 SMP ");
+	const std::string	 decoy	= "xvermagic=9.9.9 ";
+	inside.insert(inside.begin() + 70, decoy.begin(), decoy.end());
+	CHECK(kmodb::image_release(inside.data(), inside.size()) != "9.9.9");
+
+	// A module that ends inside its vermagic is read up to its end, not past it
+	std::vector<uint8_t> cut = fake_module("7.2.11-arch1-1");
+	cut.resize(cut.size() - 40 - 14);
+	CHECK(kmodb::image_release(cut.data(), cut.size()).find("7.2.11") == 0);
+
+	const std::vector<ModuleImage> both = {{older.data(), older.size()}, {newer.data(), newer.size()}, {not_elf.data(), not_elf.size()}};
+	std::string					   why;
+	const ModuleImage*			   chosen = kmodb::select_image(both, "7.2.11-arch1-1", why);
+	CHECK(chosen == &both[1]);
+	CHECK(kmodb::select_image(both, "6.1.0-test", why) == &both[0]);
+	// No image for this kernel: the reason names the kernels there are modules for (and not the one that is not a module)
+	CHECK(kmodb::select_image(both, "6.8.0-other", why) == nullptr);
+	CHECK(why.find("6.1.0-test") != std::string::npos && why.find("7.2.11-arch1-1") != std::string::npos &&
+		  why.find("6.8.0-other") != std::string::npos);
+	CHECK(kmodb::select_image({}, "7.2.11-arch1-1", why) == nullptr && why.find("no module is embedded") != std::string::npos);
+	// A release that only starts like another one is another kernel
+	CHECK(kmodb::select_image(both, "7.2.1", why) == nullptr);
+	CHECK(kmodb::select_image(both, "7.2.11-arch1-1-lts", why) == nullptr);
+}
+
 // The fingerprint that decides whether a packet is resumed as it is or as new bytes
 void test_the_payload_fingerprint_sees_every_edit()
 {
@@ -605,6 +663,8 @@ int main(int argc, char** argv)
 		{"a_filter_too_big_for_the_vm_is_refused_with_a_message", test_a_filter_too_big_for_the_vm_is_refused_with_a_message},
 		{"compiled_programs_agree_with_the_reference_on_random_filters_and_packets",
 		 test_compiled_programs_agree_with_the_reference_on_random_filters_and_packets},
+		{"the_embedded_module_for_the_running_kernel_is_chosen_by_its_vermagic",
+		 test_the_embedded_module_for_the_running_kernel_is_chosen_by_its_vermagic},
 		{"the_payload_fingerprint_sees_every_edit", test_the_payload_fingerprint_sees_every_edit},
 		{"cost_per_packet", test_cost_per_packet},
 	};

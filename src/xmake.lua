@@ -61,6 +61,10 @@ target("lagsw")
         add_links("iphlpapi")
     elseif is_plat("linux") then
         add_rules(get_config("linux_backend") == "kmod" and "backend.kmod" or "backend.nfqueue")
+        -- The kmod backend embeds the swdivert module in the executable, so the module is built first (backends/kmod/xmake.lua)
+        if get_config("linux_backend") == "kmod" and get_config("linux_kmod_embed") ~= false then
+            add_deps("swdivert")
+        end
     else
         add_rules("backend.stub")
     end

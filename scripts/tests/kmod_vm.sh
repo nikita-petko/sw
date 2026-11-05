@@ -83,7 +83,7 @@ copy_libs() {
 
 for tool in bash sh ls cat sleep echo mkdir rm cp mv ln date kill sort head tail wc tr cut sed awk grep egrep diff uniq seq true false env test \
 	chmod mount umount dmesg sync stat id uname hostname find xargs tee timeout mktemp readlink dirname basename \
-	ip nsenter unshare insmod rmmod lsmod modprobe depmod modinfo nft ping ss; do
+	ip nsenter unshare setpriv insmod rmmod lsmod modprobe depmod modinfo nft ping ss; do
 	copy_bin "$tool" || echo "note: $tool is not a program on the host, skipped" >&2
 done
 # kmod's tools are symlinks to one binary: copy_bin followed them, which stored the same program under each name, so that works.

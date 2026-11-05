@@ -14,6 +14,7 @@
 //   bytes, an FNV-1a hash and the peer address swbench tcpsend --dst IP --port P --bytes N [--seed S]
 //   swbench backend --filter F [--forward yes] [--include-forward yes] [--sniff yes] [--priority N] [--delay-ms D] [--batch yes]
 //                   [--discard-every K] [--modify dport --to-port P] [--inline yes] [--seconds S]   the backend::open() channel, as the engine uses it
+//   swbench backend-image FILE             loads a module file from memory (the embedded module's loader)
 //   swbench backend-load | backend-api       module loading by check_privileges(); the backend contract that needs no traffic
 // sink and sniff run until SIGINT/SIGTERM and then print their result. The -hold modes give every packet a verdict D ms after it
 // was captured (0: at once; -1: never, so only the module's timeout or its close releases it) and drop every K-th packet.
@@ -54,6 +55,7 @@
 // backend_cmd.cc: the lagsw backend itself (backends/kmod), driven like the engine drives it
 int run_backend(const std::vector<std::string>& arguments);
 int run_backend_load(const std::vector<std::string>& arguments);
+int run_backend_image(const std::vector<std::string>& arguments);
 int run_backend_api(const std::vector<std::string>& arguments);
 
 namespace {
@@ -1798,6 +1800,8 @@ int main(int argc, char** argv)
 		return run_backend(args.v);
 	if (command == "backend-load")
 		return run_backend_load(args.v);
+	if (command == "backend-image")
+		return run_backend_image(args.v);
 	if (command == "backend-api")
 		return run_backend_api(args.v);
 	if (command == "tcpsink")

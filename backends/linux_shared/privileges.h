@@ -11,6 +11,9 @@ namespace linux_shared {
 /// Also logs a warning when keyboard devices exist but none is readable (hotkeys would not work).
 bool check_privileges(std::string& error);
 
+/// Whether the process has `capability` (CAP_* number) in its effective set.
+bool has_capability(int capability);
+
 }  // namespace linux_shared
 
 #endif

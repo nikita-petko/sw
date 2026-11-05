@@ -22,6 +22,8 @@
 #include <thread>
 #include <vector>
 
+#include "module.h"
+#include "module_image.h"
 #include "packet_backend.h"
 
 namespace {
@@ -277,6 +279,38 @@ int run_backend(const std::vector<std::string>& arguments)
 		static_cast<unsigned long long>(counters.modified.load()),
 		layers.empty() ? "-" : layers.c_str());
 	return 0;
+}
+
+// `swbench backend-image FILE`: loads a module file from memory with backends/kmod's loader, the way the embedded module is loaded
+int run_backend_image(const std::vector<std::string>& arguments)
+{
+	if (arguments.empty())
+	{
+		std::fprintf(stderr, "swbench: backend-image needs a module file\n");
+		return 2;
+	}
+	std::FILE* file = std::fopen(arguments[0].c_str(), "rb");
+	if (file == nullptr)
+	{
+		std::fprintf(stderr, "swbench: cannot read %s\n", arguments[0].c_str());
+		return 2;
+	}
+	std::vector<uint8_t> bytes;
+	uint8_t				 chunk[65536];
+	size_t				 count;
+	while ((count = std::fread(chunk, 1, sizeof(chunk), file)) > 0)
+		bytes.insert(bytes.end(), chunk, chunk + count);
+	std::fclose(file);
+
+	std::string error;
+	const auto	status = kmodb::load_module_image(bytes.data(), bytes.size(), error);
+	const char* name = status == kmodb::LoadStatus::loaded ? "loaded" : status == kmodb::LoadStatus::already_loaded ? "already" : "failed";
+	std::printf("image_status=%s image_release=%s kernel_release=%s image_error=%s\n",
+				name,
+				kmodb::image_release(bytes.data(), bytes.size()).c_str(),
+				kmodb::kernel_release().c_str(),
+				error.empty() ? "-" : error.c_str());
+	return status == kmodb::LoadStatus::failed ? 1 : 0;
 }
 
 int run_backend_load(const std::vector<std::string>& arguments)
