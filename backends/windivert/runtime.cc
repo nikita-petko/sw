@@ -79,7 +79,7 @@ void cleanup()
 bool load_functions()
 {
 #define LOAD_WINDIVERT_FUNCTION(name)                                                                  \
-	name##_fn = reinterpret_cast<decltype(name##_fn)>(GetProcAddress(windivert_module, #name));        \
+	name##_fn = reinterpret_cast<decltype(name##_fn)>(reinterpret_cast<void*>(GetProcAddress(windivert_module, #name))); \
 	if (name##_fn == nullptr)                                                                          \
 	{                                                                                                  \
 		LOG_ERROR("WinDivert.dll is missing exported function %s (error %lu)", #name, GetLastError()); \

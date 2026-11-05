@@ -75,7 +75,7 @@ task("package-all")
                     raise("python is needed to create the %s sysroot (scripts/build/make_sysroot.py)", arch)
                 end
                 cprint("${bright}creating the %s sysroot in %s", arch, dir)
-                os.vrunv(python, {path.join(root, "scripts", "build", "make_sysroot.py"), "--arch", arch, "--dest", dir}, {curdir = root})
+                os.execv(python, {path.join(root, "scripts", "build", "make_sysroot.py"), "--arch", arch, "--dest", dir}, {curdir = root})
             end
             return dir
         end
@@ -131,9 +131,9 @@ task("package-all")
                 local builddir = path.join(root, "build", "package-all", subdir, "out")
                 os.mkdir(configdir)
                 local opts = {curdir = root, envs = {XMAKE_CONFIGDIR = configdir}}
-                os.vrunv(xmake, table.join("f", "-c", "-y", "-m", mode, "-o", builddir, args), opts)
-                os.vrunv(xmake, {"build", "lagsw"}, opts)
-                os.vrunv(xmake, {"package", "-o", outputdir, "lagsw"}, opts)
+                os.execv(xmake, table.join("f", "-c", "-v", "-y", "-m", mode, "-o", builddir, args), opts)
+                os.execv(xmake, {"build", "-v", "lagsw"}, opts)
+                os.execv(xmake, {"package", "-v", "-o", outputdir, "lagsw"}, opts)
                 return true
             end, catch { function (errors) failure = errors end } }
             if not ok then
