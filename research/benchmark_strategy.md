@@ -109,23 +109,39 @@ measurement and should not be read as proof that a backend reduces CPU use.
 
 ## What the results say about speed and reliability
 
-The clearest comparison is at the tested game-scale rate of 20,000 pps: both platforms delivered the traffic without
-reported loss, but Linux had lower measured latency for immediate verdicts. The Windows baseline p50 was 9 us versus
-3-4 us on Linux. With `hold0`, Windows p50 rose to 26 us, compared with 7-10 us for Linux swdivert and NFQUEUE; batching
-was 36 us on Windows and 7-9 us on Linux. These are end-to-end measurements on different hosts and paths, so they show
-the outcome of these particular setups, not an isolated operating-system or backend cost.
+The comparisons below use p50 end-to-end latency (`lat p50`) and packet delivery (`received / sent`). A lower latency
+of `A` versus `B` is expressed as `(B-A)/B` percent lower and `B/A` times lower. A delivery ratio is not a general
+reliability score: it describes only packets delivered in these runs. Percentages are rounded, and all results are
+from the tested hosts and paths.
 
-At 100,000 pps, reliability and tail behavior separate much more sharply in this run. Linux swdivert and NFQUEUE
-delivered essentially all sent packets for both payload sizes in the runnable hold scenarios. Windows WinDivert did
-not: `hold0` lost about 60-61%, `hold0-batch` about 23-27%, and `hold2ms` about 29-30%. For the packets that arrived,
-Windows `hold0` p99 latency was roughly 59-80 ms, while Linux swdivert `hold0` p99 was 40-45 us. Windows `hold2ms`
-also accumulated multi-second tail latency and very large verdict-overdue time, whereas Linux `hold2ms` stayed close
-to its intended 2 ms delay, with p99 around 2.1-2.2 ms.
+### Overall comparison across the shared hold scenarios
 
-In practical terms, Linux was both faster and more reliable under this stress test; on Windows, batching improved
-delivery compared with one verdict call per packet but did not make the 100,000-pps load reliable. At 20,000 pps,
-WinDivert delivered traffic reliably, though with higher measured immediate-verdict latency than the Linux backends.
-Latency percentiles describe received packets only, so they must be read alongside `lost` and `missed`; when many
-packets are dropped, low latency among survivors would not mean the path is healthy. These findings are limited to
-one 8-CPU machine per OS, the tested loopback/namespace paths, and this one-flow UDP workload. Repeat on equivalent
-hardware and the intended NIC/game path before drawing conclusions about Windows versus Linux generally.
+This composite covers all 12 matched cells: `hold0`, `hold0-batch` and `hold2ms`, each at 20 kpps and 100 kpps with
+64- and 1200-byte payloads. Each cell has equal weight in the latency comparison: we take the geometric mean of the
+12 per-cell p50 latency ratios, so the intentionally 2-ms hold does not overwhelm the microsecond scenarios merely
+because it has a larger absolute latency. Delivery is pooled as total received divided by total sent across those
+cells, so the 100-kpps cells contribute in proportion to their packet counts. Baseline is excluded because it has no
+backend; sniff is excluded because NFQUEUE has no sniff mode and the cited WinDivert results do not provide matching
+sniff latency data.
+
+| Comparison | Overall p50 latency | Overall delivery | Takeaway |
+|---|---|---|---|
+| Linux swdivert vs. NFQUEUE | swdivert about **26.8% lower** (about **1.37x lower latency**) | Both **100%**; swdivert 3,599,974/3,599,974, NFQUEUE 3,599,986/3,599,986 | swdivert has the lower composite median, but its composite p99 is only about 4% lower; no delivery/reliability winner was measured |
+| Linux swdivert vs. Windows WinDivert | swdivert about **98.9% lower** (about **90x lower latency**) | Linux **100%** vs. Windows about **68.1%**; about **+31.9 percentage points** and **1.47x as many packets delivered** | The large difference is driven by Windows saturation in the 100-kpps stress cells; it is not a general OS/backend guarantee |
+| Linux NFQUEUE vs. Windows WinDivert | NFQUEUE about **98.5% lower** (about **66x lower latency**) | Linux **100%** vs. Windows about **68.1%**; about **+31.9 percentage points** and **1.47x as many packets delivered** | Same cross-host caveat; Linux backends had equivalent measured delivery in this test |
+
+For the Linux-only comparison, swdivert's reader CPU per packet was about **44% lower** overall; equivalently,
+NFQUEUE used about **1.79x as much reader CPU time per packet** by the same geometric-mean method. This is process
+CPU, not host-wide CPU or total system power.
+
+The cross-OS latency ratios are approximate: the Windows 20-kpps values are reported as rounded ranges, and the
+Windows and Linux results came from different machines and paths. The cited Windows run was a single run per cell,
+whereas the Linux table is the median of three runs. Also, latency percentiles describe received packets only; the
+Windows 100-kpps latency is for surviving packets while many others were dropped. The delivered-packet comparison
+(100% vs. about 68%) is more informative for reliability in this particular combined workload. Since Linux recorded
+zero losses, a finite “X-times more reliable” loss-rate ratio is undefined; report the delivery percentage-point
+difference and delivered-packet ratio instead.
+
+These are initial results from one 8-CPU machine per OS, loopback on Windows and a namespace/veth path on Linux, using
+one UDP flow and 64- or 1200-byte payloads. Repeat on equivalent hardware and the intended NIC/game path before
+drawing conclusions about Windows versus Linux generally.
