@@ -231,7 +231,8 @@ To package every platform at once, `xmake package-all` builds Windows x86_64 (`.
 (`.tar.gz`) into `dist/`. It uses its own configuration directory (your `xmake f` settings stay untouched), Visual Studio
 for Windows on a Windows host and MinGW-w64 elsewhere (`--mingw=<dir>`), the native toolchain for a Linux target of the
 host's own architecture, and clang with an automatically created `build/sysroot/<arch>` otherwise. Options: `--targets=`
-(`windows-x86_64,linux-x86_64,linux-arm64`), `-m debug`, `-o <dir>`.
+(`windows-x86_64,linux-x86_64,linux-arm64`), `-m debug`, `-o <dir>`. Linux packages use the NFQUEUE backend; `--linux-backends=nfqueue,kmod` instead packages each listed
+backend separately for every selected Linux target (the kmod ones get a `-kmod` suffix, e.g. `lagsw-v*-x86_64-release-kmod.tar.gz`).
 
 Requirements: clang 16+ with lld and the target (`clang --print-targets` lists `x86-64` / `aarch64`), **found on `PATH`**
 (`clang --version` must work in the shell that runs `xmake f`; `--sdk`/`--bin` are not enough). For example install LLVM

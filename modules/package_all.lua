@@ -14,6 +14,7 @@ task("package-all")
             {'m', "mode", "kv", "release", "Build mode: release or debug."},
             {'o', "outputdir", "kv", "dist", "Directory for the packages."},
             {nil, "targets", "kv", "all", "Comma-separated subset of: windows-x86_64, linux-x86_64, linux-arm64."},
+            {nil, "linux-backends", "kv", nil, "Comma-separated Linux backends to package, each separately (nfqueue, kmod); the default is the nfqueue backend only."},
             {nil, "mingw", "kv", nil, "MinGW-w64 directory for the Windows target on a non-Windows host."}
         }
     }
@@ -47,6 +48,16 @@ task("package-all")
                     raise("unknown target '%s', expected one of: %s", name, table.concat(all, ", "))
                 end
                 table.insert(selected, name)
+            end
+        end
+
+        local linux_backends = {}
+        for name in (option.get("linux-backends") or ""):gmatch("[^,%s]+") do
+            if name ~= "nfqueue" and name ~= "kmod" then
+                raise("unknown Linux backend '%s', expected one of: nfqueue, kmod", name)
+            end
+            if not table.contains(linux_backends, name) then
+                table.insert(linux_backends, name)
             end
         end
 
@@ -93,13 +104,31 @@ task("package-all")
 
         local xmake = os.programfile()
         local failed = {}
-        for _, name in ipairs(selected) do
-            cprint("${bright}== %s ==", name)
+        -- one job per package: Linux targets repeat for every requested backend
+        local jobs = {}
+        for _, target in ipairs(selected) do
+            if target:startswith("linux-") and #linux_backends > 0 then
+                for _, backend in ipairs(linux_backends) do
+                    table.insert(jobs, {target = target, backend = backend})
+                end
+            else
+                table.insert(jobs, {target = target})
+            end
+        end
+
+        for _, job in ipairs(jobs) do
+            local name = job.target
+            local label = job.backend and (name .. "/" .. job.backend) or name
+            cprint("${bright}== %s ==", label)
             local failure
             local ok = try { function ()
                 local args = configure_args(name)
-                local configdir = path.join(root, "build", "package-all", name, "config")
-                local builddir = path.join(root, "build", "package-all", name, "out")
+                local subdir = job.backend and (name .. "-" .. job.backend) or name
+                if job.backend then
+                    table.insert(args, "--linux_backend=" .. job.backend)
+                end
+                local configdir = path.join(root, "build", "package-all", subdir, "config")
+                local builddir = path.join(root, "build", "package-all", subdir, "out")
                 os.mkdir(configdir)
                 local opts = {curdir = root, envs = {XMAKE_CONFIGDIR = configdir}}
                 os.vrunv(xmake, table.join("f", "-c", "-y", "-m", mode, "-o", builddir, args), opts)
@@ -108,8 +137,8 @@ task("package-all")
                 return true
             end, catch { function (errors) failure = errors end } }
             if not ok then
-                table.insert(failed, name)
-                cprint("${color.error}%s failed: %s", name, tostring(failure or "unknown error"))
+                table.insert(failed, label)
+                cprint("${color.error}%s failed: %s", label, tostring(failure or "unknown error"))
             end
         end
 

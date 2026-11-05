@@ -77,6 +77,9 @@ target("lagsw")
         local outdir = path.absolute(option.get("outputdir") or "dist")
         -- scripts/package/<os>: "windows" also for MinGW builds
         local targetos = target:plat() == "mingw" and "windows" or target:plat()
+        if target:is_plat("linux") and get_config("linux_backend") == "kmod" then
+            name = name .. "-kmod"
+        end
         local pkgdir = path.join(outdir, name)
         os.tryrm(pkgdir)
         os.mkdir(pkgdir)
