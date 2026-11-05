@@ -404,8 +404,11 @@ sudo ./build/linux/x86_64/release/lagsw --config profiles/localhost.test.sw.yml
 This build needs none of the netfilter libraries, and **the executable carries the module** (as the Windows build carries
 WinDivert's driver): the build compiles `swdivert.ko`, strips it (107 KB) and embeds it. At startup `lagsw` loads the module when
 `/dev/swdivert` is missing, from memory with `init_module(2)`, so nothing else has to be installed or copied. That takes root or
-`CAP_SYS_MODULE` (`sudo setcap cap_net_admin,cap_sys_module+ep ./lagsw` is enough; the device node is root-only, so a non-root user
-also needs a udev rule for `/dev/swdivert`). The module is taken from the first of these that works: `$LAGSW_KMOD_PATH` (a `.ko`;
+`CAP_SYS_MODULE` (`sudo setcap cap_net_admin,cap_sys_module+ep ./lagsw` is enough). The device node is created root-only, so a
+non-root user also needs the udev rule that ships with the package, which opens it to a group:
+`sudo scripts/package/linux/setup_kmod_access.sh install --user $USER --lagsw ./lagsw` (creates the group `lagsw`, installs
+`70-swdivert.rules`, adds the user, runs `setcap`; log in again afterwards; `status` and `remove` are there too). Group access
+alone grants nothing, since the module's `open()` still requires `CAP_NET_ADMIN`. The module is taken from the first of these that works: `$LAGSW_KMOD_PATH` (a `.ko`;
 used alone, for a development build), the embedded module for the running kernel, an installed module (`modprobe swdivert`), a
 `swdivert.ko` next to the executable. `lagsw` never unloads the module (closing the handles releases everything it held);
 `LAGSW_KMOD_UNLOAD_ON_EXIT=1` unloads it on a normal exit when this process loaded it. A module of another ABI version is refused.

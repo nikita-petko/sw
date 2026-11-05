@@ -825,21 +825,37 @@ t_backend_image() {
 }
 
 # Loading a module takes CAP_SYS_MODULE, not root: a lagsw with `setcap cap_net_admin,cap_sys_module+ep` loads the module it carries and
-# runs as an ordinary user. Tested with setpriv standing in for file capabilities (CAP_DAC_OVERRIDE stands in for a udev rule that makes
-# /dev/swdivert accessible: the device is root-only otherwise).
+# runs as an ordinary user. Tested with setpriv standing in for file capabilities. The kernel creates /dev/swdivert root-only and the udev
+# rule (scripts/package/linux/70-swdivert.rules) gives it to a group a moment later; there is no udev in the VM, so a background loop does
+# what the rule does (chgrp, chmod 0660) a little after the node appears, which is also the race lagsw has to wait out.
 t_backend_caps() {
-	local user=(setpriv --reuid=1000 --regid=1000 --clear-groups) rc
+	local user_in_group=(setpriv --reuid=1000 --regid=1500 --clear-groups) user_outside=(setpriv --reuid=1001 --regid=1001 --clear-groups) rc started elapsed
+	local caps=(--inh-caps=+net_admin,+sys_module --ambient-caps=+net_admin,+sys_module)
 	rmmod swdivert 2> /dev/null
 	chmod 755 "$(dirname "$swbench")" 2> /dev/null
 
-	"${user[@]}" --inh-caps=+net_admin,+sys_module,+dac_override --ambient-caps=+net_admin,+sys_module,+dac_override \
-		env LAGSW_KMOD_PATH="$ko" LAGSW_KMOD_UNLOAD_ON_EXIT=1 "$swbench" backend-load > "$tmp/caps.out" 2> "$tmp/caps.err"
+	( for _ in $(seq 1 600); do [ -c /dev/swdivert ] && break; sleep 0.01; done; sleep 0.4; chgrp 1500 /dev/swdivert; chmod 0660 /dev/swdivert ) &
+	local udev_pid=$!
+	"${user_in_group[@]}" "${caps[@]}" env LAGSW_KMOD_PATH="$ko" LAGSW_KMOD_UNLOAD_ON_EXIT=1 "$swbench" backend-load > "$tmp/caps.out" 2> "$tmp/caps.err"
 	rc=$?
-	check "a user without root but with CAP_NET_ADMIN and CAP_SYS_MODULE loads the module and opens a channel (exit $rc: $(cat "$tmp/caps.out") $(head -c 150 "$tmp/caps.err"))" eq "$rc/$(kv "$tmp/caps.out" backend_opened)" "0/1"
+	wait "$udev_pid" 2> /dev/null
+	check "a member of the device's group with CAP_NET_ADMIN and CAP_SYS_MODULE, not root, loads the module and opens a channel although the node only gets its group 0.4 s after it appears (exit $rc: $(cat "$tmp/caps.out") $(head -c 120 "$tmp/caps.err"))" eq "$rc/$(kv "$tmp/caps.out" backend_opened)" "0/1"
 	check "... and unloads it again on exit, which needs the same capability" test -z "$(lsmod | awk '$1 == "swdivert"')"
 
-	"${user[@]}" --inh-caps=+net_admin,+dac_override --ambient-caps=+net_admin,+dac_override \
-		env LAGSW_KMOD_PATH="$ko" "$swbench" backend-load > "$tmp/caps.out" 2> "$tmp/caps.err"
+	# Not in the group: the node stays root-only for this user, and the refusal comes after the bounded wait with the way out
+	( for _ in $(seq 1 600); do [ -c /dev/swdivert ] && break; sleep 0.01; done; sleep 0.4; chgrp 1500 /dev/swdivert; chmod 0660 /dev/swdivert ) &
+	udev_pid=$!
+	started=$(date +%s.%N)
+	"${user_outside[@]}" "${caps[@]}" env LAGSW_KMOD_PATH="$ko" "$swbench" backend-load > "$tmp/caps.out" 2> "$tmp/caps.err"
+	rc=$?
+	elapsed="$(awk -v a="$started" -v b="$(date +%s.%N)" 'BEGIN{printf "%.1f", b - a}')"
+	wait "$udev_pid" 2> /dev/null
+	check "a user outside the group is refused (exit $rc after $elapsed s)" eq "$rc" 3
+	check "... with the udev rule and the script that installs it named ($(grep -o 'backend_error=.*' "$tmp/caps.out" | head -c 150))" grep -q 'udev rule.*setup_kmod_access.sh' "$tmp/caps.out"
+	check "... after waiting for udev, but not for ever ($elapsed s)" test "${elapsed%.*}" -ge 1 -a "${elapsed%.*}" -le 6
+	rmmod swdivert 2> /dev/null
+
+	"${user_in_group[@]}" --inh-caps=+net_admin --ambient-caps=+net_admin env LAGSW_KMOD_PATH="$ko" "$swbench" backend-load > "$tmp/caps.out" 2> "$tmp/caps.err"
 	rc=$?
 	check "a user without CAP_SYS_MODULE is told what is missing and nothing is loaded (exit $rc)" eq "$rc" 3
 	check "... the message names the capability and how to grant it ($(grep -o 'backend_error=.*' "$tmp/caps.out" | head -c 170))" grep -q 'CAP_SYS_MODULE.*setcap' "$tmp/caps.out"

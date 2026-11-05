@@ -1,0 +1,12 @@
+# udev rule for /dev/swdivert, the device of lagsw's kernel-module backend (backends/kmod).
+#
+# The kernel creates the node root-only (0600). This opens it to the members of the group "lagsw", so that lagsw can run as an ordinary
+# user that holds CAP_NET_ADMIN (and CAP_SYS_MODULE, to load the module it carries):
+#     sudo setcap cap_net_admin,cap_sys_module+ep ./lagsw
+# Installed by setup_kmod_access.sh next to this file (`setup_kmod_access.sh install --user <name>`), which also creates the group and
+# adds the user; to do it by hand copy this file to /etc/udev/rules.d/ and run `udevadm control --reload-rules`.
+#
+# Access to the node alone grants nothing: the module's open() requires CAP_NET_ADMIN, which the group does not carry. That is why the
+# mode is 0660 for a group and not 0666: an unprivileged user can obtain CAP_NET_ADMIN in a network namespace of their own, and the
+# module would then attach netfilter hooks there, so the node is not offered to everybody.
+SUBSYSTEM=="misc", KERNEL=="swdivert", GROUP="lagsw", MODE="0660"

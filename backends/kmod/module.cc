@@ -117,6 +117,7 @@ namespace {
 	{
 		ok,
 		missing,
+		denied,	 ///< the node exists and this process may not open it (EACCES): udev has not opened it to a group, or never will
 		failed,
 	};
 
@@ -127,9 +128,18 @@ namespace {
 		{
 			if (errno == ENOENT)
 				return Check::missing;
-			error =
-				std::string("cannot open ") + kDevicePath + ": " + std::strerror(errno) +
-				(errno == EACCES || errno == EPERM ? " (the device needs root or a udev rule that grants access, and CAP_NET_ADMIN)" : "");
+			if (errno == EACCES)
+			{
+				error = std::string("cannot open ") + kDevicePath +
+						": Permission denied. The device node is root-only until a udev rule opens it to a group: install the rule and add "
+						"your user "
+						"to that group (scripts/package/linux/setup_kmod_access.sh install --user <name>, which ships next to lagsw; log "
+						"in again "
+						"afterwards), or run lagsw as root. Opening it also needs CAP_NET_ADMIN";
+				return Check::denied;
+			}
+			error = std::string("cannot open ") + kDevicePath + ": " + std::strerror(errno) +
+					(errno == EPERM ? " (opening the device needs CAP_NET_ADMIN)" : "");
 			return Check::failed;
 		}
 		uint32_t  version = 0;
@@ -293,6 +303,7 @@ bool ensure_module(std::string& error)
 			LOG_DEBUG("swdivert module present (abi %d)", SWDIVERT_ABI_VERSION);
 			return true;
 		case Check::failed:
+		case Check::denied:
 			return false;
 		case Check::missing:
 			break;
@@ -401,7 +412,15 @@ bool ensure_module(std::string& error)
 		error = std::string("the swdivert module was loaded but ") + kDevicePath + " did not appear (is udev running?)";
 		return false;
 	}
-	if (check_device(error) != Check::ok)
+	// udev gives the node its group and mode a moment after the kernel created it root-only (0600): for a user who only gets in through the
+	// rule, the first attempts can be refused. Waiting for it is bounded, and after that the refusal is real.
+	Check state = check_device(error);
+	for (int attempt = 0; state == Check::denied && attempt < 40; ++attempt)
+	{
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+		state = check_device(error);
+	}
+	if (state != Check::ok)
 	{
 		if (error.empty())
 			error = std::string(kDevicePath) + " is not usable after loading the module";
