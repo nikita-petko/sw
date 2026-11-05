@@ -12,6 +12,7 @@
 //   through the rig swbench progcheck                       what SET_PROGRAM must accept and refuse swbench pktcheck --port P --iface IF
 //   verifies IP and UDP checksums of the packets arriving on IF (AF_PACKET) swbench tcpsink --port P            one connection: prints
 //   bytes, an FNV-1a hash and the peer address swbench tcpsend --dst IP --port P --bytes N [--seed S]
+//   swbench abicheck                        the rules of the stable interface: reserved and unused fields, unknown flags, verdicts and ioctls
 //   swbench backend --filter F [--forward yes] [--include-forward yes] [--sniff yes] [--priority N] [--delay-ms D] [--batch yes]
 //                   [--discard-every K] [--modify dport --to-port P] [--inline yes] [--seconds S]   the backend::open() channel, as the engine uses it
 //   swbench backend-image FILE             loads a module file from memory (the embedded module's loader)
@@ -483,6 +484,171 @@ int run_vmcheck(const Args& args)
 		static_cast<unsigned long long>(mismatches),
 		static_cast<unsigned long long>(user_mismatches));
 	return mismatches == 0 && user_mismatches == 0 && odd == 0 ? 0 : 1;
+}
+
+// The rules of the stable interface (kmod/include/swdivert_abi.h), through the real ioctls: what is reserved or unused has to be zero and
+// is refused otherwise, unknown flags and verdicts and ioctls are refused with the errno that says so, and the answers carry no garbage.
+int run_abicheck(const Args&)
+{
+	int cases = 0, failed = 0;
+	auto expect = [&](const char* what, int result, int expected_errno) {
+		++cases;
+		const int got = result == 0 ? 0 : errno;
+		if (got != expected_errno)
+		{
+			++failed;
+			std::fprintf(stderr, "abicheck FAIL: %s: expected %s, got %s\n", what, expected_errno ? std::strerror(expected_errno) : "success",
+						 got ? std::strerror(got) : "success");
+		}
+	};
+	auto open_device = [] {
+		const int fd = open("/dev/" SWDIVERT_DEVICE_NAME, O_RDWR | O_CLOEXEC);
+		if (fd < 0)
+			die("open /dev/" SWDIVERT_DEVICE_NAME);
+		return fd;
+	};
+	auto open_args = [](uint32_t flags) {
+		swdiv_open_args a = {};
+		a.slots			  = 64;
+		a.slot_bytes	  = 256;
+		a.flags			  = flags;
+		return a;
+	};
+
+	{
+		const int fd	  = open_device();
+		__u32	  version = 0;
+		expect("the version ioctl answers", ioctl(fd, SWDIVERT_IOC_VERSION, &version), 0);
+		++cases;
+		if (version != SWDIVERT_ABI_VERSION || version != 1)
+		{
+			++failed;
+			std::fprintf(stderr, "abicheck FAIL: the module reports ABI version %u\n", version);
+		}
+		swdiv_open_args a = open_args(SWDIV_OPEN_HOLD);
+		a.reserved3		  = 1;
+		expect("OPEN: reserved field set", ioctl(fd, SWDIVERT_IOC_OPEN, &a), EINVAL);
+		a			= open_args(0x10);
+		expect("OPEN: an unknown flag", ioctl(fd, SWDIVERT_IOC_OPEN, &a), EINVAL);
+		a			= open_args(SWDIV_OPEN_HOLD);
+		a.priority	= 30001;
+		expect("OPEN: priority out of range", ioctl(fd, SWDIVERT_IOC_OPEN, &a), EINVAL);
+		a			= open_args(SWDIV_OPEN_HOLD);
+		a.hold_ms	= SWDIV_MAX_HOLD_MS + 1;
+		expect("OPEN: hold_ms above the limit", ioctl(fd, SWDIVERT_IOC_OPEN, &a), EINVAL);
+		a			= open_args(SWDIV_OPEN_HOLD);
+		a.max_held	= SWDIV_MAX_HELD + 1;
+		expect("OPEN: max_held above the limit", ioctl(fd, SWDIVERT_IOC_OPEN, &a), EINVAL);
+		a = open_args(SWDIV_OPEN_HOLD);
+		expect("OPEN: a valid request", ioctl(fd, SWDIVERT_IOC_OPEN, &a), 0);
+
+		swdiv_tuple tuple = {};
+		tuple.reserved[1] = 1;
+		expect("SET_FILTER: reserved bytes set", ioctl(fd, SWDIVERT_IOC_SET_FILTER, &tuple), EINVAL);
+		tuple = {};
+		expect("SET_FILTER: all zero", ioctl(fd, SWDIVERT_IOC_SET_FILTER, &tuple), 0);
+
+		swdiv_stats stats;
+		std::memset(&stats, 0xFF, sizeof(stats));
+		expect("STATS answers", ioctl(fd, SWDIVERT_IOC_STATS, &stats), 0);
+		bool reserved_zero = true;
+		for (const __u64 word : stats.reserved)
+			reserved_zero = reserved_zero && word == 0;
+		++cases;
+		if (!reserved_zero)
+		{
+			++failed;
+			std::fprintf(stderr, "abicheck FAIL: STATS leaves its reserved counters unset\n");
+		}
+
+		expect("an ioctl that does not exist", ioctl(fd, _IO('s', 0x7f)), ENOTTY);
+		swdiv_inject_args early = {};
+		early.len				= 1;
+		expect("INJECT before START", ioctl(fd, SWDIVERT_IOC_INJECT, &early), EINVAL);
+		expect("START", ioctl(fd, SWDIVERT_IOC_START), 0);
+
+		swdiv_inject_args inject = {};
+		unsigned char	  packet[64] = {};
+		inject.data				   = static_cast<__u64>(reinterpret_cast<uintptr_t>(packet));
+		inject.len				   = sizeof(packet);
+		inject.ifindex			   = 1;
+		inject.reserved			   = 1;
+		expect("INJECT: reserved field set", ioctl(fd, SWDIVERT_IOC_INJECT, &inject), EINVAL);
+		inject.reserved = 0;
+		inject.flags	= 0x8;
+		expect("INJECT: an unknown flag", ioctl(fd, SWDIVERT_IOC_INJECT, &inject), EINVAL);
+		inject.flags = 0;
+		inject.len	 = 0;
+		expect("INJECT: no bytes", ioctl(fd, SWDIVERT_IOC_INJECT, &inject), EINVAL);
+
+		swdiv_verdict		items[8] = {};
+		swdiv_verdict_args args	  = {};
+		args.items				  = static_cast<__u64>(reinterpret_cast<uintptr_t>(items));
+		args.count				  = 1;
+		args.reserved			  = 1;
+		expect("VERDICT: reserved field set", ioctl(fd, SWDIVERT_IOC_VERDICT, &args), EINVAL);
+		args.reserved = 0;
+		args.count	  = 0;
+		expect("VERDICT: no items", ioctl(fd, SWDIVERT_IOC_VERDICT, &args), EINVAL);
+		args.count = SWDIV_MAX_VERDICTS + 1;
+		expect("VERDICT: too many items", ioctl(fd, SWDIVERT_IOC_VERDICT, &args), EINVAL);
+
+		// One call, several items: each carries its own status
+		struct Item
+		{
+			const char*	  what;
+			swdiv_verdict v;
+			int			  status;
+		};
+		auto verdict = [](uint32_t kind, uint64_t data, uint32_t len, uint32_t flags) {
+			swdiv_verdict v = {};
+			v.id			= 424242;	 // no such held packet
+			v.verdict		= kind;
+			v.data			= data;
+			v.len			= len;
+			v.flags			= flags;
+			return v;
+		};
+		const Item list[] = {
+			{"RESUME with nothing else set (no such packet)", verdict(SWDIV_V_RESUME, 0, 0, 0), ENOENT},
+			{"DROP with nothing else set (no such packet)", verdict(SWDIV_V_DROP, 0, 0, 0), ENOENT},
+			{"RESUME with data set", verdict(SWDIV_V_RESUME, 1, 0, 0), EINVAL},
+			{"RESUME with len set", verdict(SWDIV_V_RESUME, 0, 1, 0), EINVAL},
+			{"RESUME with flags set", verdict(SWDIV_V_RESUME, 0, 0, SWDIV_CALC_IP), EINVAL},
+			{"DROP with flags set", verdict(SWDIV_V_DROP, 0, 0, 0x80), EINVAL},
+			{"an unknown verdict", verdict(99, 0, 0, 0), EINVAL},
+			{"RESUME_MOD with an unknown flag", verdict(SWDIV_V_RESUME_MOD, static_cast<__u64>(reinterpret_cast<uintptr_t>(packet)), sizeof(packet), 0x4), EINVAL},
+			};
+		for (size_t index = 0; index < sizeof(list) / sizeof(list[0]); ++index)
+			items[index] = list[index].v;
+		args.count = sizeof(list) / sizeof(list[0]);
+		expect("VERDICT: a list of items", ioctl(fd, SWDIVERT_IOC_VERDICT, &args), 0);
+		for (size_t index = 0; index < sizeof(list) / sizeof(list[0]); ++index)
+		{
+			++cases;
+			if (static_cast<int>(items[index].status) != list[index].status)
+			{
+				++failed;
+				std::fprintf(stderr, "abicheck FAIL: VERDICT item '%s': expected %s, got %s\n", list[index].what, std::strerror(list[index].status),
+							 items[index].status ? std::strerror(static_cast<int>(items[index].status)) : "success");
+			}
+		}
+		close(fd);
+	}
+	{
+		// A handle that does not hold has no verdicts to give
+		const int		fd = open_device();
+		swdiv_open_args a  = open_args(0);
+		expect("OPEN (sniffing)", ioctl(fd, SWDIVERT_IOC_OPEN, &a), 0);
+		swdiv_verdict	   item = {};
+		swdiv_verdict_args args = {};
+		args.items				= static_cast<__u64>(reinterpret_cast<uintptr_t>(&item));
+		args.count				= 1;
+		expect("VERDICT on a handle that does not hold", ioctl(fd, SWDIVERT_IOC_VERDICT, &args), EINVAL);
+		close(fd);
+	}
+	std::printf("abicheck_cases=%d abicheck_failed=%d\n", cases, failed);
+	return failed == 0 ? 0 : 1;
 }
 
 // What SET_PROGRAM has to accept and what it has to refuse, through the real ioctl.
@@ -1796,6 +1962,8 @@ int main(int argc, char** argv)
 		return run_vmcheck(args);
 	if (command == "progcheck")
 		return run_progcheck(args);
+	if (command == "abicheck")
+		return run_abicheck(args);
 	if (command == "backend")
 		return run_backend(args.v);
 	if (command == "backend-load")

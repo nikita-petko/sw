@@ -2,6 +2,7 @@
 // (backends/kmod/filter_program.cc). No root, no module: this is the same code the kernel runs. The differential test compares compiled
 // programs with a reference evaluator that reads the filter's syntax tree directly.
 #include <chrono>
+#include <cstddef>
 #include <cstdio>
 
 #include "module_image.h"
@@ -473,6 +474,97 @@ void test_compiled_programs_agree_with_the_reference_on_random_filters_and_packe
 }
 
 // Not a pass/fail test: the cost of one run of a typical program on this machine (information for the design document).
+// The interface of /dev/swdivert is declared stable (ABI version 1, kmod/include/swdivert_abi.h): the sizes and the ioctl numbers are
+// asserted in the header itself, and this writes down the rest, so that a change that would break a program built against it fails here.
+void test_the_abi_is_the_one_that_was_declared_stable()
+{
+	CHECK(SWDIVERT_ABI_VERSION == 1);
+	CHECK(std::string(SWDIVERT_DEVICE_NAME) == "swdivert");
+#define OFFSET(type, field, expected) CHECK(offsetof(type, field) == (expected))
+	OFFSET(swdiv_tuple, proto, 0);
+	OFFSET(swdiv_tuple, reserved, 1);
+	OFFSET(swdiv_tuple, saddr, 4);
+	OFFSET(swdiv_tuple, daddr, 8);
+	OFFSET(swdiv_tuple, sport, 12);
+	OFFSET(swdiv_tuple, dport, 14);
+	OFFSET(swdiv_open_args, slots, 0);
+	OFFSET(swdiv_open_args, slot_bytes, 4);
+	OFFSET(swdiv_open_args, flags, 8);
+	OFFSET(swdiv_open_args, priority, 12);
+	OFFSET(swdiv_open_args, data_bytes, 16);
+	OFFSET(swdiv_open_args, cons_offset, 24);
+	OFFSET(swdiv_open_args, hdr_bytes, 32);
+	OFFSET(swdiv_open_args, hold_ms, 36);
+	OFFSET(swdiv_open_args, max_held, 40);
+	OFFSET(swdiv_open_args, reserved3, 44);
+	OFFSET(swdiv_verdict, id, 0);
+	OFFSET(swdiv_verdict, verdict, 8);
+	OFFSET(swdiv_verdict, status, 12);
+	OFFSET(swdiv_verdict, data, 16);
+	OFFSET(swdiv_verdict, len, 24);
+	OFFSET(swdiv_verdict, flags, 28);
+	OFFSET(swdiv_verdict_args, items, 0);
+	OFFSET(swdiv_verdict_args, count, 8);
+	OFFSET(swdiv_verdict_args, reserved, 12);
+	OFFSET(swdiv_inject_args, data, 0);
+	OFFSET(swdiv_inject_args, len, 8);
+	OFFSET(swdiv_inject_args, flags, 12);
+	OFFSET(swdiv_inject_args, ifindex, 16);
+	OFFSET(swdiv_inject_args, reserved, 20);
+	OFFSET(swdiv_insn, op, 0);
+	OFFSET(swdiv_insn, fail, 2);
+	OFFSET(swdiv_insn, src, 4);
+	OFFSET(swdiv_insn, k, 6);
+	OFFSET(swdiv_insn, a, 8);
+	OFFSET(swdiv_insn, b, 12);
+	OFFSET(swdiv_set_desc, kind, 0);
+	OFFSET(swdiv_set_desc, n, 4);
+	OFFSET(swdiv_set_desc, elems, 8);
+	OFFSET(swdiv_program_args, insns, 0);
+	OFFSET(swdiv_program_args, n_insns, 8);
+	OFFSET(swdiv_program_args, n_sets, 12);
+	OFFSET(swdiv_program_args, sets, 16);
+	OFFSET(swdiv_program_args, reserved, 24);
+	OFFSET(swdiv_slot_hdr, timestamp_ns, 0);
+	OFFSET(swdiv_slot_hdr, id, 8);
+	OFFSET(swdiv_slot_hdr, len, 16);
+	OFFSET(swdiv_slot_hdr, caplen, 20);
+	OFFSET(swdiv_slot_hdr, ifindex_in, 24);
+	OFFSET(swdiv_slot_hdr, ifindex_out, 28);
+	OFFSET(swdiv_slot_hdr, flags, 32);
+	OFFSET(swdiv_slot_hdr, hook, 34);
+	OFFSET(swdiv_ring_hdr, abi, 0);
+	OFFSET(swdiv_ring_hdr, slots, 4);
+	OFFSET(swdiv_ring_hdr, slot_bytes, 8);
+	OFFSET(swdiv_ring_hdr, prod, 64);
+	// The statistics keep their order (counters are only ever added at the end, into the reserved room), and 8 words of it are left
+	OFFSET(swdiv_stats, seen, 0);
+	OFFSET(swdiv_stats, held, 48);
+	OFFSET(swdiv_stats, held_now, 120);
+	OFFSET(swdiv_stats, modified, 128);
+	OFFSET(swdiv_stats, inject_failed, 160);
+	OFFSET(swdiv_stats, reserved, 168);
+#undef OFFSET
+
+	// Values that user space bakes in: verdicts, flags, filter operations and sources, limits
+	CHECK(SWDIV_V_RESUME == 1 && SWDIV_V_DROP == 2 && SWDIV_V_RESUME_MOD == 3);
+	CHECK(SWDIV_CALC_IP == 1 && SWDIV_CALC_L4 == 2);
+	CHECK(SWDIV_OPEN_HOLD == 1 && SWDIV_OPEN_LOCAL_IN == 2 && SWDIV_OPEN_LOCAL_OUT == 4 && SWDIV_OPEN_FORWARD == 8);
+	CHECK(SWDIV_SLOT_F_TRUNCATED == 1 && SWDIV_SLOT_F_HELD == 2 && SWDIVERT_SLOT_HDR_BYTES == 48);
+	CHECK(SWDIV_OP_ACCEPT == 1 && SWDIV_OP_EQ == 2 && SWDIV_OP_NE == 3 && SWDIV_OP_LT == 4 && SWDIV_OP_LE == 5 && SWDIV_OP_GT == 6 &&
+		  SWDIV_OP_GE == 7 && SWDIV_OP_MASK_EQ == 8 && SWDIV_OP_RANGE == 9 && SWDIV_OP_IN_SET == 10 && SWDIV_OP_NOT_IN_SET == 11);
+	CHECK(SWDIV_SRC_IP_PROTO == 1 && SWDIV_SRC_IP_SRC == 2 && SWDIV_SRC_IP_DST == 3 && SWDIV_SRC_IP_TTL == 4 && SWDIV_SRC_IP_TOTLEN == 5 &&
+		  SWDIV_SRC_IP_FRAG == 6 && SWDIV_SRC_RAW_BYTE == 7 && SWDIV_SRC_TCP_SPORT == 10 && SWDIV_SRC_TCP_DPORT == 11 &&
+		  SWDIV_SRC_UDP_SPORT == 12 && SWDIV_SRC_UDP_DPORT == 13 && SWDIV_SRC_TCP_FLAGS == 14 && SWDIV_SRC_TCP_PAYLOAD_BYTE == 15 &&
+		  SWDIV_SRC_UDP_PAYLOAD_BYTE == 16 && SWDIV_SRC_TCP_PAYLOAD_LEN == 17 && SWDIV_SRC_UDP_PAYLOAD_LEN == 18 &&
+		  SWDIV_SRC_IN_IFINDEX == 30 && SWDIV_SRC_OUT_IFINDEX == 31 && SWDIV_SRC_MARK == 32 && SWDIV_SRC_OUTBOUND == 33 &&
+		  SWDIV_SRC_LOOPBACK == 34 && SWDIV_SRC_PKT_LEN == 35 && SWDIV_SRC_HOOK == 36);
+	CHECK(SWDIV_SET_IPV4 == 1 && SWDIV_SET_PORTS == 2);
+	CHECK(SWDIV_MAX_INSNS == 4096 && SWDIV_MAX_SETS == 64 && SWDIV_MAX_SET_ELEMS == 65536 && SWDIV_MAX_TOTAL_ELEMS == (1U << 20) &&
+		  SWDIV_VM_PREFIX == 256);
+	CHECK(SWDIV_MAX_PACKET == 65535 && SWDIV_MAX_VERDICTS == 4096 && SWDIV_MAX_HOLD_MS == 600000 && SWDIV_MAX_HELD == 65536);
+}
+
 // Which embedded module belongs to the running kernel
 std::vector<uint8_t> fake_module(const std::string& vermagic, bool elf = true)
 {
@@ -663,6 +755,7 @@ int main(int argc, char** argv)
 		{"a_filter_too_big_for_the_vm_is_refused_with_a_message", test_a_filter_too_big_for_the_vm_is_refused_with_a_message},
 		{"compiled_programs_agree_with_the_reference_on_random_filters_and_packets",
 		 test_compiled_programs_agree_with_the_reference_on_random_filters_and_packets},
+		{"the_abi_is_the_one_that_was_declared_stable", test_the_abi_is_the_one_that_was_declared_stable},
 		{"the_embedded_module_for_the_running_kernel_is_chosen_by_its_vermagic",
 		 test_the_embedded_module_for_the_running_kernel_is_chosen_by_its_vermagic},
 		{"the_payload_fingerprint_sees_every_edit", test_the_payload_fingerprint_sees_every_edit},

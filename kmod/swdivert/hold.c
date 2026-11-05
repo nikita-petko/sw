@@ -543,7 +543,8 @@ int swdiv_hold_verdicts(struct swdiv_handle *h, void __user *argp)
 				}
 				kfree(buf);
 			}
-		} else if (v.verdict != SWDIV_V_RESUME && v.verdict != SWDIV_V_DROP) {
+		} else if ((v.verdict != SWDIV_V_RESUME && v.verdict != SWDIV_V_DROP) || v.data || v.len || v.flags) {
+			/* What a verdict does not use has to be 0, so that it can get a meaning later (see swdivert_abi.h) */
 			status = EINVAL;
 		} else {
 			e = swdiv_take_id(h, v.id);

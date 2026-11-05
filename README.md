@@ -387,13 +387,15 @@ Requirements and behaviour:
 - With `backend_monitor` enabled the extra status line also shows the kernel counters (stages, packets matched, delayed and
   dropped).
 
-### Kernel module backend (experimental)
+### Kernel module backend
 
 A third Linux backend replaces nftables + NFQUEUE with an out-of-tree kernel module, `swdivert` (`kmod/`; design, measurements
 and caveats in [`pocs/linux_kernel_module_backend.md`](pocs/linux_kernel_module_backend.md)). The module matches packets with a
 filter program, copies them into a ring shared with `lagsw` and holds the originals until the engine sends or drops them,
 so a held packet costs no netlink round trip. The filter language, the engine and the profiles are the same as with NFQUEUE. It is
-chosen when `lagsw` is built:
+chosen when `lagsw` is built. **Status:** the module's interface (`/dev/swdivert`, ABI version 1) is declared stable and
+is frozen under written rules (`kmod/include/swdivert_abi.h`); the implementation has not been hardened yet (sanitizer and lockdep
+runs, a security review and a kernel matrix are still to do), so NFQUEUE stays the default backend.
 
 ```sh
 xmake f -m release --linux_backend=kmod       # the default is nfqueue

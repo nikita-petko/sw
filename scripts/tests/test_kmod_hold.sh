@@ -870,6 +870,20 @@ t_backend_caps() {
 	insmod "$ko" 2> "$tmp/load.err" || bad "could not load the module again: $(cat "$tmp/load.err")"
 }
 
+# The interface is declared stable (ABI version 1): what is reserved or unused has to be zero, unknown flags, verdicts and ioctls are refused with the
+# errno that says so, and the answers carry no garbage. The sizes and ioctl numbers are asserted at compile time; this is the kernel's side of the rules.
+t_abi() {
+	rig_up || return
+	"$swbench" abicheck > "$tmp/abi.out" 2> "$tmp/abi.err"
+	local rc=$?
+	check "the rules of the stable interface hold in the kernel ($(kv "$tmp/abi.out" abicheck_cases) cases, $(kv "$tmp/abi.out" abicheck_failed) wrong)" eq "$rc/$(kv "$tmp/abi.out" abicheck_failed)" "0/0"
+	[ "$rc" != 0 ] && cat "$tmp/abi.err"
+	dmesg | grep swdivert > "$tmp/abi.dmesg"
+	check "the module reports ABI version 1 when it loads ($(head -c 100 "$tmp/abi.dmesg"))" grep -q 'ready (abi 1)' "$tmp/abi.dmesg"
+	check "its metadata says what it is (modinfo): version 1, no spike label" test "$(modinfo -F version "$ko")" = 1 -a -z "$(modinfo -F description "$ko" | grep -i spike)"
+	rig_down
+}
+
 t_backend_local_out() {
 	rig_up || return
 	start_bg sink server "$swbench" sink --port $PORT --verify yes
@@ -1235,9 +1249,9 @@ insmod "$ko" || { echo "insmod failed"; exit 1; }
 dmesg_before="$(dmesg | wc -l)"
 [ -c /dev/swdivert ] || { echo "/dev/swdivert did not appear"; exit 1; }
 
-default_tests=(sniff filter_string filter_set filter_swap filter_bad vmcheck progcheck backend_api backend_load backend_image backend_caps backend_local_out backend_local_in backend_forward backend_all backend_direction backend_modify backend_loopback backend_tcp backend_sigkill mod_payload mod_grow mod_shrink mod_tcp mod_tcp_nat mod_bad mod_dst chain_order priority_equal inject_twin inject_chain race_mod fuzz resume_now delay drop_verdict tcp tcp_nat sigkill_hold graceful_stop hold_timeout max_held device_removal rate race)
+default_tests=(sniff filter_string filter_set filter_swap filter_bad vmcheck progcheck abi backend_api backend_load backend_image backend_caps backend_local_out backend_local_in backend_forward backend_all backend_direction backend_modify backend_loopback backend_tcp backend_sigkill mod_payload mod_grow mod_shrink mod_tcp mod_tcp_nat mod_bad mod_dst chain_order priority_equal inject_twin inject_chain race_mod fuzz resume_now delay drop_verdict tcp tcp_nat sigkill_hold graceful_stop hold_timeout max_held device_removal rate race)
 [ "${#only[@]}" -eq 0 ] && only=("${default_tests[@]}")
-for t in sniff filter_string filter_set filter_swap filter_bad vmcheck progcheck backend_api backend_load backend_image backend_caps backend_local_out backend_local_in backend_forward backend_all backend_direction backend_modify backend_loopback backend_tcp backend_sigkill mod_payload mod_grow mod_shrink mod_tcp mod_tcp_nat mod_bad mod_dst chain_order priority_equal inject_twin inject_chain race_mod fuzz resume_now delay drop_verdict tcp tcp_nat sigkill_hold graceful_stop hold_timeout max_held device_removal rate race bench; do
+for t in sniff filter_string filter_set filter_swap filter_bad vmcheck progcheck abi backend_api backend_load backend_image backend_caps backend_local_out backend_local_in backend_forward backend_all backend_direction backend_modify backend_loopback backend_tcp backend_sigkill mod_payload mod_grow mod_shrink mod_tcp mod_tcp_nat mod_bad mod_dst chain_order priority_equal inject_twin inject_chain race_mod fuzz resume_now delay drop_verdict tcp tcp_nat sigkill_hold graceful_stop hold_timeout max_held device_removal rate race bench; do
 	want_test "$t" || continue
 	echo "== $t"
 	"t_$t"

@@ -1,12 +1,22 @@
 /*
  * ABI of /dev/swdivert, shared by the kernel module and user space (only <linux/...> uapi headers are used).
  *
- * SPIKE STATUS (Phases 2-6 of pocs/linux_kernel_module_backend.md): the LOCAL_IN, LOCAL_OUT and FORWARD hooks (per handle), a filter program per handle (SET_PROGRAM, or the
- * 5-tuple of SET_FILTER, which is turned into a program). A handle either
- * sniffs (copies matching packets into the ring and lets them go) or holds (copies them into the ring and steals the original
- * until user space gives a verdict: resume, resume with new bytes, or drop). Handles have a priority and form a chain; a handle
- * can also inject packets of its own. SWDIVERT_ABI_VERSION stays 0 until the ABI is declared stable; user space refuses any
- * other value.
+ * What it covers: the LOCAL_IN, LOCAL_OUT and FORWARD hooks (per handle), a filter program per handle (SET_PROGRAM, or the 5-tuple of
+ * SET_FILTER, which is turned into a program). A handle either sniffs (copies matching packets into the ring and lets them go) or holds
+ * (copies them into the ring and steals the original until user space gives a verdict: resume, resume with new bytes, or drop). Handles
+ * have a priority and form a chain; a handle can also inject packets of its own.
+ *
+ * STABLE: this is ABI version 1, and what is in this file does not change within a version. The rules:
+ *  - Struct layouts, field meanings, ioctl numbers, constants and limits stay as they are. The sizes and the ioctl numbers are asserted
+ *    at the end of this file, in the module and in user space alike, so a change cannot be made by accident.
+ *  - What may be added without a new version is what a program that does not ask for it can never meet: a new ioctl, a new flag or enum
+ *    value, a new filter operation or source. The kernel refuses what it does not know (EINVAL for a flag, an operation or a source, ENOTTY
+ *    for an ioctl), which is how user space finds out whether a feature exists.
+ *  - Every field marked reserved, and every field a request does not use, has to be zero and is refused otherwise. That is what keeps
+ *    them free to get a meaning later.
+ *  - A struct that is the argument of an ioctl cannot grow (its size is part of the number): growth takes a new ioctl, the old one stays.
+ *    swdiv_stats has reserved room for counters.
+ *  - Anything else is a new SWDIVERT_ABI_VERSION. User space refuses a module whose version is not the one it was built for.
  */
 #ifndef SWDIVERT_ABI_H_
 #define SWDIVERT_ABI_H_
@@ -15,12 +25,12 @@
 #include <linux/types.h>
 
 #define SWDIVERT_DEVICE_NAME "swdivert"
-#define SWDIVERT_ABI_VERSION 0
+#define SWDIVERT_ABI_VERSION 1
 
 /* A packet filter: every field is a wildcard when zero. Addresses and ports are in network byte order. */
 struct swdiv_tuple {
 	__u8	proto;		/* IPPROTO_TCP / IPPROTO_UDP, 0 = any */
-	__u8	reserved[3];
+	__u8	reserved[3];	/* must be 0 */
 	__be32	saddr;
 	__be32	daddr;
 	__be16	sport;
@@ -71,12 +81,13 @@ struct swdiv_stats {
 	__u64	pass_unsupported;/* matched but not held (owned by a socket, no route, segmentation failed): let through */
 	__u64	pass_limit;	/* matched but not held because max_held was reached or memory was short: let through */
 	__u64	held_now;	/* gauge: packets held right now */
-	/* Phase 4 */
+	/* modify and inject */
 	__u64	modified;	/* held packets resumed with new bytes */
 	__u64	mod_dropped;	/* held packets dropped because a modification could not be applied (no memory, no route) */
 	__u64	ct_detached;	/* modified packets whose 5-tuple changed: their connection tracking entry was detached */
 	__u64	injected;	/* packets injected by this handle */
 	__u64	inject_failed;
+	__u64	reserved[8];	/* room for counters to come; always 0 (a struct that has to grow would need a new ioctl number) */
 };
 
 /* SWDIVERT_IOC_VERDICT: gives verdicts for held packets in one call */
@@ -92,11 +103,11 @@ struct swdiv_verdict {
 	__u64	id;		/* swdiv_slot_hdr.id */
 	__u32	verdict;	/* SWDIV_V_* */
 	__u32	status;		/* out: 0, or an errno. ENOENT: no such held packet (already resumed, dropped or expired).
-				 *      EINVAL: nothing was done and a RESUME_MOD packet stays held (bad bytes: not IPv4, lengths that do
-				 *      not fit) */
-	__u64	data;		/* RESUME_MOD: user pointer to the packet */
-	__u32	len;		/* RESUME_MOD: bytes at `data`, at most SWDIV_MAX_PACKET; bytes beyond the IP total length are ignored */
-	__u32	flags;		/* RESUME_MOD: SWDIV_CALC_* */
+				 *      EINVAL: nothing was done and the packet stays held (an unknown verdict, a field a verdict does not use
+				 *      that is not 0, or for RESUME_MOD bad bytes: not IPv4, lengths that do not fit) */
+	__u64	data;		/* RESUME_MOD: user pointer to the packet; must be 0 for RESUME and DROP */
+	__u32	len;		/* RESUME_MOD: bytes at `data`, at most SWDIV_MAX_PACKET; bytes beyond the IP total length are ignored; 0 for RESUME and DROP */
+	__u32	flags;		/* RESUME_MOD: SWDIV_CALC_*; 0 for RESUME and DROP */
 };
 #define SWDIV_MAX_PACKET	65535
 
@@ -252,5 +263,31 @@ struct swdiv_slot_hdr {
 struct swdiv_cons {
 	__u32	cons;		/* free-running count of consumed slots; written by user space only */
 };
+
+/*
+ * The layout, written down. These fail to compile when a struct or an ioctl number changes (the module and every user of this header
+ * check the same values); changing one means changing the ABI, see the rules at the top.
+ */
+#ifdef __cplusplus
+#define SWDIV_ABI_ASSERT(cond, what) static_assert(cond, what)
+#else
+#define SWDIV_ABI_ASSERT(cond, what) _Static_assert(cond, what)
+#endif
+SWDIV_ABI_ASSERT(sizeof(struct swdiv_tuple) == 16, "swdiv_tuple");
+SWDIV_ABI_ASSERT(sizeof(struct swdiv_open_args) == 48, "swdiv_open_args");
+SWDIV_ABI_ASSERT(sizeof(struct swdiv_stats) == 232, "swdiv_stats");
+SWDIV_ABI_ASSERT(sizeof(struct swdiv_verdict) == 32, "swdiv_verdict");
+SWDIV_ABI_ASSERT(sizeof(struct swdiv_verdict_args) == 16, "swdiv_verdict_args");
+SWDIV_ABI_ASSERT(sizeof(struct swdiv_inject_args) == 24, "swdiv_inject_args");
+SWDIV_ABI_ASSERT(sizeof(struct swdiv_insn) == 16, "swdiv_insn");
+SWDIV_ABI_ASSERT(sizeof(struct swdiv_set_desc) == 16, "swdiv_set_desc");
+SWDIV_ABI_ASSERT(sizeof(struct swdiv_program_args) == 32, "swdiv_program_args");
+SWDIV_ABI_ASSERT(sizeof(struct swdiv_ring_hdr) == 128 && __builtin_offsetof(struct swdiv_ring_hdr, prod) == 64, "swdiv_ring_hdr");
+SWDIV_ABI_ASSERT(sizeof(struct swdiv_slot_hdr) == 48, "swdiv_slot_hdr");
+SWDIV_ABI_ASSERT(sizeof(struct swdiv_cons) == 4, "swdiv_cons");
+SWDIV_ABI_ASSERT(SWDIVERT_IOC_VERSION == 0x80047310u && SWDIVERT_IOC_OPEN == 0xc0307311u && SWDIVERT_IOC_SET_FILTER == 0x40107312u &&
+		 SWDIVERT_IOC_START == 0x7313u && SWDIVERT_IOC_STOP == 0x7314u && SWDIVERT_IOC_STATS == 0x80e87315u &&
+		 SWDIVERT_IOC_VERDICT == 0xc0107316u && SWDIVERT_IOC_INJECT == 0x40187317u && SWDIVERT_IOC_SET_PROGRAM == 0x40207318u,
+		 "ioctl numbers");
 
 #endif

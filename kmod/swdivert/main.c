@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * /dev/swdivert (Phase 2 spike): one open file is one handle. OPEN sizes the ring, SET_FILTER sets the 5-tuple, START
- * registers a FORWARD hook in the opener's network namespace, and the reader consumes the mmap'd ring (poll() to sleep).
+ * /dev/swdivert: one open file is one handle. OPEN sizes the ring and says which hooks (LOCAL_IN, LOCAL_OUT, FORWARD), SET_PROGRAM or
+ * SET_FILTER sets the filter, START registers the hooks in the opener's network namespace, and the reader consumes the mmap'd ring
+ * (poll() to sleep) and answers held packets with VERDICT. The interface is the one declared in swdivert_abi.h.
  */
 #include <linux/capability.h>
 #include <linux/fs.h>
@@ -160,6 +161,8 @@ static long swdiv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 		if (copy_from_user(&tuple, argp, sizeof(tuple))) {
 			ret = -EFAULT;
+		} else if (memchr_inv(tuple.reserved, 0, sizeof(tuple.reserved))) {
+			ret = -EINVAL;
 		} else {
 			prog = swdiv_prog_from_tuple(&tuple);
 			if (IS_ERR(prog))
@@ -314,7 +317,7 @@ static int __init swdiv_init(void)
 		swdiv_hold_module_exit();
 		return ret;
 	}
-	pr_info("swdivert: /dev/%s ready (abi %d, spike)\n", SWDIVERT_DEVICE_NAME, SWDIVERT_ABI_VERSION);
+	pr_info("swdivert: /dev/%s ready (abi %d)\n", SWDIVERT_DEVICE_NAME, SWDIVERT_ABI_VERSION);
 	return 0;
 }
 
@@ -329,5 +332,5 @@ module_init(swdiv_init);
 module_exit(swdiv_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("swdivert Phase 3 spike: FORWARD sniffer / holder with an mmap ring");
-MODULE_VERSION("0");
+MODULE_DESCRIPTION("swdivert: packet diversion at the netfilter hooks (capture, hold, modify, inject) with a filter VM and an mmap ring");
+MODULE_VERSION("1");
