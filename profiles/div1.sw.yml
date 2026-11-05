@@ -81,7 +81,7 @@ profiles:
   - name: "Trickle"
     key: x
     mode: toggle
-#   disables: "*"
+    disables: "*"
     delay_mode: from_timestamp
     filter: "tcp.SrcPort == 55000 or tcp.DstPort == 55000"
     delay_ms: 500

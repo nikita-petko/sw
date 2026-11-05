@@ -356,7 +356,7 @@ void test_invalid_save_needs_confirmation()
 	// the saved file is listed with a marker next to it
 	app.handle_key(key::escape);
 	CHECK(app.screen() == App::Screen::loader && app.statuses()[0].state == FileState::unreadable);
-	app.handle_key(key::ctrl('R'));
+	app.handle_key(' ');
 	CHECK(app.outcome() == Outcome::running && app.message().find("cannot read") != std::string::npos);
 }
 
