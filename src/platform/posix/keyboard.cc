@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <linux/input.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
@@ -20,6 +21,7 @@
 #include <fstream>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace platform {
@@ -242,9 +244,18 @@ int read_key()
 	if (g_terminate_requested.load())
 		return 'q';
 	enter_raw_terminal();
+	// The caller loops on this without sleeping; waiting for input here keeps it from spinning a core while still
+	// polling held keys about once a millisecond.
+	pollfd input = {STDIN_FILENO, POLLIN, 0};
+	if (poll(&input, 1, 1) <= 0)
+		return key::none;
 	const int value = read_byte();
 	if (value < 0)
+	{
+		// Readable but empty means stdin is closed or redirected, which would otherwise make poll() return at once forever.
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
 		return key::none;
+	}
 	if (value == 127)
 		return key::backspace;
 	if (value != 0x1B)

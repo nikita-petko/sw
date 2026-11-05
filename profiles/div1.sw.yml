@@ -50,7 +50,7 @@ features:
   # of a delayed packet is passive + profile. delay_ms 60 on both directions raises the observed RTT by 120 ms; use
   # outbound_delay_ms / inbound_delay_ms to place it on one side. Region-probe traffic is never delayed.
   passive_latency:
-    enabled: true
+    enabled: false
     mode: fixed
     delay_ms: 12
     direction: both
