@@ -75,7 +75,7 @@ downloads it); GCC-based MinGW-w64 (`x86_64-w64-mingw32-g++`, Debian/Ubuntu `g++
 xmake f -p mingw -a x86_64 -m release                 # MinGW found on PATH or in /usr
 xmake f -p mingw -a x86_64 --mingw=/opt/llvm-mingw    # or give the toolchain directory
 xmake build lagsw
-xmake package lagsw            # dist/lagsw-v*-x86_64-release.zip (needs zip or 7z)
+xmake package lagsw            # dist/lagsw-v*-windows-x86_64-release.zip (needs zip or 7z)
 ```
 
 The result is a self-contained `build/mingw/x86_64/release/lagsw.exe` (libstdc++ and libgcc are linked statically) with
@@ -180,7 +180,7 @@ detects `pacman` or `apt`, installs the cross compiler if it is missing (one
 ```sh
 scripts/build/build_aarch64.sh                 # build/linux/arm64/release/lagsw
 scripts/build/build_aarch64.sh --mode debug
-scripts/build/build_aarch64.sh --package       # also create dist/lagsw-v*-arm64-release.tar.gz
+scripts/build/build_aarch64.sh --package       # also create dist/lagsw-v*-linux-arm64-release.tar.gz
 scripts/build/build_aarch64.sh --sysroot-only  # just prepare the sysroot
 scripts/build/build_aarch64.sh -- --pcap_files=y   # extra `xmake f` arguments after --
 ```
@@ -224,7 +224,7 @@ linking them (rerun with `--refresh` to recreate a sysroot made by an older vers
 python scripts/build/make_sysroot.py --arch x86_64 --dest build/sysroot/x86_64     # or --arch arm64; --distro ubuntu
 xmake f -p linux -a x86_64 --toolchain=clang --sysroot=build/sysroot/x86_64 -m release
 xmake build lagsw
-xmake package lagsw          # dist/lagsw-v*-x86_64-release.tar.gz
+xmake package lagsw          # dist/lagsw-v*-linux-x86_64-release.tar.gz
 ```
 
 To package every platform at once, `xmake package-all` builds Windows x86_64 (`.zip`), Linux x86_64 and Linux arm64
@@ -232,7 +232,7 @@ To package every platform at once, `xmake package-all` builds Windows x86_64 (`.
 for Windows on a Windows host and MinGW-w64 elsewhere (`--mingw=<dir>`), the native toolchain for a Linux target of the
 host's own architecture, and clang with an automatically created `build/sysroot/<arch>` otherwise. Options: `--targets=`
 (`windows-x86_64,linux-x86_64,linux-arm64`), `-m debug`, `-o <dir>`. Linux packages use the NFQUEUE backend; `--linux-backends=nfqueue,kmod` instead packages each listed
-backend separately for every selected Linux target (the kmod ones get a `-kmod` suffix, e.g. `lagsw-v*-x86_64-release-kmod.tar.gz`).
+backend separately for every selected Linux target (the kmod ones get a `-kmod` suffix, e.g. `lagsw-v*-linux-x86_64-release-kmod.tar.gz`).
 
 Requirements: clang 16+ with lld and the target (`clang --print-targets` lists `x86-64` / `aarch64`), **found on `PATH`**
 (`clang --version` must work in the shell that runs `xmake f`; `--sdk`/`--bin` are not enough). For example install LLVM

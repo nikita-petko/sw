@@ -93,7 +93,7 @@ bindir="$(dirname "$(command -v "${cross_prefix}g++")")"
 # ---- Sysroot ----
 # The sysroot holds the aarch64 headers and libraries lagsw links against, and the C library they were built for.
 sysroot_arch() {
-    local pkgs=(glibc linux-api-headers gcc-libs zlib curl libnetfilter_queue libmnl libnftnl libnfnetlink)
+    local pkgs=(glibc linux-api-headers gcc-libs zlib curl libnetfilter_queue libmnl libnftnl libnfnetlink linux-headers)
     local work="$sysroot/.work" conf
     conf="$work/pacman.conf"
     mkdir -p "$work/db" "$work/cache" "$work/gpg" "$sysroot"
@@ -123,7 +123,7 @@ EOF
 }
 
 sysroot_debian() {
-    local pkgs=(libc6-dev libstdc++6 zlib1g-dev libcurl4-openssl-dev libnetfilter-queue-dev libmnl-dev libnftnl-dev libnfnetlink-dev)
+    local pkgs=(libc6-dev libstdc++6 zlib1g-dev libcurl4-openssl-dev libnetfilter-queue-dev libmnl-dev libnftnl-dev libnfnetlink-dev linux-headers-$(uname -r))
     local work="$sysroot/.work" codename="${VERSION_CODENAME:-}" keyring sources
     [[ -n "$codename" ]] || die "cannot determine the distribution codename from /etc/os-release"
     mkdir -p "$work/state/lists/partial" "$work/cache/archives/partial" "$sysroot"

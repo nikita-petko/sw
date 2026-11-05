@@ -1,5 +1,5 @@
 -- `xmake package-all` builds and packages lagsw for Windows x86_64, Linux x86_64 and Linux arm64 in one go:
---   Windows: <outputdir>/lagsw-v*-*-<mode>.zip      Linux: <outputdir>/lagsw-v*-*-<mode>.tar.gz
+--   Windows: <outputdir>/lagsw-v*-windows-<arch>-<mode>.zip      Linux: <outputdir>/lagsw-v*-linux-<arch>-<mode>.tar.gz
 -- Every target is configured in its own XMAKE_CONFIGDIR below build/package-all, so the project configuration of `xmake f` is
 -- left alone. What each target uses depends on the host (see the README, "Cross-compiling"):
 --   Windows target: Visual Studio on a Windows host, MinGW-w64 (xmake's mingw platform) on any other
@@ -15,6 +15,7 @@ task("package-all")
             {'o', "outputdir", "kv", "dist", "Directory for the packages."},
             {nil, "targets", "kv", "all", "Comma-separated subset of: windows-x86_64, linux-x86_64, linux-arm64."},
             {nil, "linux-backends", "kv", nil, "Comma-separated Linux backends to package, each separately (nfqueue, kmod); the default is the nfqueue backend only."},
+            {nil, "kmod-kdir", "kv", nil, "Kernel build tree to embed the kmod module for (xmake f --kmod_kdir); without it, kmod packages for another architecture than the host carry no module."},
             {nil, "mingw", "kv", nil, "MinGW-w64 directory for the Windows target on a non-Windows host."}
         }
     }
@@ -126,6 +127,14 @@ task("package-all")
                 local subdir = job.backend and (name .. "-" .. job.backend) or name
                 if job.backend then
                     table.insert(args, "--linux_backend=" .. job.backend)
+                    local kdir = option.get("kmod-kdir")
+                    if kdir then
+                        table.insert(args, "--kmod_kdir=" .. kdir)
+                    elseif job.backend == "kmod" and name:sub(#"linux-" + 1) ~= host_arch then
+                        -- the host's kernel tree cannot build a module for another architecture
+                        cprint("${yellow}%s: no module is embedded (another architecture than the host, no --kmod-kdir); lagsw expects an installed one", label)
+                        table.insert(args, "--linux_kmod_embed=n")
+                    end
                 end
                 local configdir = path.join(root, "build", "package-all", subdir, "config")
                 local builddir = path.join(root, "build", "package-all", subdir, "out")

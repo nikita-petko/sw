@@ -73,10 +73,10 @@ target("lagsw")
     on_package(function (target)
         import("core.base.option")
 
-        local name = format("%s-v%s-%s-%s", target:name(), target:version(), target:arch(), get_config("mode"))
-        local outdir = path.absolute(option.get("outputdir") or "dist")
         -- scripts/package/<os>: "windows" also for MinGW builds
         local targetos = target:plat() == "mingw" and "windows" or target:plat()
+        local name = format("%s-v%s-%s-%s-%s", target:name(), target:version(), targetos, target:arch(), get_config("mode"))
+        local outdir = path.absolute(option.get("outputdir") or "dist")
         if target:is_plat("linux") and get_config("linux_backend") == "kmod" then
             name = name .. "-kmod"
         end
