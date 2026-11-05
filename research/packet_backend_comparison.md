@@ -29,7 +29,7 @@ These are anecdotal and have not been measured with the same setup on both platf
 | WinDivert | `backends/windivert` | Windows | WinDivert 2.2.2 driver, network and forward layers, one receive thread per layer, user-space scheduling | `pocs/windivert_benchmark` (`wdbench`, `bench.py`) |
 | NFQUEUE | `backends/nfqueue` | Linux | nftables rules (in-process netlink) queue packets to `libnetfilter_queue`; verdict per packet | `pocs/linux_kernel_module_backend` (`swbench`, `bench.py`, modes `nfq`, `nfq-hold`) |
 | swdivert (kmod) | `backends/kmod`, `kmod/` | Linux, out of tree | kernel module with a shared ring, steal-and-resume verdicts, in-kernel checksums | same (`swdiv`, `swdiv-hold`, `backend` modes) |
-| AF_PACKET | none (benchmark reference only) | Linux | TPACKET_V3 capture, no hold | `swbench` mode `afpacket`; sniff-only reference |
+| AF_PACKET | [PoC](../pocs/linux_afpacket_backend.md); no production backend yet | Linux | TPACKET_V3 passive copy alongside NFQUEUE/eBPF/swdivert; original remains with the active backend | `swbench` mode `afpacket`; sniff-only reference and preferred simple capture path where its interface-level view suffices |
 | stub | `backends/stub` | any | no packet access | not applicable |
 | tc/netem | `pocs/linux_tc_netem_backend.md` | Linux | kernel delays, no user-space hop | proposal only, nothing built or run |
 | eBPF/netlink | `pocs/linux_ebpf_netlink_backend.md` | Linux | per-packet logic in kernel; its Change A (in-process netlink rules) and Change C are in the NFQUEUE backend | not benchmarked here |
@@ -192,7 +192,7 @@ at 100 kpps) while NFQUEUE lost 13-41% and queued for 180-300 ms.
 | WinDivert | 9-10 | 26-27 | about +17 | 106-119 | 0 | 8-10 per 100k | measured here (loopback, 64 and 1200 B) |
 | NFQUEUE (one verdict) | 4 | 11 | about +7 | 32 | 0 | TODO (not recorded) | PoC doc (`veth`, 200 B) |
 | swdivert (`wake_us=0`) | 4 | 10 | about +6 | 38 | 0 | TODO (not recorded) | PoC doc (`veth`, 200 B) |
-| AF_PACKET | - | - | sniff only, cannot hold | - | - | - | PoC doc |
+| AF_PACKET | - | - | passive sniff copy alongside the active backend; no verdict or hold | - | - | - | [PoC](../pocs/linux_afpacket_backend.md); not a production `PacketBackend` |
 | stub | - | - | no packet access | - | - | - | - |
 | tc/netem | - | - | not built | - | - | - | proposal |
 

@@ -35,7 +35,7 @@ The goal is to find out which engine features survive that split, what the cost/
 
 ## 5. Non-goals
 
-- Payload rewrite, region-enforcement verdicts that depend on packet contents, sniffing/pcap capture, `ack_restoration`, TCP sequence-aware holds (see §8). These need packet visibility in user space and stay on NFQUEUE.
+- Payload rewrite, region-enforcement verdicts that depend on packet contents, `ack_restoration`, TCP sequence-aware holds (see §8). These need a verdict-capable packet path and stay on NFQUEUE or another stateful backend. This netem design itself does not provide sniffing/pcap; use the passive AF_PACKET PoC alongside the active path when its interface-level view is sufficient, or the tc eBPF PoC's ring-buffer path when the exact tc classifier view is needed.
 - IPv6 in the first iteration (the same design works with `ip6tables` and `protocol ipv6` filters).
 - Replacing the filter language. Profile filters that are not expressible as an iptables match (§7) are rejected at startup, exactly like unsupported terms are rejected by the NFQUEUE filter compiler.
 - Managing a pre-existing, user-owned qdisc setup. If the interface already has a non-default root qdisc the backend refuses to start (§9.1).
@@ -137,9 +137,10 @@ The WinDivert-style filter strings the engine passes today are compiled by `back
 | `delay_mode: ratio` with `%` | `delay D reorder P%` sends P% immediately and delays the rest | Approximate, probabilistic rather than batch-based |
 | `delay_mode: drop_and_send` | `loss P% delay D` | Approximate, probabilistic rather than a batch ratio |
 | `send_all_after_delay`, `ratio` (count), `hold_and_send`, `hold_until_deactivation`, `drop_until_toggle`, `packet_group_send`, `subsequent_packet_hold_mode`, `ack_restoration` | none; need stateful holding and ordered release by the controller | **Not supported.** Rejected at startup on this backend |
-| `capture_options.sniff` | none | Not supported |
+| `capture_options.sniff` | none in netem | Not provided by this backend; use AF_PACKET or the eBPF PoC's ring-buffer copy |
 | `capture_options.forward` | rules on the egress interface, see §6.3 | Supported |
-| Region enforcement, server discovery, pcap capture | need packet contents | Not supported (use NFQUEUE, or run the probes from a separate backend) |
+| Region enforcement | needs packet contents and a verdict | Not supported (use NFQUEUE or another verdict-capable backend) |
+| Server discovery, sniffing, pcap capture | passive packet copy | Not provided by netem; use AF_PACKET where its interface-level view is sufficient, otherwise the eBPF ring-buffer path or a separate capture backend |
 | Desync countdown | derived from active duration only | Works unchanged (no packet data needed) |
 
 Profiles are validated against this table when the backend is selected: a profile using an unsupported mode fails with an explicit message rather than silently degrading.

@@ -26,8 +26,10 @@ python pocs/bench_common.py report a.json b.json    # one table from the --json 
 | `hold0-batch` | held, verdict at once, calls batched (16 packets per receive on Windows; everything one receive returned on Linux) |
 | `hold2ms` | held, verdict 2 ms after capture (the engine's behaviour) |
 
-A backend that cannot run a scenario prints a row of `n/a` with the reason; nothing is skipped silently:
-NFQUEUE has no `sniff` (every queued packet needs a verdict), AF_PACKET has no `hold*`.
+A backend that cannot run a scenario prints a row of `n/a` with the reason; nothing is skipped silently. AF_PACKET is the Linux
+passive-copy reference for `sniff` (see the [AF_PACKET PoC](../pocs/linux_afpacket_backend.md)) and cannot run `hold*`.
+NFQUEUE can emulate sniff by queueing each packet and immediately accepting it, but that adds a userspace verdict round
+trip; the current shared benchmark does not count that as a passive-copy scenario and reports NFQUEUE `sniff` as `n/a`.
 
 ## Traffic and procedure (same everywhere)
 
@@ -94,7 +96,8 @@ At 20,000 pps, all runnable rows delivered every packet the sender reported (100
 reported loss. WinDivert's `hold0` p50 was 26 us and
 `hold0-batch` was 36 us, compared with a 9 us Windows baseline; `hold2ms` p50 was about 2,024 us. On Linux, swdivert
 and NFQUEUE also delivered all packets in the runnable cases; their `hold0` p50s were 7-10 us and `hold2ms` p50s were
-about 2,033-2,040 us. NFQUEUE `sniff` and AF_PACKET `hold*` remain unsupported as described above.
+about 2,033-2,040 us. The shared benchmark does not report NFQUEUE `sniff` (which would include a verdict round trip) or
+AF_PACKET `hold*`, as described above.
 
 At 100,000 pps, the Linux swdivert runs still delivered essentially all packets for both payload sizes. In contrast,
 WinDivert lost 23-27% of packets in `hold0-batch` and about 60-61% in `hold0`; `hold2ms` lost about 29-30%, with

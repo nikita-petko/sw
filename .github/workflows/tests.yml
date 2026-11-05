@@ -3,7 +3,24 @@ name: tests
 on:
   push:
     branches: [master]
+
+    # Any c/cc, lua or header changes
+    paths:
+      - '.github/workflows/build.yml'
+      
+      - '**/*.c'
+      - '**/*.cc'
+      - '**/*.h'
+      - '**/*.lua'
   pull_request:
+    # Any c/cc, lua or header changes
+    paths:
+      - '.github/workflows/build.yml'
+      
+      - '**/*.c'
+      - '**/*.cc'
+      - '**/*.h'
+      - '**/*.lua'
 
 permissions:
   contents: read

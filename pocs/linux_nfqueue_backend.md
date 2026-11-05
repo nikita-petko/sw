@@ -13,7 +13,7 @@
 
 The packet engine currently depends on WinDivert (`WinDivertOpen/Recv/Send`, `WinDivertHelperCalcChecksums`, WinDivert filter strings). This PoC defines a Linux backend that provides the same capabilities using **nftables** to select traffic and **NFQUEUE** (via `libnetfilter_queue`) to hand packets to user space, which then returns a verdict (accept / drop / accept-with-modified-payload).
 
-The goal is to prove that every behaviour the engine relies on (capture, drop, delay, modify, reinject, sniff) can be reproduced on Linux without a kernel module, and to identify the seam where the engine is split into a platform-neutral core and per-OS backends.
+The goal is to prove that the engine's active packet behaviours (capture for a verdict, drop, delay, modify and reinject) can be reproduced on Linux without a kernel module, and to identify the seam where the engine is split into a platform-neutral core and per-OS backends. Observation-only sniffing is supplied by the complementary AF_PACKET tier when its interface-level view suffices (see [`linux_afpacket_backend.md`](linux_afpacket_backend.md)).
 
 ## 2. Terminology
 
@@ -32,7 +32,7 @@ The goal is to prove that every behaviour the engine relies on (capture, drop, d
 1. Introduce a `PacketBackend` interface in `include/` that the engine uses instead of WinDivert types directly.
 2. Implement `NfqueueBackend` for Linux, IPv4 first, TCP and UDP.
 3. Generate and own the nftables ruleset from the existing profile/server/filter data.
-4. Support the existing modes: normal (intercept), sniff, forward, outbound-only, region enforcement (drop), delay/reorder, payload rewrite.
+4. Support the existing modes through the appropriate Linux path: NFQUEUE for intercept, forward, outbound-only, region enforcement (drop), delay/reorder and payload rewrite; passive AF_PACKET capture for sniff-only consumers when its interface-level view is sufficient.
 5. Fail safe: if the process dies, traffic must keep flowing.
 
 ## 5. Non-goals
@@ -50,7 +50,7 @@ The goal is to prove that every behaviour the engine relies on (capture, drop, d
 | `WINDIVERT_LAYER_NETWORK_FORWARD` | nft `forward` hook |
 | `WINDIVERT_LAYER_NETWORK` | nft `input` and `output` hooks (two rules, direction known from the hook) |
 | `priority` | nft chain priority (lower runs first); one chain per distinct priority |
-| `WINDIVERT_FLAG_SNIFF` | verdict `NF_ACCEPT` immediately in the receive callback (copy is processed afterwards), or nft `queue ... bypass` with a `numgen`/`meta` sample; see §8.4 |
+| `WINDIVERT_FLAG_SNIFF` | separate passive capture path (prefer AF_PACKET where its interface-level view is sufficient); see §8.4. NFQUEUE can emulate sniffing with an immediate accept, but still intercepts every packet |
 | `WinDivertRecv` | `nfq_handle_packet` callback; packet ID, hook, ifindex, mark from `nfq_get_msg_packet_hdr/indev/outdev` |
 | `WinDivertSend` (reinject) | `nfq_set_verdict(qh, id, NF_ACCEPT, len, buf)` with the (modified) packet |
 | Dropping (no send) | `NF_DROP` |
@@ -126,10 +126,16 @@ The kernel holds a packet until a verdict is issued, so **delaying a packet == d
 
 ### 8.4 Sniff mode
 
-NFQUEUE has no native copy mode. Options evaluated by the PoC:
+Sniff-only consumers do not need a verdict, packet modification or reinjection. Do not send them through the NFQUEUE path just to issue an immediate `NF_ACCEPT`: use the passive AF_PACKET design in [`linux_afpacket_backend.md`](linux_afpacket_backend.md) when its visibility is sufficient. AF_PACKET can run alongside NFQUEUE: the packet socket supplies copies to observation consumers, while NFQUEUE continues to own the original packets requiring a userspace verdict. A socket filter can narrow the copied traffic; the capture worker can then feed the sniff, discovery or pcap consumer without reinjecting those copies.
 
-1. Queue and immediately `NF_ACCEPT` in the callback (latency cost of one user-space round trip). **Default.**
-2. nft `log group N` with `libnetfilter_log` (true copy, no latency, but truncated/limited metadata). Candidate for discovery/probe/FAD handles which use `WINDIVERT_FLAG_SNIFF` today.
+This is a distinct capture path, not an NFQUEUE verdict mode:
+
+- It requires packet-socket permission (`CAP_NET_RAW`) and an interface in the relevant network namespace.
+- Its view is at the device/packet-socket tap, not an arbitrary netfilter hook. Interface selection, direction, link-layer framing and loopback behavior must be checked against each consumer; capturing both sides of a forwarded flow can observe more than one copy.
+- It is appropriate only when loss-tolerant passive observation is acceptable. It cannot hold, drop, modify or reinject the original.
+- Where an exact netfilter-hook view or NFQUEUE-specific metadata is required, use the eBPF ring-buffer copy path described in [`linux_ebpf_netlink_backend.md`](linux_ebpf_netlink_backend.md) where applicable, or use NFQUEUE only if the added userspace verdict round trip is acceptable.
+
+NFQUEUE itself has no native copy mode. Queueing and immediately issuing `NF_ACCEPT` remains a compatibility fallback, with a userspace round trip on every packet. nft `log group N` with `libnetfilter_log` is another true-copy option, but has truncated/limited metadata and should be evaluated only if AF_PACKET's device-level view is insufficient.
 
 ### 8.5 Modification and checksums
 
@@ -198,6 +204,6 @@ Packets not obtained from a queue (if any engine feature needs them) are sent th
 
 1. Is gateway (forward) the primary Linux use case, or local host capture?
 2. Accept disabling GRO/GSO as a requirement, or implement segmentation-aware handling?
-3. Is sniff via `NF_ACCEPT` latency acceptable for discovery/FAD, or should `libnetfilter_log` be used?
+3. Do discovery/FAD consumers get the required interfaces, direction and metadata from AF_PACKET, or do any require the NFQUEUE/eBPF hook-level view?
 4. Are length-changing rewrites (see `tls_segment_removal.md`) required on Linux in the first iteration? They need conntrack-aware sequence adjustment.
 5. Minimum kernel/nftables version (proposal: kernel ≥ 5.10, nftables ≥ 0.9.8 for `queue flags bypass,fanout`).

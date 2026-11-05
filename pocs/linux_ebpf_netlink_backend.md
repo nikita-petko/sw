@@ -18,7 +18,7 @@ This PoC proposes three changes:
 | | Change | Removes |
 |---|---|---|
 | **A** | Program nf_tables **directly over netlink** (libmnl + libnftnl, one atomic batch) into a table with the `owner` flag, using sets instead of one rule per clause | the `nft` binary, the root-only restriction, stale tables after `SIGKILL` |
-| **B** | A **tc eBPF + earliest-departure-time (EDT)** data plane for verbs that only need a release time or a drop (`passive_latency`, `from_timestamp`, `drop`, `send_all_after_delay`, probabilistic `drop_and_send`), plus a ring-buffer **copy** path for sniff/pcap | the user-space hop, the queue-length limit, and the "queue and immediately `NF_ACCEPT`" sniff |
+| **B** | A **tc eBPF + earliest-departure-time (EDT)** data plane for verbs that only need a release time or a drop (`passive_latency`, `from_timestamp`, `drop`, `send_all_after_delay`, probabilistic `drop_and_send`), plus an optional ring-buffer **copy** path for sniff/pcap | the user-space hop, the queue-length limit, and the "queue and immediately `NF_ACCEPT`" sniff |
 | **C** | **NFQUEUE only for stateful verbs**, installed only while such a verb is active, with batched verdicts | idle-profile user-space cost; NFQUEUE as the default path |
 
 Unlike the netem PoC, the delay is computed **per packet in BPF**, so `preserve_order`, `max_delay_ms` and the `uniform`/`normal` models map exactly instead of being listed as gaps (§8). The kernel still holds the packet, but in a qdisc, not in an NFQUEUE entry.
@@ -38,7 +38,7 @@ Unlike the netem PoC, the delay is computed **per packet in BPF**, so `preserve_
 - Make "process died" mean "traffic is untouched" without a watchdog, for both the rules and the shaping.
 - Make activation a map write or one netlink batch, not a spawn.
 - Stop paying user-space cost, queue-memory cost and netlink-verdict latency for packets whose fate is a timestamp.
-- Give sniff/discovery/pcap a real copy instead of a delayed accept.
+- Keep sniff-only work out of the verdict path: AF_PACKET can provide a passive interface-level copy alongside the eBPF/NFQUEUE active path; use the BPF ring buffer when capture must share this tc classifier's hook and filter.
 
 ## 4. Goals
 
@@ -154,7 +154,9 @@ tc egress runs after the netfilter `POSTROUTING` hook and tc ingress before `PRE
 
 ### 7.6 Sniff and discovery
 
-The ring buffer gives a true copy with no verdict wait, replacing the NFQUEUE PoC §8.4 default (queue + immediate `NF_ACCEPT`) and the `libnetfilter_log` alternative. It carries an interface index, direction and a timestamp, so `PacketMeta` is fillable. pcap export uses the same records. Records are dropped, with a counter, if user space falls behind; sniff consumers must tolerate loss, which a WinDivert sniff handle also does.
+Sniff-only traffic should not be queued for an immediate accept. Prefer the AF_PACKET/TPACKET_V3 passive copy described in [`linux_afpacket_backend.md`](linux_afpacket_backend.md) when that tap sees the required traffic and supplies enough metadata (also see [`linux_nfqueue_backend.md`](linux_nfqueue_backend.md) §8.4). This avoids a verdict path without adding BPF capture code.
+
+The ring buffer remains an alternative when sniffing must use the exact tc classifier's interface, direction and filter, or when the BPF tier is already active and a second capture path is undesirable. It gives a copy with no verdict wait and carries an interface index, direction and timestamp, so `PacketMeta` is fillable. pcap export uses the same records. Records are dropped, with a counter, if user space falls behind; sniff consumers must tolerate loss, as they must with AF_PACKET or a WinDivert sniff handle.
 
 ### 7.7 Offloads
 
@@ -183,7 +185,7 @@ Each profile and the passive-latency feature are classified at start-up. A profi
 | `hold_and_send`, `hold_until_deactivation`, `drop_until_toggle`, `packet_group_send` | **NFQUEUE** | release time is decided by a later key press |
 | `ack_restoration`, `subsequent_packet_hold_mode`, payload rewrite | **NFQUEUE** | needs packet contents and checksums |
 | Region enforcement (SYN/PSH probes) | **NFQUEUE** | per-packet user-space verdict; a later iteration can use a BPF drop flag keyed by server |
-| `capture_options.sniff`, discovery, forwarded-address discovery, pcap | **BPF ring buffer** | copy, no verdict |
+| `capture_options.sniff`, discovery, forwarded-address discovery, pcap | **AF_PACKET alongside the selected active tier; BPF ring buffer where tc-hook visibility is needed** | passive copy, no verdict; see §7.6 |
 | `capture_options.forward` | both | forward = egress program on the outgoing interface (§7.4) |
 | Desync countdown | unchanged | depends only on active duration |
 
