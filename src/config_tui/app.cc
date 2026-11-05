@@ -431,9 +431,11 @@ void App::key_loader(int code)
 			refresh_statuses();
 			message_ = "Checked every file again";
 			break;
+		case ' ':
+			run_selected();
+			break;
 		default:
-			if (code == key::ctrl('R'))
-				run_selected();
+			break;
 	}
 }
 
@@ -975,7 +977,7 @@ std::string App::render(int width, int height)
 		}
 		if (recent_.empty() && body > 0)
 			rows[2] = std::string(kDim) + fit("   (nothing opened yet)", columns) + kReset;
-		rows[total - 1] = styled(kDim, " Up/Down select  Enter edit  Ctrl+R run  n new  o open  d forget  r check again  q quit");
+		rows[total - 1] = styled(kDim, " Up/Down select  Enter edit  Space run  n new  o open  d forget  r check again  q quit");
 	}
 	else
 	{

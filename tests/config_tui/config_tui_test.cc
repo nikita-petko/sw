@@ -216,6 +216,8 @@ void test_loader_keys_and_outcomes()
 	{
 		App app(services);
 		app.handle_key(key::ctrl('R'));
+		CHECK(app.outcome() == Outcome::running);
+		app.handle_key(' ');
 		CHECK(app.outcome() == Outcome::run && app.chosen_path() == absolute_path(directory.file("good.yml")));
 	}
 }

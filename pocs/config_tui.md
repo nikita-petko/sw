@@ -120,7 +120,7 @@ so it can be fixed in place. Entries are never removed automatically.
 - `Ctrl+S` validates with the production loader and writes the file (atomic rename, original kept as `<file>.bak` once
   per session). Invalid content can be saved only after an explicit confirmation, and is then marked `!` in the list.
 - `Ctrl+R` saves and starts the program with this file, going to `initial_view`.
-- `Tab` (form tab) or `Ctrl+T` switches tabs; on the raw tab `Tab` inserts two spaces. Loader: `Ctrl+R` runs the
+- `Tab` (form tab) or `Ctrl+T` switches tabs; on the raw tab `Tab` inserts two spaces. Loader: `Space` runs the
   selected file, `n` new, `o` open path, `d` forget.
 - `Esc` goes back to the loader view, asking first when there are unsaved changes.
 
