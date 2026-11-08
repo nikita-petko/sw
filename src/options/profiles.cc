@@ -746,6 +746,11 @@ namespace {
 														 parse_ulong(unquote(value), 0, 600000),
 														 monitor.alert_stall_ms,
 														 "net_monitor alert_stall"));
+			if (key == "silent_timeout")
+				return to_status(assign_number<uint32_t>(context_,
+														 parse_ulong(unquote(value), 0, 600000),
+														 monitor.silent_timeout_ms,
+														 "net_monitor silent_timeout"));
 			if (key == "export_directory")
 			{
 				monitor.export_directory = unquote(value);

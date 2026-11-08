@@ -744,6 +744,7 @@ features:
     alert_jitter: 30
     alert_retransmit: 2
     alert_stall: 1000
+    silent_timeout: 30000
     export_directory: "netmonitor-exports"
     log_file: "netmonitor.jsonl"
 ```
@@ -761,6 +762,7 @@ features:
 | `alert_jitter` | No | Smoothed RTT jitter in milliseconds above which a server raises an alert. Defaults to `30`; `0` disables it. |
 | `alert_retransmit` | No | Percentage of retransmitted TCP data packets over the last 10 seconds above which a server raises an alert. Defaults to `2`; `0` disables it. |
 | `alert_stall` | No | Inbound silence in milliseconds from a server at or above which an alert is raised. Defaults to `1000`; `0` disables it. |
+| `silent_timeout` | No | Inbound silence in milliseconds at or above which a server's row turns gray and hides all statistics except RTT, silence and score. Defaults to `30000`; `0` disables this behavior. |
 | `export_directory` | No | Directory for the CSV and JSON files written by the `e` key. Defaults to a `netmonitor` folder in the per-user data directory. |
 | `log_file` | No | JSON Lines file that receives one record per server and second, plus the events, while the view is open. Disabled when empty. |
 
@@ -771,6 +773,8 @@ a per-profile view (activations, active time and the latency, retransmits and th
 active), `e` exports
 the measured window and `r` resets it. A server whose alert thresholds are exceeded turns red in the table, and the
 events panel lists alerts, profile activations and servers found by server discovery.
+Silent rows retain their server label and selection/alert marker; their RTT trend is hidden. Silence excludes paused time
+and is unknown until an inbound packet has been observed.
 
 Region enforcement delays TCP PSH packets from configured servers outside the
 currently selected server group. Use the Left and Right arrow keys to change

@@ -68,6 +68,11 @@ the log file are further keys of the same block, see the README.
 | TCP resets, TCP/UDP split, average packet size | counters |
 | per-server table | pkt/s, RTT now/avg, jitter, retransmit %, silence and an RTT trend sparkline for every configured server; the selected server is marked |
 
+After `silent_timeout` milliseconds without inbound traffic (default 30000, 0 disables it), the server's row is gray
+and retains only its label, marker, last RTT, silence and score; the other fields and RTT trend are hidden. Silence is
+unknown until an inbound packet is seen, and does not advance while the monitor is paused. This changes only the
+display, not stored statistics, alerts or exports.
+
 ### Known PoC limits
 
 - Latency is only measured for TCP; a UDP-only server shows arrival jitter and gaps but no RTT. See below for an
@@ -87,7 +92,7 @@ the log file are further keys of the same block, see the README.
 
 - **Alerts**: per server, `alert_rtt` (ms, one second's mean RTT), `alert_jitter` (ms, smoothed RTT jitter),
   `alert_retransmit` (percent of data packets over the last 10 seconds, needs at least 20 of them) and `alert_stall`
-  (ms of inbound silence); 0 disables one. A raised alert turns the server's table row red and is added to the events
+  (ms of inbound silence); 0 disables one. A raised alert marks the server red unless it is silent, and is added to the events
   panel, and the cleared state is added too. When the view closes, a warning line summarises how often each server
   raised each alert.
 - **Events** (last four shown, 200 kept): alerts, profiles switching on or off, servers added by discovery. The

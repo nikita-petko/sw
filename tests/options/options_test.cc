@@ -94,6 +94,12 @@ void test_shipped_profiles()
 
 void test_every_setting()
 {
+#ifdef LAGSW_FEATURE_NET_MONITOR
+	const LoadResult defaults = load_text(kProfile);
+	CHECK(defaults.ok && defaults.options.features.net_monitor.silent_timeout_ms == 30000);
+	const LoadResult disabled = load_text("features:\n  net_monitor:\n    silent_timeout: 0\n" + kProfile);
+	CHECK(disabled.ok && disabled.options.features.net_monitor.silent_timeout_ms == 0);
+#endif
 	const LoadResult result = load_text(R"(global_filter: "tcp"
 default_view: net_monitor
 servers:
@@ -135,6 +141,7 @@ features:
     alert_jitter: 0
     alert_retransmit: 5
     alert_stall: 750
+    silent_timeout: 45000
     export_directory: "exports"
     log_file: "logs/net.jsonl"
   pcap_files:
@@ -224,6 +231,7 @@ profiles:
 	CHECK(o.features.net_monitor.profiles_key == 'K' && o.features.net_monitor.export_key == 'L');
 	CHECK(o.features.net_monitor.alert_rtt_ms == 120 && o.features.net_monitor.alert_jitter_ms == 0);
 	CHECK(o.features.net_monitor.alert_retransmit_percent == 5 && o.features.net_monitor.alert_stall_ms == 750);
+	CHECK(o.features.net_monitor.silent_timeout_ms == 45000);
 	CHECK(o.features.net_monitor.export_directory == "exports" && o.features.net_monitor.log_file == "logs/net.jsonl");
 #endif
 #ifdef LAGSW_FEATURE_PCAP_FILES
@@ -382,6 +390,12 @@ void test_rejected_files()
 		{"net monitor bad alert",
 		 "features:\n  net_monitor:\n    alert_retransmit: 101\n" + kProfile,
 		 "Invalid net_monitor alert_retransmit in"},
+		{"net monitor bad silent timeout",
+		 "features:\n  net_monitor:\n    silent_timeout: 600001\n" + kProfile,
+		 "Invalid net_monitor silent_timeout in"},
+		{"net monitor negative silent timeout",
+		 "features:\n  net_monitor:\n    silent_timeout: -1\n" + kProfile,
+		 "Invalid net_monitor silent_timeout in"},
 		{"net monitor profile key",
 		 "features:\n  net_monitor:\n    enabled: true\n    key: x\n" + kProfile,
 		 "conflicts with an activation key of profile 'A'"},

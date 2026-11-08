@@ -19,6 +19,7 @@
 
 #	include "fakes.h"
 #	include "log.h"
+#	include "net_monitor/internal.h"
 #	include "packet_engine.h"
 #	include "support/packets.h"
 #	include "support/test.h"
@@ -272,6 +273,83 @@ void test_charts_and_frame_render()
 		CHECK(frame.find("lagsw effect") != std::string::npos);
 		CHECK(frame.find("bit/s") != std::string::npos);
 	}
+}
+
+void test_silent_server_row()
+{
+	using namespace net_monitor_detail;
+	fakes::reset();
+	PacketEngineOptions options = options_with_server();
+	CHECK(options.features.net_monitor.silent_timeout_ms == 30000);
+	PacketEngine engine(options);
+	NetMonitor	 monitor(engine, options);
+	monitor.toggle();
+	monitor.stop();
+
+	auto& stats = monitor.servers_[kServerAddress];
+	stats.up.packets = 10;
+	stats.down.packets = 20;
+	stats.pps_up.push(12);
+	stats.pps_down.push(34);
+	stats.rtt_samples = 2;
+	stats.last_rtt_ms = 42;
+	stats.rtt_sum_ms = 100;
+	stats.jitter_ms = 8;
+	stats.data_up = 20;
+	stats.retrans_up = 1;
+	stats.rtt.push(42);
+	stats.score.push(87);
+	stats.alert_active[NetMonitor::alert_rtt] = true;
+	monitor.paused_ = true;
+	monitor.paused_at_ = Clock::now();
+
+	const auto row = [&] {
+		const std::string frame = monitor.render_frame(120, 0);
+		const size_t label = frame.find("!Test");
+		CHECK(label != std::string::npos);
+		if (label == std::string::npos)
+			return std::string();
+		const size_t start = frame.rfind('\n', label);
+		const size_t end = frame.find('\n', label);
+		return frame.substr(start + 1, end - start - 1);
+	};
+	stats.last_in = monitor.paused_at_ - std::chrono::milliseconds(29999);
+	CHECK(row().find(std::string(kRed) + "!Test") == 0);
+	stats.last_in = monitor.paused_at_ - std::chrono::milliseconds(30000);
+	const std::string expected = std::string(kDim) + "!" + pad(stats.label, 24) + std::string(18, ' ') +
+		pad_left("42 ms", 10) + std::string(27, ' ') + pad_left("30.0 s", 9) + pad_left("87", 7) + "  " +
+		std::string(21, ' ') + kReset + "\033[K";
+	CHECK(row() == expected);
+	CHECK(stats.rtt.values.size() == 1 && stats.data_up == 20);
+
+	options.features.net_monitor.silent_timeout_ms = 40000;
+	CHECK(row().find(std::string(kRed) + "!Test") == 0);
+	stats.last_in = monitor.paused_at_ - std::chrono::milliseconds(40000);
+	CHECK(row().find(std::string(kDim) + "!Test") == 0);
+	options.features.net_monitor.silent_timeout_ms = 0;
+	CHECK(row().find(std::string(kRed) + "!Test") == 0);
+	options.features.net_monitor.silent_timeout_ms = 30000;
+	stats.down.packets = 0;
+	CHECK(row().find(std::string(kRed) + "!Test") == 0);
+	stats.down.packets = 20;
+	stats.rtt_samples = 0;
+	stats.score.values.clear();
+	const std::string no_samples = std::string(kDim) + "!" + pad(stats.label, 24) + std::string(18, ' ') +
+		pad_left("-", 10) + std::string(27, ' ') + pad_left("40.0 s", 9) + pad_left("-", 7) + "  " +
+		std::string(21, ' ') + kReset + "\033[K";
+	CHECK(row() == no_samples);
+
+	// Resuming excludes paused time without restoring the interarrival state.
+	monitor.paused_at_ = Clock::now() - std::chrono::minutes(2);
+	stats.last_in = monitor.paused_at_ - std::chrono::seconds(30);
+	stats.has_in = true;
+	CHECK(monitor.handle_key(platform::key::space));
+	CHECK(!stats.has_in);
+	CHECK(elapsed_ms(stats.last_in, Clock::now()) >= 30000 && elapsed_ms(stats.last_in, Clock::now()) < 31000);
+	CHECK(row().find(std::string(kDim) + "!Test") == 0);
+	const Bytes inbound = from_server(1, 1, kAck, 0);
+	monitor.record(inbound.data(), static_cast<uint32_t>(inbound.size()));
+	CHECK(row().find(std::string(kRed) + "!Test") == 0);
 }
 
 void test_ports_sizes_and_handshakes()
@@ -831,6 +909,7 @@ int main(int argc, char** argv)
 		{"pause_ignores_packets_and_reset_clears_them", test_pause_ignores_packets_and_reset_clears_them},
 		{"view_keys_follow_the_configuration", test_view_keys_follow_the_configuration},
 		{"charts_and_frame_render", test_charts_and_frame_render},
+		{"silent_server_row", test_silent_server_row},
 		{"ports_sizes_and_handshakes", test_ports_sizes_and_handshakes},
 		{"tcp_health_flows_and_path", test_tcp_health_flows_and_path},
 		{"capture_health_and_warnings", test_capture_health_and_warnings},

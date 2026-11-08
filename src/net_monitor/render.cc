@@ -501,12 +501,24 @@ std::string NetMonitor::render_frame(int console_columns, int console_rows)
 		const double	   average = has_rtt ? stats.rtt_sum_ms / static_cast<double>(stats.rtt_samples) : 0;
 		const bool		   current = &stats == focus;
 		const double	   score   = score_of(stats);
+		const bool		   has_silence = stats.down.packets > 0;
+		const double	   silence = has_silence ? elapsed_ms(stats.last_in, now) : 0;
+		const uint32_t	   timeout = options_.features.net_monitor.silent_timeout_ms;
+		const bool		   silent = has_silence && timeout > 0 && silence >= timeout;
 		char			   retx_text[16], score_text[16];
 		std::snprintf(retx_text, sizeof(retx_text), "%.1f", retx);
 		std::snprintf(score_text, sizeof(score_text), "%.0f", score);
 		bool alerting = false;
 		for (const bool active : stats.alert_active)
 			alerting = alerting || active;
+		if (silent)
+		{
+			line(std::string(kDim) + (alerting ? "!" : current ? ">" : " ") + pad(stats.label, name_cols) +
+				 std::string(18, ' ') + pad_left(format_ms(stats.last_rtt_ms, has_rtt), 10) + std::string(27, ' ') +
+				 pad_left(format_ms(silence), 9) + pad_left(score >= 0 ? score_text : "-", 7) + "  " +
+				 std::string(trend_cols, ' ') + kReset);
+			continue;
+		}
 		line(std::string(alerting  ? kRed
 						 : current ? kBold
 								   : "") +
@@ -518,7 +530,7 @@ std::string NetMonitor::render_frame(int console_columns, int console_rows)
 			 pad_left(format_ms(stats.last_rtt_ms, has_rtt), 10) + kReset + pad_left(format_ms(average, has_rtt), 10) +
 			 pad_left(format_ms(stats.jitter_ms, has_rtt), 9) + (data > 0 ? loss_color(retx) : kDim) +
 			 pad_left(data > 0 ? retx_text : "-", 8) + kReset +
-			 pad_left(stats.has_in ? format_ms(elapsed_ms(stats.last_in, now)) : "-", 9) + (score >= 0 ? score_color(score) : kDim) +
+			 pad_left(has_silence ? format_ms(silence) : "-", 9) + (score >= 0 ? score_color(score) : kDim) +
 			 pad_left(score >= 0 ? score_text : "-", 7) + kReset + "  " +
 			 sparkline(stats.rtt.values, trend_cols, 50, has_rtt ? rtt_color(stats.last_rtt_ms) : kDim));
 	}

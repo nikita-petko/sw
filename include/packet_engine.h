@@ -354,6 +354,8 @@ struct NetMonitorOptions
 	uint32_t alert_retransmit_percent = 2;
 	/// Inbound silence (ms) from a server at or above which an alert is raised; 0 disables the alert.
 	uint32_t alert_stall_ms = 1000;
+	/// Inbound silence (ms) at which a server's table row is grayed out; 0 disables this display behavior.
+	uint32_t silent_timeout_ms = 30000;
 	/// Directory for the files written by the export key; empty uses a `netmonitor` folder in the per-user data directory.
 	std::string export_directory;
 	/// JSON Lines file that receives one record per server and second while the view is open; empty disables logging.

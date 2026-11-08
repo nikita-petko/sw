@@ -202,8 +202,12 @@ bool NetMonitor::handle_key(int key)
 		{
 			// Measurements taken before the pause must not be paired with packets seen after it.
 			std::lock_guard<std::mutex> lock(mutex_);
+			const auto resumed_at = Clock::now();
+			for (auto& entry : servers_)
+				if (entry.second.down.packets > 0)
+					entry.second.last_in += resumed_at - paused_at_;
 			clear_transient_locked();
-			last_tick_		 = Clock::now();
+			last_tick_		 = resumed_at;
 			system_has_prev_ = false;
 			paused_			 = false;
 		}
