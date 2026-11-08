@@ -6,15 +6,16 @@ Windows numbers are measured (loopback, one machine). Linux numbers for NFQUEUE 
 from the existing bare-metal results in [`pocs/linux_kernel_module_backend.md`](../pocs/linux_kernel_module_backend.md)
 (Phase 3 and 4 results); they were **not** produced with the same parameters or the same metrics as the Windows run, so
 the two sides are not directly comparable yet. Cells marked TODO are to be filled in on Linux by running the matching
-benchmark. Subsequent in-game tests suggest that RTT to the authoritative server, rather than the backend, is the main
-factor in the damage outcome. The gameplay observations below are separate from the synthetic backend measurements;
-the endpoint and meaning of the reported RTT still need verification.
+benchmark. Subsequent in-game tests, including adding a fixed delay on the same Windows VPN path, suggest that latency
+to the authoritative server, rather than the backend, is the main factor in the damage outcome. The gameplay
+observations below are separate from the synthetic backend measurements; the endpoint and meaning of the reported RTT
+still need verification.
 
 ## Question
 
-Is the perceived difference between the Windows and Linux hosts a packet-backend (driver) issue or a network-path issue?
+Is the perceived difference between the Windows and Linux hosts a packet-backend (driver) issue or a latency issue?
 Current in-game observations favor the latter, specifically RTT to the authoritative game server, but do not yet
-establish causation or rule out every backend effect.
+establish the exact mechanism or rule out every backend effect.
 
 ## Observations that motivated this
 
@@ -33,6 +34,12 @@ These are anecdotal and have not been measured with the same setup on both platf
 - Switching to a US VPN server raised the reported RTT to about 95-120 ms, and shotgun damage occurred much more often.
   The VPN exit and potentially the game endpoint or route changed as well, so RTT is strongly correlated with the
   outcome in these observations, but is not yet isolated as the only cause.
+- On the fastest ProtonVPN path on Windows, adding a fixed 100 ms of passive latency to a baseline RTT of about 24 ms
+  (approximately 124 ms with the added delay) likewise produced more shotgun damage instead of sniper damage. This
+  supports latency as a contributor without needing to change the VPN exit. The 124 ms is the stated baseline plus
+  configured delay; whether it was independently measured as end-to-end RTT, the delay direction and affected traffic
+  should be recorded. Passive delay also changes packet timing, so this test does not isolate RTT from all other timing
+  effects. The equivalent Linux test is still outstanding.
 - Additional passive latency did not help and made the outcome worse in these tests. The practical target is **under
   50 ms RTT to the authoritative server**, based on the observed behavior; this is a working target, not a proven
   universal cutoff or guarantee of sniper damage.
@@ -260,8 +267,8 @@ absolute value, and treat even that as indicative until the Linux side is rerun 
    Nothing in these results points at WinDivert or the hold logic as a source of millisecond-scale delay.
 2. The Linux backends also add only microseconds in the existing results (NFQUEUE about +7 us, swdivert about +6 us at
    the median). On that evidence none of the Linux backends adds a delay of the size of a weapon-swap window either.
-   The later gameplay observations point more strongly toward the network path and authoritative-server RTT than the
-   capture and verdict path, although these synthetic measurements alone cannot prove the cause.
+   The later gameplay observations, including the fixed-delay test on the nearby VPN path, point more strongly toward
+   latency and packet timing than backend choice, although these synthetic measurements alone cannot prove the cause.
 3. Diverting on Windows introduces a small amount of reordering at 20 kpps (5-10 per 100,000 packets) that the baseline
    does not have. A 2 ms hold nearly removes it (0-1). Reordering remains a possible contributing factor, but the
    in-game RTT observations make it a lower-priority hypothesis than previously thought. **It has not been measured on
@@ -271,7 +278,8 @@ absolute value, and treat even that as indicative until the Linux side is rerun 
    rows.
 5. These benchmark results are not measurements of the real gameplay path: neither side was benchmarked through the
    host's forward layer with a client behind it, or through the ProtonVPN interface. The later in-game observations
-   provide separate, uncontrolled evidence about that path.
+   provide separate evidence; the fixed-delay comparison reduces the VPN-route confound but has not yet been
+   fully controlled or replicated on Linux.
 
 The benchmark figures are measurements under the stated synthetic conditions. The explanation of the in-game outcome
 remains a hypothesis to test with controlled trials.
@@ -291,6 +299,10 @@ remains a hypothesis to test with controlled trials.
   jitter, loss and sample count, plus the number of comparable attempts and shotgun versus sniper outcomes for each
   run. Keep passive delay and other packet-engine settings fixed when comparing routes; test added delay separately.
   Treat the under-50-ms target as provisional until the outcome has been tested across RTT ranges.
+- TODO: replicate the Windows fixed-100-ms passive-latency test on Linux, and repeat both platforms with delay off and
+  on while keeping the route, game endpoint, client and other settings as consistent as possible. Record delay mode,
+  direction, filter and actual measured RTT, alongside packet loss, reordering and damage outcomes. If the endpoint or
+  other conditions change, record that as a confounder.
 - TODO: measure the client-to-game path, including forwarding through the host, using the game's own RTT if its endpoint
   is known or an appropriate permitted game-protocol probe or packet trace. DNS RTT from `egress.py` is useful for
   comparing interfaces, but is not a substitute for game-server RTT. ICMP may be blocked or treated differently from
