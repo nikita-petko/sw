@@ -43,6 +43,7 @@ and ACK restoration that apply across modes.
 | Network statistics view | [Net monitor](net_monitor.md) |
 | Profile editor and loader | [Config TUI](config_tui.md) |
 | Logs and runtime status | [Logging and status](logging_and_status.md) |
+| Replacing handwritten parsing and serialization | [App code reduction via libraries](app_code_reduction.md) |
 
 ## Packet backends and proposed experiments
 
