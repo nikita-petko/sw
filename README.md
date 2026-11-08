@@ -1050,6 +1050,35 @@ SIGKILL and unprivileged operation.
 | `win_divert/` | Embedded WinDivert headers, libraries, drivers, and documentation |
 | `xmake.lua` | Project-wide compiler and linker settings |
 
+## Proofs of concept
+
+The PoC documents track implementation status and planned phases; a complete status refers to the documented core scope,
+not necessarily every proposed follow-up.
+For the complete feature and packet-mode inventory, see the [PoC index](pocs/README.md).
+
+- **Complete — Config TUI:** loader and editor are implemented; some editor enhancements remain out of scope. See
+  [`pocs/config_tui.md`](pocs/config_tui.md).
+- **Complete — Net monitor:** live monitoring, flow/profile views, export and logging are implemented; additional
+  metrics and views are proposed. See [`pocs/net_monitor.md`](pocs/net_monitor.md).
+- **Complete — Linux NFQUEUE backend:** Phases 1–5 are implemented; multi-queue fanout remains deferred. See
+  [`pocs/linux_nfqueue_backend.md`](pocs/linux_nfqueue_backend.md).
+- **In progress — Linux eBPF/EDT backend:** netlink setup, batched NFQUEUE verdicts and the egress shaping tier are
+  implemented; local-inbound shaping, sniffing/pcap and broader kernel validation remain. See
+  [`pocs/linux_ebpf_netlink_backend.md`](pocs/linux_ebpf_netlink_backend.md).
+- **In progress — Linux kernel-module backend:** Phases 1–7 are implemented and the ABI is stable; Phase 8 hardening
+  is deferred. See [`pocs/linux_kernel_module_backend.md`](pocs/linux_kernel_module_backend.md).
+- **Proposed — Linux AF_PACKET passive capture:** production capture and engine integration have not started; this
+  document defines the design. See [`pocs/linux_afpacket_backend.md`](pocs/linux_afpacket_backend.md).
+- **Proposed — Linux tc/netem latency backend:** design only; the Phase 1 network-namespace harness has not yet been
+  run. See [`pocs/linux_tc_netem_backend.md`](pocs/linux_tc_netem_backend.md).
+- **Complete — Passive latency:** Phases 0–3 are implemented; optional Phase 4 adaptive target RTT is not started,
+  and capture options remain deferred. See [`pocs/passive_latency.md`](pocs/passive_latency.md).
+- **Proposed — TCP/TLS proxy:** the implementation plan covers environment validation (Phase 0) through integration
+  evaluation (Phase 5); the standalone relay is planned. See [`pocs/tcp_tls_proxy.md`](pocs/tcp_tls_proxy.md).
+- **Proposed — TLS record segment removal:** Phase 0 parser/filter work is the planned first implementation, followed
+  by packet splicing, sequence correction and integration in Phases 1–4. See
+  [`pocs/tls_segment_removal.md`](pocs/tls_segment_removal.md).
+
 ## License
 
 The `lagsw` project does not currently include a root license file. WinDivert
