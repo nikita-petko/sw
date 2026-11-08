@@ -26,6 +26,7 @@ decltype(&WinDivertShutdown)			WinDivertShutdown_fn			= nullptr;
 decltype(&WinDivertClose)				WinDivertClose_fn				= nullptr;
 decltype(&WinDivertSetParam)			WinDivertSetParam_fn			= nullptr;
 decltype(&WinDivertHelperCompileFilter) WinDivertHelperCompileFilter_fn = nullptr;
+decltype(&WinDivertHelperEvalFilter)	 WinDivertHelperEvalFilter_fn	 = nullptr;
 decltype(&WinDivertHelperCalcChecksums) WinDivertHelperCalcChecksums_fn = nullptr;
 
 bool extract_resource(int resource_id, const std::filesystem::path& path)
@@ -92,6 +93,7 @@ bool load_functions()
 	LOAD_WINDIVERT_FUNCTION(WinDivertClose);
 	LOAD_WINDIVERT_FUNCTION(WinDivertSetParam);
 	LOAD_WINDIVERT_FUNCTION(WinDivertHelperCompileFilter);
+	LOAD_WINDIVERT_FUNCTION(WinDivertHelperEvalFilter);
 	LOAD_WINDIVERT_FUNCTION(WinDivertHelperCalcChecksums);
 #undef LOAD_WINDIVERT_FUNCTION
 	return true;
@@ -191,4 +193,9 @@ extern "C" BOOL WinDivertHelperCompileFilter(const char*	 filter,
 extern "C" BOOL WinDivertHelperCalcChecksums(VOID* packet, UINT packet_len, WINDIVERT_ADDRESS* address, UINT64 flags)
 {
 	return WinDivertHelperCalcChecksums_fn(packet, packet_len, address, flags);
+}
+
+extern "C" BOOL WinDivertHelperEvalFilter(const char* filter, const VOID* packet, UINT packet_len, const WINDIVERT_ADDRESS* address)
+{
+	return WinDivertHelperEvalFilter_fn(filter, packet, packet_len, address);
 }

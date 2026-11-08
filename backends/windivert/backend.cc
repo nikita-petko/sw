@@ -58,10 +58,18 @@ namespace {
 	class WinDivertChannel final : public PacketChannel
 	{
 	public:
-		WinDivertChannel(HANDLE handle, std::string description) : handle_(handle), description_(std::move(description)) {}
+		WinDivertChannel(HANDLE handle, std::string description, WINDIVERT_LAYER layer, std::string filter)
+		: handle_(handle), description_(std::move(description)), layer_(layer), filter_(std::move(filter)) {}
 		~WinDivertChannel() override { close(); }
 
 		std::string description() const override { return description_; }
+
+		bool requires_reinjection_handoff(const PacketMeta& meta) const override
+		{
+			WINDIVERT_ADDRESS address;
+			std::memcpy(&address, meta.native, sizeof(address));
+			return address.Layer == WINDIVERT_LAYER_NETWORK_FORWARD;
+		}
 
 		IoStatus recv(uint8_t* buffer, uint32_t capacity, uint32_t& length, PacketMeta& meta, std::string& error) override
 		{
@@ -99,6 +107,24 @@ namespace {
 			return IoStatus::ok;
 		}
 
+		IoStatus match_reinjected(const uint8_t* packet, uint32_t length, const PacketMeta& meta, bool& matches, std::string& error) override
+		{
+			matches = false;
+			WINDIVERT_ADDRESS address;
+			std::memcpy(&address, meta.native, sizeof(address));
+			if (layer_ != WINDIVERT_LAYER_NETWORK_FORWARD || address.Layer != WINDIVERT_LAYER_NETWORK_FORWARD)
+				return IoStatus::ok;
+			SetLastError(ERROR_SUCCESS);
+			matches = WinDivertHelperEvalFilter(filter_.c_str(), packet, length, &address) != FALSE;
+			const DWORD code = GetLastError();
+			if (code != ERROR_SUCCESS)
+			{
+				error = format_error(code);
+				return IoStatus::error;
+			}
+			return IoStatus::ok;
+		}
+
 		void shutdown_recv() override
 		{
 			if (handle_ != INVALID_HANDLE_VALUE)
@@ -117,6 +143,8 @@ namespace {
 	private:
 		HANDLE			 handle_;
 		std::string		 description_;
+		WINDIVERT_LAYER	 layer_;
+		std::string		 filter_;
 		wd::ChannelStats stats_;
 	};
 
@@ -136,6 +164,11 @@ namespace {
 		~MultiLayerChannel() override { close(); }
 
 		std::string description() const override { return "network + forward layers"; }
+
+		bool requires_reinjection_handoff(const PacketMeta& meta) const override
+		{
+			return forwarded_->requires_reinjection_handoff(meta);
+		}
 
 		IoStatus recv(uint8_t* buffer, uint32_t capacity, uint32_t& length, PacketMeta& meta, std::string& error) override
 		{
@@ -253,8 +286,22 @@ namespace {
 
 	std::unique_ptr<PacketChannel> open_layer(const OpenOptions& options, WINDIVERT_LAYER layer, std::string& error)
 	{
+		std::string filter = options.filter;
+		if (layer == WINDIVERT_LAYER_NETWORK_FORWARD)
+		{
+			std::vector<char> object(1024 * 1024);
+			const char* message = nullptr;
+			UINT position = 0;
+			if (!WinDivertHelperCompileFilter(filter.c_str(), layer, object.data(), static_cast<UINT>(object.size()), &message, &position))
+			{
+				error = std::string("could not compile forward filter for reinjection: ") + (message ? message : format_error(GetLastError())) +
+						" at position " + std::to_string(position);
+				return nullptr;
+			}
+			filter = object.data();
+		}
 		const UINT64 flags	= options.sniff ? WINDIVERT_FLAG_SNIFF : 0;
-		HANDLE		 handle = WinDivertOpen(options.filter.c_str(), layer, options.priority, flags);
+		HANDLE		 handle = WinDivertOpen(filter.c_str(), layer, options.priority, flags);
 		if (handle == INVALID_HANDLE_VALUE)
 		{
 			error = format_error(GetLastError());
@@ -262,7 +309,8 @@ namespace {
 		}
 		WinDivertSetParam(handle, WINDIVERT_PARAM_QUEUE_LENGTH, kQueueLength);
 		WinDivertSetParam(handle, WINDIVERT_PARAM_QUEUE_TIME, kQueueTimeMs);
-		return std::make_unique<WinDivertChannel>(handle, layer == WINDIVERT_LAYER_NETWORK_FORWARD ? "forward layer" : "network layer");
+		return std::make_unique<WinDivertChannel>(
+			handle, layer == WINDIVERT_LAYER_NETWORK_FORWARD ? "forward layer" : "network layer", layer, std::move(filter));
 	}
 
 	std::string address_chain(const char* field, const std::vector<std::string>& addresses)

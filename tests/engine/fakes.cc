@@ -130,6 +130,18 @@ public:
 		state_->discarded_.push_back(meta.timestamp);
 	}
 
+	bool requires_reinjection_handoff(const backend::PacketMeta& meta) const override
+	{
+		return meta.native[0] == 1;
+	}
+
+	backend::IoStatus match_reinjected(const uint8_t*, uint32_t, const backend::PacketMeta& meta, bool& matches, std::string&) override
+	{
+		std::lock_guard<std::mutex> lock(state_->m_);
+		matches = state_->options.forward && state_->match_reinjected_ && meta.native[0] == 1;
+		return backend::IoStatus::ok;
+	}
+
 	void shutdown_recv() override
 	{
 		{
@@ -165,6 +177,26 @@ void ChannelState::inject(const std::vector<uint8_t>& packet, int64_t id, bool o
 		inbound_.push_back(std::move(inbound));
 	}
 	cv_.notify_all();
+}
+
+void ChannelState::inject_forwarded(const std::vector<uint8_t>& packet, int64_t id, bool outbound)
+{
+	Inbound inbound;
+	inbound.data = packet;
+	inbound.meta.timestamp = id;
+	inbound.meta.outbound = outbound;
+	inbound.meta.native[0] = 1;
+	{
+		std::lock_guard<std::mutex> lock(m_);
+		inbound_.push_back(std::move(inbound));
+	}
+	cv_.notify_all();
+}
+
+void ChannelState::match_forwarded_reinjection(bool match)
+{
+	std::lock_guard<std::mutex> lock(m_);
+	match_reinjected_ = match;
 }
 
 void ChannelState::fail_sends(bool fail)

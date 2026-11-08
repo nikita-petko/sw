@@ -114,6 +114,19 @@ public:
 	/// Tells the backend a received packet is intentionally never sent. Backends that hold packets until a
 	/// verdict (for example NFQUEUE) must release it as dropped; capture-and-reinject backends need nothing.
 	virtual void	 discard(const PacketMeta& meta) { (void)meta; }
+	/// Whether reinjection of this captured packet bypasses later channels.
+	virtual bool	 requires_reinjection_handoff(const PacketMeta& meta) const { (void)meta; return false; }
+	/// Whether a packet reinjected by another channel must be handed to this channel in user space.
+	/// Backends whose reinjection traverses subsequent capture stages leave `matches` false.
+	virtual IoStatus match_reinjected(const uint8_t* packet, uint32_t length, const PacketMeta& meta, bool& matches, std::string& error)
+	{
+		(void)packet;
+		(void)length;
+		(void)meta;
+		(void)error;
+		matches = false;
+		return IoStatus::ok;
+	}
 	/// Short human-readable summary of what the channel covers (for example "network + forward layers"); empty when unknown.
 	virtual std::string description() const { return {}; }
 	/// Unblocks pending and future recv() calls.

@@ -562,6 +562,8 @@ private:
 	struct Session;
 	/// Receives and schedules packets for an active profile.
 	void read_packets(const std::shared_ptr<Session>& session);
+	/// Processes one packet received by a profile, including packets handed off by another stage.
+	bool record_profile_packet(const std::shared_ptr<Session>& session, const uint8_t* packet, uint32_t length, const backend::PacketMeta& meta);
 	/// Releases scheduled packets for an active profile.
 	void write_packets(const std::shared_ptr<Session>& session);
 #ifdef LAGSW_FEATURE_SERVER_DISCOVERY
@@ -603,6 +605,9 @@ private:
 	void passive_latency_recv();
 	/// Waits until passive-latency packets are due and sends them.
 	void passive_latency_send();
+	/// Passes a released packet to a profile when backend reinjection cannot reach its capture stage.
+	bool handoff_passive_packet(const uint8_t* packet, uint32_t length, const backend::PacketMeta& meta);
+	void release_passive_packet(const uint8_t* packet, uint32_t length, const backend::PacketMeta& meta, const char* reason);
 	/// Sends every packet still queued by passive latency, unconditionally.
 	void flush_passive_latency_queue();
 	/// Whether the packet belongs to the region-enforcement probe port, which passive latency must not delay.

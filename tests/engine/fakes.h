@@ -32,6 +32,8 @@ class ChannelState
 public:
 	/// Queues a packet for the engine's next recv(). `id` is stored in the metadata timestamp so packets can be told apart.
 	void inject(const std::vector<uint8_t>& packet, int64_t id = 0, bool outbound = false, uint32_t if_index = 0);
+	void inject_forwarded(const std::vector<uint8_t>& packet, int64_t id = 0, bool outbound = false);
+	void match_forwarded_reinjection(bool match);
 	/// Makes subsequent send() calls fail.
 	void fail_sends(bool fail);
 
@@ -66,6 +68,7 @@ private:
 	bool					recv_shutdown_ = false;
 	bool					closed_		   = false;
 	bool					fail_sends_	   = false;
+	bool					match_reinjected_ = false;
 };
 
 /// Forgets every channel and recorded call; run at the start of each test.

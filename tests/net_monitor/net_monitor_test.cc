@@ -154,7 +154,7 @@ void test_monitor_and_profile_receive_packets_with_passive_latency()
 	CHECK(sniff->options.priority > passive->options.priority);
 	CHECK(passive->options.priority > profile->options.priority);
 
-	// Model WinDivert's priority traversal: sniff first, then reinject from the passive channel to the profile.
+	// Model WinDivert's local-network priority traversal: sniff first, then reinject to the profile.
 	const auto route = [&](const Bytes& packet, int64_t id, bool outbound) {
 		sniff->inject(packet, id, outbound);
 		passive->inject(packet, id, outbound);

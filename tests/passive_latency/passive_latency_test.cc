@@ -13,6 +13,7 @@
 #	include "fakes.h"
 #	include "log.h"
 #	include "packet_engine.h"
+#	include "packet_engine_util.h"
 #	include "support/capture.h"
 #	include "support/packets.h"
 
@@ -155,6 +156,101 @@ void test_passive_channel_is_distinct_from_profile_channels()
 	const auto passive = fakes::channel_with_filter("tcp");
 	CHECK(passive != nullptr);
 	CHECK(fakes::channel_with_filter("profile#0") == nullptr);
+	engine.stop_workers();
+}
+
+void test_forwarded_packets_reach_profiles_after_passive_latency()
+{
+	fakes::reset();
+	PacketEngineOptions options = passive_options(100);
+	options.profiles[0].capture_options.forward = true;
+	options.profiles[0].delay_ms = 50;
+	PacketEngine engine(options);
+	engine.start_workers();
+	engine.setup(1);
+	const auto passive = fakes::channel_with_filter("tcp");
+	const auto profile_channel = fakes::channel_with_filter("profile#0");
+	CHECK(passive && profile_channel);
+	if (!passive || !profile_channel)
+		return;
+	profile_channel->match_forwarded_reinjection(true);
+
+	const auto start = std::chrono::steady_clock::now();
+	passive->inject_forwarded(tcp_packet(1, 1, kAck), 1, true);
+	CHECK(wait_until([&] { return profile_channel->sent_count() == 1; }, std::chrono::milliseconds(2000)));
+	const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+	CHECK(elapsed >= 130);
+	CHECK(passive->sent_count() == 0);
+	const auto sent = profile_channel->sent_packets();
+	CHECK(!sent.empty() && sent[0].meta.timestamp == 1);
+
+	profile_channel->match_forwarded_reinjection(false);
+	passive->inject_forwarded(tcp_packet(2, 1, kAck), 2);
+	CHECK(wait_until([&] { return passive->sent_count() == 1; }, std::chrono::milliseconds(2000)));
+	CHECK(profile_channel->sent_count() == 1);
+
+	profile_channel->match_forwarded_reinjection(true);
+	engine.toggle_passive_latency_pause();
+	passive->inject_forwarded(tcp_packet(3, 1, kAck), 3);
+	CHECK(wait_until([&] { return profile_channel->sent_count() == 2; }, std::chrono::milliseconds(2000)));
+	CHECK(passive->sent_count() == 1);
+
+	engine.teardown(1);
+	passive->inject_forwarded(tcp_packet(4, 1, kAck), 4);
+	CHECK(wait_until([&] { return passive->sent_count() == 2; }, std::chrono::milliseconds(2000)));
+	engine.stop_workers();
+}
+
+void test_forwarded_flush_and_sniff_profile()
+{
+	fakes::reset();
+	PacketEngineOptions options = passive_options(5000);
+	options.profiles[0].capture_options.forward = true;
+	options.profiles[0].capture_options.sniff = true;
+	PacketEngine engine(options);
+	engine.start_workers();
+	engine.setup(1);
+	const auto passive = fakes::channel_with_filter("tcp");
+	const auto profile_channel = fakes::channel_with_filter("profile#0");
+	CHECK(passive && profile_channel);
+	if (!passive || !profile_channel)
+		return;
+	profile_channel->match_forwarded_reinjection(true);
+	passive->inject_forwarded(tcp_packet(1, 1, kAck), 1);
+	CHECK(wait_until([&] { return passive->consumed() == 1; }));
+	engine.toggle_passive_latency_pause();
+	CHECK(wait_until([&] { return passive->sent_count() == 1; }));
+	CHECK(profile_channel->sent_count() == 0);
+	const auto sent = passive->sent_packets();
+	CHECK(!sent.empty() && sent[0].meta.timestamp == 1);
+	logging::set_level(logging::level::info);
+	const std::string report = test::capture_stdout([&] { engine.print_state(); });
+	logging::set_level(logging::level::error);
+	CHECK(report.find("packets caught:  " + highlight("1")) != std::string::npos);
+	engine.stop_workers();
+}
+
+void test_forwarded_flush_hands_packets_to_holding_profile()
+{
+	fakes::reset();
+	PacketEngineOptions options = passive_options(5000);
+	options.profiles[0].capture_options.forward = true;
+	PacketEngine engine(options);
+	engine.start_workers();
+	engine.setup(1);
+	const auto passive = fakes::channel_with_filter("tcp");
+	const auto profile_channel = fakes::channel_with_filter("profile#0");
+	CHECK(passive && profile_channel);
+	if (!passive || !profile_channel)
+		return;
+	profile_channel->match_forwarded_reinjection(true);
+	passive->inject_forwarded(tcp_packet(1, 1, kAck), 1);
+	CHECK(wait_until([&] { return passive->consumed() == 1; }));
+	engine.toggle_passive_latency_pause();
+	CHECK(wait_until([&] { return engine.pending_packets() == 1; }));
+	CHECK(passive->sent_count() == 0);
+	engine.teardown(1);
+	CHECK(wait_until([&] { return profile_channel->sent_count() == 1; }));
 	engine.stop_workers();
 }
 
@@ -438,6 +534,9 @@ int main(int argc, char** argv)
 		{"overflow_releases_packets_immediately", test_overflow_releases_packets_immediately},
 		{"stopping_the_workers_flushes_and_closes_the_channel", test_stopping_the_workers_flushes_and_closes_the_channel},
 		{"passive_channel_is_distinct_from_profile_channels", test_passive_channel_is_distinct_from_profile_channels},
+		{"forwarded_packets_reach_profiles_after_passive_latency", test_forwarded_packets_reach_profiles_after_passive_latency},
+		{"forwarded_flush_and_sniff_profile", test_forwarded_flush_and_sniff_profile},
+		{"forwarded_flush_hands_packets_to_holding_profile", test_forwarded_flush_hands_packets_to_holding_profile},
 		{"inbound_only_leaves_outbound_packets_undelayed", test_inbound_only_leaves_outbound_packets_undelayed},
 		{"per_direction_overrides", test_per_direction_overrides},
 		{"jitter_modes_preserve_order", test_jitter_modes_preserve_order},

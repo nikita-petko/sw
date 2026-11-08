@@ -177,46 +177,43 @@ void PacketEngine::passive_latency_recv()
 			continue;
 		}
 
-		std::lock_guard<std::mutex> lock(state_->passive_latency_mutex);
-		if (state_->passive_latency_stopping)
+		const char* immediate = nullptr;
 		{
-			send_passive_packet(*state_->passive_latency_handle, packet_data, received_length, address, "send: stopping");
-			continue;
+			std::lock_guard<std::mutex> lock(state_->passive_latency_mutex);
+			if (state_->passive_latency_stopping)
+				immediate = "send: stopping";
+			else if (state_->passive_latency_paused)
+				immediate = "send: paused";
+			else if (is_probe_traffic(packet_data, received_length))
+				immediate = "send: probe traffic";
+			else if (state_->passive_latency_queue.size() >= passive.max_queued_packets)
+			{
+				LOG_WARN("Passive latency queue is full (%u packets); releasing a packet immediately", passive.max_queued_packets);
+				immediate = "send: queue full";
+			}
+			else
+			{
+				const DelayDirection direction = address.outbound ? DelayDirection::outbound : DelayDirection::inbound;
+				const uint64_t now = platform::tick_ms();
+				const uint64_t release_at = state_->passive_latency_model->release_at(direction, now);
+				if (logging::group_accepts(logging::group::passive_latency_packet, logging::level::debug))
+				{
+					const PacketAddresses addresses = packet_addresses(packet_data, received_length);
+					LOG_DEBUG_GROUP(logging::group::passive_latency_packet,
+									"Passive latency recv: %s packet (delaying for %llums): Length = %u, Src = %s, Dst = %s",
+									address.outbound ? "outbound" : "inbound",
+									static_cast<unsigned long long>(release_at - now),
+									received_length,
+									addresses.source.c_str(),
+									addresses.destination.c_str());
+				}
+				state_->passive_latency_queue.push(
+					make_packet_node(packet_data, received_length, address, 0, release_at, state_->passive_latency_next_receive_order++));
+				state_->passive_latency_changed.notify_one();
+			}
 		}
-		if (state_->passive_latency_paused)
-		{
-			send_passive_packet(*state_->passive_latency_handle, packet_data, received_length, address, "send: paused");
-			continue;
-		}
-		if (is_probe_traffic(packet_data, received_length))
-		{
-			send_passive_packet(*state_->passive_latency_handle, packet_data, received_length, address, "send: probe traffic");
-			continue;
-		}
-		if (state_->passive_latency_queue.size() >= passive.max_queued_packets)
-		{
-			LOG_WARN("Passive latency queue is full (%u packets); releasing a packet immediately", passive.max_queued_packets);
-			send_passive_packet(*state_->passive_latency_handle, packet_data, received_length, address, "send: queue full");
-			continue;
-		}
-
-		const DelayDirection direction	= address.outbound ? DelayDirection::outbound : DelayDirection::inbound;
-		const uint64_t		 now		= platform::tick_ms();
-		const uint64_t		 release_at = state_->passive_latency_model->release_at(direction, now);
-		if (logging::group_accepts(logging::group::passive_latency_packet, logging::level::debug))
-		{
-			const PacketAddresses addresses = packet_addresses(packet_data, received_length);
-			LOG_DEBUG_GROUP(logging::group::passive_latency_packet,
-							"Passive latency recv: %s packet (delaying for %llums): Length = %u, Src = %s, Dst = %s",
-							address.outbound ? "outbound" : "inbound",
-							static_cast<unsigned long long>(release_at - now),
-							received_length,
-							addresses.source.c_str(),
-							addresses.destination.c_str());
-		}
-		state_->passive_latency_queue.push(
-			make_packet_node(packet_data, received_length, address, 0, release_at, state_->passive_latency_next_receive_order++));
-		state_->passive_latency_changed.notify_one();
+		if (immediate)
+			release_passive_packet(packet_data, received_length, address, immediate);
 	}
 }
 
@@ -244,10 +241,39 @@ void PacketEngine::passive_latency_send()
 		}
 		for (PacketNode* node : ready_packets)
 		{
-			send_passive_packet(*state_->passive_latency_handle, node->packet, node->length, *node->address, "send: delayed packet");
+			release_passive_packet(node->packet, node->length, *node->address, "send: delayed packet");
 			destroy_packet_node(node);
 		}
 	}
+}
+
+bool PacketEngine::handoff_passive_packet(const uint8_t* packet, uint32_t length, const backend::PacketMeta& meta)
+{
+	std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
+	for (const std::shared_ptr<Session>& session : state_->active_sessions)
+	{
+		if (!session || !session->handle)
+			continue;
+		bool matches = false;
+		std::string error;
+		if (session->handle->match_reinjected(packet, length, meta, matches, error) != backend::IoStatus::ok)
+		{
+			LOG_ERROR("Passive latency: cannot evaluate profile #%d filter: %s", session->profile, error.c_str());
+			continue;
+		}
+		if (!matches)
+			continue;
+		if (!record_profile_packet(session, packet, length, meta))
+			return false;
+		return !options_.profiles[session->profile - 1].capture_options.sniff.value_or(false);
+	}
+	return false;
+}
+
+void PacketEngine::release_passive_packet(const uint8_t* packet, uint32_t length, const backend::PacketMeta& meta, const char* reason)
+{
+	if (!state_->passive_latency_handle->requires_reinjection_handoff(meta) || !handoff_passive_packet(packet, length, meta))
+		send_passive_packet(*state_->passive_latency_handle, packet, length, meta, reason);
 }
 
 bool PacketEngine::is_probe_traffic([[maybe_unused]] const uint8_t* packet, [[maybe_unused]] uint32_t length) const
@@ -318,24 +344,34 @@ void PacketEngine::flush_passive_latency_queue()
 			state_->passive_latency_queue.pop();
 		}
 	}
-	std::vector<backend::SendItem> items(pending_packets.size());
-	for (size_t index = 0; index < pending_packets.size(); ++index)
+	std::vector<backend::SendItem> items;
+	const auto send_batch = [&] {
+		state_->passive_latency_handle->send_batch(items.data(), items.size());
+		for (const backend::SendItem& item : items)
+			log_passive_send("flush: sent packet", item.packet, item.length, item.status, item.sent, item.error);
+		items.clear();
+	};
+	for (PacketNode* packet : pending_packets)
 	{
-		items[index].packet = pending_packets[index]->packet;
-		items[index].length = pending_packets[index]->length;
-		items[index].meta	= pending_packets[index]->address;
+		if (state_->passive_latency_handle->requires_reinjection_handoff(*packet->address))
+		{
+			if (!items.empty())
+				send_batch();
+			release_passive_packet(packet->packet, packet->length, *packet->address, "flush: sent packet");
+		}
+		else
+		{
+			backend::SendItem item;
+			item.packet = packet->packet;
+			item.length = packet->length;
+			item.meta = packet->address;
+			items.push_back(std::move(item));
+		}
 	}
-	state_->passive_latency_handle->send_batch(items.data(), items.size());
-	for (size_t index = 0; index < pending_packets.size(); ++index)
-	{
-		log_passive_send("flush: sent packet",
-						 items[index].packet,
-						 items[index].length,
-						 items[index].status,
-						 items[index].sent,
-						 items[index].error);
-		destroy_packet_node(pending_packets[index]);
-	}
+	if (!items.empty())
+		send_batch();
+	for (PacketNode* packet : pending_packets)
+		destroy_packet_node(packet);
 }
 
 std::string PacketEngine::describe_passive_latency() const

@@ -108,28 +108,40 @@ void PacketEngine::read_packets(const std::shared_ptr<Session>& session)
 				LOG_ERROR("%s recv: %s", profile_label.c_str(), io_error.c_str());
 			continue;
 		}
-		state_->profile_stats[profile - 1].packets_caught.fetch_add(1);
-#ifdef LAGSW_FEATURE_PCAP_FILES
-		if (session->pcap.file)
-			record_pcap_packet(session->pcap, packet_data, received_length, profile_label);
-#endif
-		const bool sniff = profile_options.capture_options.sniff.value_or(false);
-		if (!sniff)
-		{
-			std::lock_guard<std::mutex> lock(session->packet_mutex);
-			if (session->stopping)
-				break;
-			session->mode->capture(packet_data,
-								   received_length,
-								   address,
-								   session->profile,
-								   platform::tick_ms(),
-								   session->next_receive_order++,
-								   session->delayed_packets);
-			session->packet_changed.notify_one();
-		}
-		log_received_packet(profile_label, packet_data, received_length);
+		if (!record_profile_packet(session, packet_data, received_length, address))
+			break;
 	}
+}
+
+bool PacketEngine::record_profile_packet(const std::shared_ptr<Session>& session,
+										 const uint8_t* packet_data,
+										 uint32_t received_length,
+										 const backend::PacketMeta& address)
+{
+	const int profile = session->profile;
+	const ProfileOptions& profile_options = options_.profiles[profile - 1];
+	const std::string profile_label = "profile #" + std::to_string(profile) + " - " + profile_options.name;
+	std::lock_guard<std::mutex> lock(session->packet_mutex);
+	if (session->stopping)
+		return false;
+	state_->profile_stats[profile - 1].packets_caught.fetch_add(1);
+#ifdef LAGSW_FEATURE_PCAP_FILES
+	if (session->pcap.file)
+		record_pcap_packet(session->pcap, packet_data, received_length, profile_label);
+#endif
+	if (!profile_options.capture_options.sniff.value_or(false))
+	{
+		session->mode->capture(packet_data,
+							   received_length,
+							   address,
+							   session->profile,
+							   platform::tick_ms(),
+							   session->next_receive_order++,
+							   session->delayed_packets);
+		session->packet_changed.notify_one();
+	}
+	log_received_packet(profile_label, packet_data, received_length);
+	return true;
 }
 
 void PacketEngine::write_packets(const std::shared_ptr<Session>& session)
