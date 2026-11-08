@@ -40,7 +40,7 @@ std::string NetMonitor::render_flow_view(int console_columns, int console_rows)
 															  selected_index > list_rows / 2 ? selected_index - list_rows / 2 : size_t{0});
 
 	const bool	 compact	= width < 97;
-	const size_t name_cols	= std::clamp<size_t>(width > (compact ? 70 : 86) ? width - (compact ? 70 : 86) : 0, 10, 28);
+	const size_t name_cols	= std::clamp<size_t>(width > (compact ? 71 : 87) ? width - (compact ? 71 : 87) : 0, compact ? 9 : 10, 28);
 	const size_t proto_cols = compact ? 4 : 6;
 	const size_t port_cols	= compact ? 6 : 8;
 	const size_t state_cols = compact ? 11 : 13;
@@ -50,7 +50,7 @@ std::string NetMonitor::render_flow_view(int console_columns, int console_rows)
 	line(std::string(kBold) + " Flows" + kReset + kDim + "  one row per connection (TCP) or port pair (UDP); Up/Down select" + kReset);
 	line(std::string(kDim) + " " + pad("server", name_cols) + pad("proto", proto_cols) + pad_left("client", port_cols) +
 		 pad_left("server", port_cols) + "  " + pad("state", state_cols) + pad_left("down", bytes_cols) + pad_left("up", bytes_cols) +
-		 pad_left("RTT", rtt_cols) + pad_left("idle", idle_cols) + pad_left("duration", 8) + kReset);
+		 pad_left("RTT", rtt_cols) + pad_left("idle", idle_cols) + " " + pad_left("duration", 8) + kReset);
 	if (flows.empty())
 		line(std::string(kDim) + " no flows seen yet" + kReset);
 	for (size_t i = first; i < std::min(flows.size(), first + list_rows); ++i)
@@ -94,7 +94,7 @@ std::string NetMonitor::render_flow_view(int console_columns, int console_rows)
 			 pad_left(format_size(static_cast<double>(flow.bytes_down)), bytes_cols) +
 			 pad_left(format_size(static_cast<double>(flow.bytes_up)), bytes_cols) +
 			 pad_left(format_ms(flow.last_rtt_ms, flow.rtt_samples > 0), rtt_cols) + pad_left(format_age(idle), idle_cols) +
-			 pad_left(format_age(duration), 8));
+			 " " + pad_left(format_age(duration), 8));
 	}
 	line("");
 

@@ -891,6 +891,15 @@ void test_flow_duration_tracks_open_and_closed_flows()
 	CHECK(later.find(" duration 1m20s") != std::string::npos);
 	CHECK(later.find("     40s\033[K") != std::string::npos);
 
+	udp.last_seen  = monitor.paused_at_ - std::chrono::hours(123 * 24);
+	udp.first_seen = monitor.paused_at_ - std::chrono::hours(1234 * 24);
+	for (const int width : {80, 120})
+	{
+		const std::string spaced = monitor.render_flow_view(width, 0);
+		CHECK(spaced.find("idle duration") != std::string::npos);
+		CHECK(spaced.find("123d00h 1234d00h\033[K") != std::string::npos);
+	}
+
 	monitor.paused_ = false;
 	feed(monitor, to_server(200, 0, kSyn, 0));
 	const auto& reopened = monitor.servers_[kServerAddress].flows[tcp_key];
