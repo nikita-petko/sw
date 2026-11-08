@@ -841,6 +841,64 @@ void test_udp_and_tcp_flows_are_listed()
 	CHECK(!monitor.handle_key('x'));
 }
 
+void test_flow_duration_tracks_open_and_closed_flows()
+{
+	fakes::reset();
+	const PacketEngineOptions options = options_with_server();
+	PacketEngine			  engine(options);
+	NetMonitor				  monitor(engine, options);
+	monitor.toggle();
+	monitor.stop();
+
+	const uint64_t tcp_key = (1000u << 16) | 2000;
+	const uint64_t udp_key = (uint64_t{1} << 32) | (4000u << 16) | 3074;
+	feed(monitor, to_server(100, 0, kSyn, 0));
+	feed(monitor, ipv4_packet(kUdp, udp_datagram(4000, 3074, 20), kClient, kServer));
+	monitor.paused_											   = true;
+	monitor.paused_at_										   = std::chrono::steady_clock::now();
+	monitor.servers_[kServerAddress].flows[tcp_key].first_seen = monitor.paused_at_ - std::chrono::seconds(25);
+	monitor.selection_.address								   = kServerAddress;
+	monitor.selection_.key									   = tcp_key;
+	monitor.has_selection_									   = true;
+	CHECK(monitor.render_flow_view(80, 0).find(" duration 25s") != std::string::npos);
+	monitor.paused_at_ += std::chrono::seconds(5);
+	CHECK(monitor.render_flow_view(80, 0).find(" duration 30s") != std::string::npos);
+	monitor.paused_ = false;
+	feed(monitor, to_server(101, 0, kFin | kAck, 0));
+	CHECK(!monitor.servers_[kServerAddress].flows[tcp_key].closed);
+	feed(monitor, from_server(500, 102, kFin | kAck, 0));
+	auto& tcp = monitor.servers_[kServerAddress].flows[tcp_key];
+	CHECK(tcp.closed);
+	const auto closed_at = tcp.closed_at;
+	feed(monitor, to_server(102, 501, kAck, 0));
+	feed(monitor, from_server(501, 102, kRst, 0));
+	CHECK(tcp.closed_at == closed_at);
+
+	monitor.paused_			= true;
+	monitor.paused_at_		= closed_at + std::chrono::seconds(100);
+	tcp.first_seen			= closed_at - std::chrono::seconds(40);
+	auto& udp				= monitor.servers_[kServerAddress].flows[udp_key];
+	udp.first_seen			= monitor.paused_at_ - std::chrono::seconds(70);
+	const std::string frame = monitor.render_flow_view(80, 0);
+	CHECK(frame.find("duration") != std::string::npos);
+	CHECK(frame.find(" duration 40s") != std::string::npos);
+	CHECK(frame.find("     40s\033[K") != std::string::npos);
+	CHECK(frame.find("   1m10s\033[K") != std::string::npos);
+
+	monitor.paused_at_ += std::chrono::seconds(10);
+	monitor.selection_.key	= udp_key;
+	const std::string later = monitor.render_flow_view(120, 0);
+	CHECK(later.find(" duration 1m20s") != std::string::npos);
+	CHECK(later.find("     40s\033[K") != std::string::npos);
+
+	monitor.paused_ = false;
+	feed(monitor, to_server(200, 0, kSyn, 0));
+	const auto& reopened = monitor.servers_[kServerAddress].flows[tcp_key];
+	CHECK(!reopened.closed && reopened.first_seen > closed_at && reopened.packets_up == 1);
+	feed(monitor, to_server(201, 0, kRst, 0));
+	CHECK(reopened.closed && reopened.closed_at >= reopened.first_seen);
+}
+
 void test_flow_table_is_bounded_and_prefers_closed_flows_for_eviction()
 {
 	fakes::reset();
@@ -1058,6 +1116,7 @@ int main(int argc, char** argv)
 		{"profile_changes_become_events_and_markers", test_profile_changes_become_events_and_markers},
 		{"profile_view_tracks_activations_and_conditions", test_profile_view_tracks_activations_and_conditions},
 		{"udp_and_tcp_flows_are_listed", test_udp_and_tcp_flows_are_listed},
+		{"flow_duration_tracks_open_and_closed_flows", test_flow_duration_tracks_open_and_closed_flows},
 		{"flow_table_is_bounded", test_flow_table_is_bounded_and_prefers_closed_flows_for_eviction},
 		{"rtt_spread_is_recorded_and_drawn", test_rtt_spread_is_recorded_and_drawn},
 		{"gateway_forwarded_traffic_is_requested", test_gateway_forwarded_traffic_is_requested},

@@ -39,10 +39,18 @@ std::string NetMonitor::render_flow_view(int console_columns, int console_rows)
 												   : std::min(flows.size() - list_rows,
 															  selected_index > list_rows / 2 ? selected_index - list_rows / 2 : size_t{0});
 
-	const size_t name_cols = std::clamp<size_t>(width > 77 ? width - 77 : 0, 10, 28);
+	const bool	 compact	= width < 97;
+	const size_t name_cols	= std::clamp<size_t>(width > (compact ? 70 : 86) ? width - (compact ? 70 : 86) : 0, 10, 28);
+	const size_t proto_cols = compact ? 4 : 6;
+	const size_t port_cols	= compact ? 6 : 8;
+	const size_t state_cols = compact ? 11 : 13;
+	const size_t bytes_cols = compact ? 9 : 11;
+	const size_t rtt_cols	= compact ? 7 : 9;
+	const size_t idle_cols	= compact ? 7 : 9;
 	line(std::string(kBold) + " Flows" + kReset + kDim + "  one row per connection (TCP) or port pair (UDP); Up/Down select" + kReset);
-	line(std::string(kDim) + " " + pad("server", name_cols) + pad("proto", 6) + pad_left("client", 8) + pad_left("server", 8) + "  " +
-		 pad("state", 13) + pad_left("down", 11) + pad_left("up", 11) + pad_left("RTT", 9) + pad_left("idle", 9) + kReset);
+	line(std::string(kDim) + " " + pad("server", name_cols) + pad("proto", proto_cols) + pad_left("client", port_cols) +
+		 pad_left("server", port_cols) + "  " + pad("state", state_cols) + pad_left("down", bytes_cols) + pad_left("up", bytes_cols) +
+		 pad_left("RTT", rtt_cols) + pad_left("idle", idle_cols) + pad_left("duration", 8) + kReset);
 	if (flows.empty())
 		line(std::string(kDim) + " no flows seen yet" + kReset);
 	for (size_t i = first; i < std::min(flows.size(), first + list_rows); ++i)
@@ -50,6 +58,7 @@ std::string NetMonitor::render_flow_view(int console_columns, int console_rows)
 		const Flow&	 flow	  = *flows[i].flow;
 		const bool	 selected = i == selected_index;
 		const double idle	  = elapsed_ms(flow.last_seen, now) / 1000.0;
+		const double duration = elapsed_ms(flow.first_seen, flow.closed ? flow.closed_at : now) / 1000.0;
 		std::string	 state;
 		const char*	 color = kDim;
 		if (!flow.tcp)
@@ -80,11 +89,12 @@ std::string NetMonitor::render_flow_view(int console_columns, int console_rows)
 			color = kGreen;
 		}
 		line(std::string(selected ? kBold : "") + (selected ? ">" : " ") + pad(flows[i].stats->label, name_cols) +
-			 pad(flow.tcp ? "tcp" : "udp", 6) + pad_left(std::to_string(flow.client_port), 8) +
-			 pad_left(std::to_string(flow.server_port), 8) + "  " + kReset + color + pad(state, 13) + kReset +
-			 pad_left(format_size(static_cast<double>(flow.bytes_down)), 11) +
-			 pad_left(format_size(static_cast<double>(flow.bytes_up)), 11) +
-			 pad_left(format_ms(flow.last_rtt_ms, flow.rtt_samples > 0), 9) + pad_left(format_age(idle), 9));
+			 pad(flow.tcp ? "tcp" : "udp", proto_cols) + pad_left(std::to_string(flow.client_port), port_cols) +
+			 pad_left(std::to_string(flow.server_port), port_cols) + "  " + kReset + color + pad(state, state_cols) + kReset +
+			 pad_left(format_size(static_cast<double>(flow.bytes_down)), bytes_cols) +
+			 pad_left(format_size(static_cast<double>(flow.bytes_up)), bytes_cols) +
+			 pad_left(format_ms(flow.last_rtt_ms, flow.rtt_samples > 0), rtt_cols) + pad_left(format_age(idle), idle_cols) +
+			 pad_left(format_age(duration), 8));
 	}
 	line("");
 
@@ -107,9 +117,10 @@ std::string NetMonitor::render_flow_view(int console_columns, int console_rows)
 			  50,
 			  rtt_color(flow.last_rtt_ms));
 		const double average = flow.rtt_samples > 0 ? flow.rtt_sum_ms / static_cast<double>(flow.rtt_samples) : 0;
-		line(" age " + format_age(elapsed_ms(flow.first_seen, now) / 1000.0) + "   packets " + std::to_string(flow.packets_down) +
-			 " down / " + std::to_string(flow.packets_up) + " up   RTT last " + format_ms(flow.last_rtt_ms, flow.rtt_samples > 0) +
-			 " avg " + format_ms(average, flow.rtt_samples > 0) + " (" + std::to_string(flow.rtt_samples) + " samples)" +
+		line(" duration " + format_age(elapsed_ms(flow.first_seen, flow.closed ? flow.closed_at : now) / 1000.0) + "   packets " +
+			 std::to_string(flow.packets_down) + " down / " + std::to_string(flow.packets_up) + " up   RTT last " +
+			 format_ms(flow.last_rtt_ms, flow.rtt_samples > 0) + " avg " + format_ms(average, flow.rtt_samples > 0) + " (" +
+			 std::to_string(flow.rtt_samples) + " samples)" +
 			 (flow.tcp ? std::string("   retransmits are counted per server") : std::string("   no RTT for UDP")));
 	}
 	else

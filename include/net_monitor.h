@@ -155,6 +155,7 @@ private:
 		std::chrono::steady_clock::time_point syn_sent;
 		std::chrono::steady_clock::time_point first_seen;
 		std::chrono::steady_clock::time_point last_seen;
+		std::chrono::steady_clock::time_point closed_at;
 		std::shared_ptr<FlowDetail> detail;
 	};
 

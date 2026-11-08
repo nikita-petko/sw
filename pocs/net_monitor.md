@@ -91,7 +91,10 @@ seen only through probes has no silence timestamp or probe-driven alerts.
 - Alerts are evaluated per second from what was measured since the view opened. The stall alert uses the gap between
   two inbound packets, so it is reported when traffic resumes, and an idle server can trip it.
 - The flow view keeps at most 256 flows per server (closed ones are dropped first) and the history of the selected flow
-  only. UDP flows are keyed by the client and server port; they have no RTT or state beyond active/idle.
+  only. Duration starts at the first packet observed by the monitor, not necessarily when the connection actually opened.
+  TCP duration stops at the first observed reset or FIN from both sides; packets seen after closure do not extend it.
+  UDP flows are keyed by the client and server port; they have no RTT or state beyond active/idle, and duration continues
+  from the first observed packet. The displayed duration freezes while paused and catches up on resume.
 - Every view key (`key`, `pause_key`, `reset_key`, `flows_key`, `profiles_key`, `export_key`) must be distinct, must differ
   from `q`, Backspace, Tab, Page Up/Down and the arrow keys, from the passive latency pause key (when that feature is enabled) and from every profile
   activation key and `send_key`; the configuration fails to load otherwise (checked at startup).
@@ -109,7 +112,7 @@ seen only through probes has no silence timestamp or probe-driven alerts.
 - **RTT spread**: the RTT charts show a darker bar up to the lowest RTT of each second, the mean above it and a thin line
   up to the highest (needs a chart taller than one row; a short terminal shows the mean only). The selected server also
   gets an RTT histogram (`<25`, `25-49`, `50-99`, `100-199`, `200-499`, `>=500 ms`).
-- **Flow view** (`f`): one row per TCP connection or UDP port pair with state, bytes, RTT and idle time; `Up`/`Down`
+- **Flow view** (`f`): one row per TCP connection or UDP port pair with state, bytes, RTT, idle time and duration; `Up`/`Down`
   select one and show its bytes/s and RTT history.
 - **Profile view** (`p`): one row per profile with its state, activation count, total active time (and share of the
   measured time), the running, last and longest activation and the engine's packet-mode status. A second table shows the

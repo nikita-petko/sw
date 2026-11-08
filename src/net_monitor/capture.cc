@@ -225,7 +225,8 @@ void NetMonitor::record(const uint8_t* packet, uint32_t length)
 	touch(flow, true, outbound ? source : dest, outbound ? dest : source);
 	const uint32_t seq	   = swap_u32(tcp.SeqNum);
 	const uint32_t payload = payload_length(parsed, length);
-	const uint32_t end_seq = seq + payload + tcp.Syn + tcp.Fin;
+	const uint32_t end_seq	  = seq + payload + tcp.Syn + tcp.Fin;
+	const bool	   was_closed = flow.closed;
 
 	if (tcp.Rst)
 	{
@@ -242,6 +243,8 @@ void NetMonitor::record(const uint8_t* packet, uint32_t length)
 		if (flow.fin_out && flow.fin_in)
 			flow.closed = true;
 	}
+	if (!was_closed && flow.closed)
+		flow.closed_at = now;
 	if (tcp.Psh)
 		++stats.psh_packets;
 	if (payload == 0 && !tcp.Syn && !tcp.Fin && !tcp.Rst && tcp.Ack)

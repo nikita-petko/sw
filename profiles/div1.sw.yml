@@ -51,11 +51,11 @@ features:
   # outbound_delay_ms / inbound_delay_ms to place it on one side. Region-probe traffic is never delayed.
   passive_latency:
     enabled: false
-    mode: uniform
+    mode: fixed
     delay_ms: 100
     direction: both
     pause_key: l
-    jitter_ms: 10
+    jitter_ms: 0
 
   backend_monitor:
     enabled: true
