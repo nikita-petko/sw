@@ -131,6 +131,53 @@ void test_rtt_is_measured_from_data_to_ack()
 	monitor.stop();
 }
 
+#	ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+void test_monitor_and_profile_receive_packets_with_passive_latency()
+{
+	fakes::reset();
+	PacketEngineOptions options = options_with_server();
+	options.features.passive_latency.enabled = true;
+	options.features.passive_latency.delay_ms = 20;
+	PacketEngine engine(options);
+	engine.start_workers();
+	NetMonitor monitor(engine, options);
+	monitor.toggle();
+	engine.setup(1);
+
+	const auto passive = fakes::channel_with_filter("tcp");
+	const auto sniff = fakes::channel_with_filter("profile#0");
+	const auto profile = fakes::channel_with_filter("profile#1");
+	CHECK(passive && sniff && profile);
+	if (!passive || !sniff || !profile)
+		return;
+	CHECK(sniff->options.sniff && !passive->options.sniff && !profile->options.sniff);
+	CHECK(sniff->options.priority > passive->options.priority);
+	CHECK(passive->options.priority > profile->options.priority);
+
+	// Model WinDivert's priority traversal: sniff first, then reinject from the passive channel to the profile.
+	const auto route = [&](const Bytes& packet, int64_t id, bool outbound) {
+		sniff->inject(packet, id, outbound);
+		passive->inject(packet, id, outbound);
+		if (!wait_until([&] { return passive->sent_count() >= static_cast<size_t>(id); }))
+			return false;
+		const auto sent = passive->sent_packets();
+		profile->inject(sent[static_cast<size_t>(id) - 1].data, id, outbound);
+		return wait_until([&] { return profile->consumed() >= static_cast<size_t>(id); });
+	};
+	CHECK(route(to_server(100, 1, kAck | kPsh, 10), 1, true));
+	CHECK(route(from_server(1, 110, kAck, 0), 2, false));
+	CHECK(route(to_server(110, 1, kAck | kPsh, 10), 3, true));
+	CHECK(route(from_server(1, 120, kAck, 0), 4, false));
+	CHECK(wait_until([&] {
+		std::lock_guard<std::mutex> lock(monitor.mutex_);
+		return monitor.servers_[kServerAddress].rtt_samples == 2;
+	}));
+	CHECK(profile->consumed() == 4);
+	monitor.stop();
+	engine.stop_workers();
+}
+#	endif
+
 void test_direction_comes_from_the_server_address_not_the_backend_flag()
 {
 	fakes::reset();
@@ -989,6 +1036,9 @@ int main(int argc, char** argv)
 		{"no_capture_without_servers", test_no_capture_without_servers},
 		{"toggle_opens_and_closes_a_sniff_channel", test_toggle_opens_and_closes_a_sniff_channel},
 		{"rtt_is_measured_from_data_to_ack", test_rtt_is_measured_from_data_to_ack},
+#	ifdef LAGSW_FEATURE_PASSIVE_LATENCY
+		{"monitor_and_profile_receive_packets_with_passive_latency", test_monitor_and_profile_receive_packets_with_passive_latency},
+#	endif
 		{"direction_comes_from_the_server_address_not_the_backend_flag", test_direction_comes_from_the_server_address_not_the_backend_flag},
 		{"retransmissions_are_counted_and_not_sampled", test_retransmissions_are_counted_and_not_sampled},
 		{"pause_ignores_packets_and_reset_clears_them", test_pause_ignores_packets_and_reset_clears_them},

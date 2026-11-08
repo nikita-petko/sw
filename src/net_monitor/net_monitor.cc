@@ -124,6 +124,7 @@ bool NetMonitor::start_capture(std::string& error)
 	backend::OpenOptions open_options;
 	open_options.filter			 = backend::filters::profile(spec);
 	open_options.sniff			 = true;
+	open_options.priority		 = backend::priority::net_monitor;
 	open_options.include_forward = true;
 	channel_					 = backend::open(open_options, error);
 	if (!channel_)

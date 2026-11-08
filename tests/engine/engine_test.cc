@@ -680,6 +680,9 @@ void test_discovery_selects_the_busiest_server()
 	if (!channel)
 		return;
 	CHECK(channel->options.sniff && channel->options.include_forward);
+	CHECK(channel->options.priority == backend::priority::discovery);
+	CHECK(channel->options.priority > backend::priority::probe);
+	CHECK(channel->options.priority < backend::priority::forwarded_address);
 	CHECK(!engine.is_authoritative_server());
 
 	run_discovery_window(channel, {{{34, 0, 0, 1}, 3}, {{34, 0, 0, 2}, 1}});

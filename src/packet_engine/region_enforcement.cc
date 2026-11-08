@@ -17,7 +17,7 @@ void PacketEngine::start_region_enforcement()
 	state_->region_enforcement_stopping = false;
 	backend::OpenOptions open_options;
 	open_options.filter	  = filter;
-	open_options.priority = -100;
+	open_options.priority = backend::priority::region_enforcement;
 	std::string open_error;
 	state_->region_enforcement_handle = backend::open(open_options, open_error);
 	if (!state_->region_enforcement_handle)
@@ -228,6 +228,7 @@ void PacketEngine::start_probe_worker()
 	backend::OpenOptions open_options;
 	open_options.filter			 = filter;
 	open_options.sniff			 = true;
+	open_options.priority		 = backend::priority::probe;
 	open_options.include_forward = true;
 	std::string open_error;
 	state_->probe_handle = backend::open(open_options, open_error);

@@ -70,7 +70,7 @@ void PacketEngine::start_forwarded_address_worker()
 	backend::OpenOptions open_options;
 	open_options.filter	  = filter;
 	open_options.sniff	  = true;
-	open_options.priority = 1000;
+	open_options.priority = backend::priority::forwarded_address;
 	std::string open_error;
 	state_->fad_handle = backend::open(open_options, open_error);
 	if (!state_->fad_handle)

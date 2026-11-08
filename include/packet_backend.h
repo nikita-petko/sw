@@ -54,6 +54,17 @@ enum class IoStatus
 	error,  ///< The operation failed; see the error message.
 };
 
+/// Distinct capture stages: WinDivert delivers a packet only once per priority.
+namespace priority {
+	constexpr int16_t region_enforcement = -100;
+	constexpr int16_t profile = 0;
+	constexpr int16_t passive_latency = 100;
+	constexpr int16_t net_monitor = 110;
+	constexpr int16_t probe = 120;
+	constexpr int16_t discovery = 130;
+	constexpr int16_t forwarded_address = 1000;
+}
+
 /// Options for opening a capture channel.
 struct OpenOptions
 {
@@ -67,7 +78,7 @@ struct OpenOptions
 	/// Observe packets without removing them from the network path.
 	bool		sniff	 = false;
 	/// Relative priority; higher values are processed first by the backend.
-	int16_t		priority = 0;
+	int16_t		priority = priority::profile;
 };
 
 /// One packet of PacketChannel::send_batch(). `status`, `sent` and `error` are filled in by the call.

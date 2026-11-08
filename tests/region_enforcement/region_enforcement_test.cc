@@ -197,6 +197,8 @@ void test_starting_the_workers_opens_the_probe_channel()
 	CHECK(fakes::channels().size() == 1);
 	const auto probe = fakes::channel_with_filter("syn:55002");
 	CHECK(probe && probe->options.sniff && probe->options.include_forward);
+	CHECK(probe && probe->options.priority == backend::priority::probe);
+	CHECK(probe && probe->options.priority > backend::priority::net_monitor);
 }
 
 void test_probe_detection_logs_each_server_once_per_window()

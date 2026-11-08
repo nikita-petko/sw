@@ -6,12 +6,15 @@ Windows numbers are measured (loopback, one machine). Linux numbers for NFQUEUE 
 from the existing bare-metal results in [`pocs/linux_kernel_module_backend.md`](../pocs/linux_kernel_module_backend.md)
 (Phase 3 and 4 results); they were **not** produced with the same parameters or the same metrics as the Windows run, so
 the two sides are not directly comparable yet. Cells marked TODO are to be filled in on Linux by running the matching
-benchmark. Nothing here was measured on the real gameplay path (ethernet to host, routed through ProtonVPN).
+benchmark. Subsequent in-game tests suggest that RTT to the authoritative server, rather than the backend, is the main
+factor in the damage outcome. The gameplay observations below are separate from the synthetic backend measurements;
+the endpoint and meaning of the reported RTT still need verification.
 
 ## Question
 
-Is the perceived difference between the Windows and Linux hosts a packet-backend (driver) issue or an interface issue
-(the path through the host and what the engine does with the packets)?
+Is the perceived difference between the Windows and Linux hosts a packet-backend (driver) issue or a network-path issue?
+Current in-game observations favor the latter, specifically RTT to the authoritative game server, but do not yet
+establish causation or rule out every backend effect.
 
 ## Observations that motivated this
 
@@ -20,7 +23,58 @@ Is the perceived difference between the Windows and Linux hosts a packet-backend
 - Linux: shotgun damage lands more often than sniper damage. A slight delay on re-sync is sometimes seen. It is rare,
   and it sometimes also occurs on Windows.
 
-These are anecdotal and have not been measured with the same setup on both platforms.
+These are anecdotal and have not been measured with the same setup on both platforms. See the later in-game tests below.
+
+## In-game tests: RTT and damage outcome
+
+- On Windows, ProtonVPN's fastest-server selection connected to a VPN server in the same city as the host. The reported
+  RTT averaged about 25 ms, including in matches described as using US servers. Weapon swaps were generally successful,
+  with sniper damage landing more often.
+- Switching to a US VPN server raised the reported RTT to about 95-120 ms, and shotgun damage occurred much more often.
+  The VPN exit and potentially the game endpoint or route changed as well, so RTT is strongly correlated with the
+  outcome in these observations, but is not yet isolated as the only cause.
+- Additional passive latency did not help and made the outcome worse in these tests. The practical target is **under
+  50 ms RTT to the authoritative server**, based on the observed behavior; this is a working target, not a proven
+  universal cutoff or guarantee of sniper damage.
+- Windows forwarding from ethernet to WLAN for US servers has not yet been tested. It may show high RTT and the same
+  symptoms as the Linux raw-egress path, but that is a prediction, not a result.
+- Linux can use ProtonVPN, but it has not been used instead of the raw egress interface for these comparisons because TCP
+  connections have seemingly been dropped for an unknown reason. The cause, affected traffic and applicability to the
+  game's transport remain unverified.
+
+The working explanation is that a longer or less stable round trip changes the timing of events as seen by the
+authoritative server, making the desired weapon-swap outcome less reliable. Exactly how the game validates or orders
+those events is unknown; RTT alone does not establish a particular server-side mechanism. A proxy or VPN is detrimental
+when it increases the relevant end-to-end RTT or instability, not simply because it is a proxy or VPN. Conversely,
+the nearby VPN exit was associated with the better result here.
+
+### Why a nearby VPN or proxy can improve a distant game route
+
+The direct path is chosen by the networks involved, not necessarily by physical distance or minimum latency. Routing
+policies, transit providers, peering and congestion can send traffic on a circuitous or busy path. A nearby VPN exit
+or a game-compatible proxy adds a waypoint but can hand traffic to a different provider or peering arrangement. If the
+improvement in the rest of the route outweighs the tunnel or proxy overhead, the **total RTT to the game endpoint** can
+be lower, even when that endpoint is far away. The return path can differ too, and either direction can affect RTT.
+
+For example, if a direct game RTT were 120 ms and a nearby VPN route took 5 ms to reach the VPN exit plus 80 ms for the
+exit-to-game round trip, the overall RTT could be roughly 85 ms plus processing overhead. These are illustrative values,
+not measurements from this test; the first figure must be the client-to-exit *round trip*, not a one-way delay.
+A VPN can also make things worse through extra distance, encryption and encapsulation, a busy exit, or a poor onward or
+return route. A US VPN exit is not necessarily a good choice just because the game server is in the US: it may be far
+from the client or the game server, or use a worse path. Likewise, a nearby exit does not guarantee a good onward route.
+An ordinary TCP/HTTP proxy does not automatically carry game UDP traffic; this comparison applies only if the proxy
+actually forwards the game traffic.
+
+Neither a VPN nor a proxy removes the distance to the authoritative server or bypasses propagation limits. The reported
+25 ms for a match described as being on US servers should not automatically be treated as a measured round trip to a
+physically distant US authoritative server: the displayed value might instead refer to a relay, another endpoint, or a
+different metric, or the actual server location may differ from the selected region. Verify the destination IP and its
+role, the RTT source and how the game calculates it before drawing that conclusion. IP geolocation and a region label
+alone are not proof of the server's physical location.
+
+For background on [network latency and distance](https://www.cloudflare.com/learning/performance/glossary/what-is-latency/)
+and [Internet routing between networks](https://www.cloudflare.com/learning/security/glossary/what-is-bgp/), see
+Cloudflare's explanations.
 
 ## Backends in scope
 
@@ -199,29 +253,53 @@ at 100 kpps) while NFQUEUE lost 13-41% and queued for 180-300 ms.
 Caution: the baselines differ (9-10 vs. 4 us) because the paths differ, so compare the **added** latency, not the
 absolute value, and treat even that as indicative until the Linux side is rerun with the same payload, rate and metrics.
 
-## Findings so far
+## Backend benchmark findings in light of the in-game tests
 
 1. At a game-scale rate the Windows driver and the hold logic add only microseconds (median about +17 us, p99 about
    +60 us, no loss). Holding for 2 ms adds about +24 us on the median and about +90 us at p99 on top of the 2 ms.
    Nothing in these results points at WinDivert or the hold logic as a source of millisecond-scale delay.
 2. The Linux backends also add only microseconds in the existing results (NFQUEUE about +7 us, swdivert about +6 us at
    the median). On that evidence none of the Linux backends adds a delay of the size of a weapon-swap window either.
-   If these hold up, the Linux symptoms (shotgun hit over sniper hit, occasional re-sync delay) are more likely caused
-   by something other than the capture and verdict path: the host's network path or interface, ordering or reordering,
-   or engine behaviour.
+   The later gameplay observations point more strongly toward the network path and authoritative-server RTT than the
+   capture and verdict path, although these synthetic measurements alone cannot prove the cause.
 3. Diverting on Windows introduces a small amount of reordering at 20 kpps (5-10 per 100,000 packets) that the baseline
-   does not have. A 2 ms hold nearly removes it (0-1). Reordering is the most plausible mechanism for a damage-type
-   outcome changing, and **it has not been measured on Linux at all**, because the Linux harness does not report it for
-   the hold modes in the quoted tables.
+   does not have. A 2 ms hold nearly removes it (0-1). Reordering remains a possible contributing factor, but the
+   in-game RTT observations make it a lower-priority hypothesis than previously thought. **It has not been measured on
+   Linux in the quoted hold-mode results**, because the Linux harness did not report it there.
 4. Throughput ceilings differ: a single WinDivert reader saturates around 40-80k pps on loopback, and NFQUEUE and
    swdivert were not saturated at 50 kpps on bare metal. The ceilings are not game-relevant but explain the high-rate
    rows.
-5. None of this is evidence about the real path: neither side was measured through the host's forward layer with a
-   client behind it, or through the ProtonVPN interface.
+5. These benchmark results are not measurements of the real gameplay path: neither side was benchmarked through the
+   host's forward layer with a client behind it, or through the ProtonVPN interface. The later in-game observations
+   provide separate, uncontrolled evidence about that path.
 
-These findings are hypotheses to test, not conclusions.
+The benchmark figures are measurements under the stated synthetic conditions. The explanation of the in-game outcome
+remains a hypothesis to test with controlled trials.
 
-## Open items (to complete on Linux)
+## Open items
+
+### Gameplay and network path
+
+- TODO: identify the authoritative game endpoint and verify what the reported RTT measures. Record the match region,
+  endpoint or relay address where observable, measurement method, platform, interface and VPN exit. Do not equate RTT
+  to the VPN exit, a DNS resolver or a relay with RTT to the authoritative server.
+- TODO: compare Windows ethernet-to-WLAN raw egress, Windows through the nearby ProtonVPN exit, Windows through a US
+  exit, and Linux raw egress. Add Linux through ProtonVPN once the TCP drops are investigated. Use the same game
+  endpoint where possible, client, settings and workload; if matchmaking changes the endpoint or region, record that
+  as a confounder rather than attributing the entire difference to the route.
+- TODO: repeat and alternate configurations, including times of day. Record RTT distribution (median and p95/p99),
+  jitter, loss and sample count, plus the number of comparable attempts and shotgun versus sniper outcomes for each
+  run. Keep passive delay and other packet-engine settings fixed when comparing routes; test added delay separately.
+  Treat the under-50-ms target as provisional until the outcome has been tested across RTT ranges.
+- TODO: measure the client-to-game path, including forwarding through the host, using the game's own RTT if its endpoint
+  is known or an appropriate permitted game-protocol probe or packet trace. DNS RTT from `egress.py` is useful for
+  comparing interfaces, but is not a substitute for game-server RTT. ICMP may be blocked or treated differently from
+  game traffic; traceroute can help identify path changes but does not by itself prove end-to-end game latency or
+  physical location.
+- TODO: investigate the Linux ProtonVPN TCP drops separately, recording VPN protocol, affected destinations, timing and
+  logs, and compare with raw egress. Avoid assuming that the TCP issue explains the gameplay symptoms.
+
+### Backend benchmarks
 
 - TODO: run the Linux harness with the same parameters as the Windows run and add a real Linux column to the side by
   side table, using `--sizes 64` and also `1200`:
@@ -231,7 +309,7 @@ These findings are hypotheses to test, not conclusions.
   sudo python3 pocs/linux_kernel_module_backend/bench.py --modes swdiv --pps 20000 --sizes 64 --seconds 5 --runs 3
   ```
 - TODO: record reordering and loss for the Linux hold modes (the `swbench` sink already counts reordering; make
-  `bench.py` print it) so finding 3 can be tested.
+  `bench.py` print it) so the backend finding can be tested.
 - TODO: add a `cap_`/`over_`/`send_` style split to the Linux hold reader, to separate the kernel path from the
   user-space scheduling the way `wdbench hold` does.
 - TODO: rerun the Windows side with `over_*`, `send_*` and CPU visible (the table is now wide enough), three repetitions
@@ -242,14 +320,15 @@ These findings are hypotheses to test, not conclusions.
 - TODO: repeat with `-Dst <local interface IP>` on Windows and a real NIC on Linux, to take the NIC path instead of
   loopback or `veth`.
 - TODO: isolate the sender on its own core, or send from a second machine, to remove the shared-CPU inflation.
-- TODO: tie any measured reordering or delay back to the in-game symptoms (weapon swap, shotgun vs. sniper damage, re-sync
-  delay) with a timestamped in-game trial; the benchmark alone does not show that.
+- TODO: tie any measured backend reordering or delay back to the in-game symptoms with a timestamped in-game trial;
+  the benchmark alone does not show that.
 
 ## Limitations
 
 - Windows: loopback only, single run per cell, one machine for all roles, 100k rows saturated.
 - Linux numbers are quoted from another document with different payload, rates, duration and metrics.
 - The tc/netem and eBPF/netlink backends are proposals or only partly built and have no latency data.
-- The in-game symptoms are anecdotal.
+- The in-game symptoms and reported RTTs are anecdotal; the RTT endpoint, match endpoints, trial counts and server-side
+  mechanism have not been independently established.
 - The `pps` column glitch and table truncation in the first printed Windows output were display bugs in the old `bench.ps1`
   (fixed afterwards, since replaced by `bench.py`); the values themselves were unaffected.

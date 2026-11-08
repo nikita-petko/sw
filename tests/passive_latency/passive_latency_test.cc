@@ -57,7 +57,7 @@ void test_starting_the_workers_opens_the_passive_channel()
 	CHECK(engine.is_passive_latency_enabled());
 	const auto channel = fakes::channel_with_filter("tcp");
 	CHECK(channel != nullptr);
-	CHECK(channel->options.priority == 100);
+	CHECK(channel->options.priority == backend::priority::passive_latency);
 	engine.stop_workers();
 }
 

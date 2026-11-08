@@ -26,6 +26,8 @@ the log file are further keys of the same block, see the README.
   known server address in both directions, so it never delays or alters traffic and is closed again when the view
   closes. It asks for forwarded traffic as well (`include_forward`), so a gateway sees routed packets: WinDivert opens a
   second handle on the forward layer, nfqueue hooks the forward chain.
+- The monitor observes traffic before passive latency and profiles. Its TCP RTT is measured between packets at this
+  capture point, not at either endpoint, so it need not include both directions of added delay.
 - Servers that server discovery adds while the view is open are picked up by the render thread, which reopens the
   capture with a filter that includes them.
 - The layout fills the terminal: charts are as wide as the window and grow taller with spare rows (history of up to

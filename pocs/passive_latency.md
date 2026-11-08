@@ -159,17 +159,22 @@ Model it on [region_enforcement.cc](../src/packet_engine/region_enforcement.cc):
 
 ### 8.2 Stage ordering
 
-The passive channel opens with a priority higher than every other channel so it sees a packet first and releases it into the later stages:
+Sniffing workers observe packets before passive latency. The passive channel then releases them into the profile and enforcement stages:
 
 | Stage | `priority` |
 | --- | --- |
+| Forwarded address discovery | `1000` |
+| Server discovery | `130` |
+| Probe detection | `120` |
+| Net monitor | `110` |
 | Passive latency | `100` |
-| Region enforcement | `-100` (existing) |
 | Profiles | `0` (existing) |
+| Region enforcement | `-100` (existing) |
 
 Consequences, which are intended:
 
 - A packet delayed by a profile has already been delayed by the baseline: total delay = passive + profile.
+- Sniffers use separate priorities so WinDivert delivers matching packets to each worker and to the subsequent profile.
 - Profile timing (`now` at capture, `release_at`, `send_all_after_delay` batch timers, `from_timestamp`) is measured from the post-passive arrival, so existing profile semantics are unchanged; only the arrival time shifts uniformly.
 - On nfqueue each priority is its own nft chain with its own queue number, and a verdict (`NF_ACCEPT`) hands the packet to the next chain, so there is no re-capture loop (see §8.6 of [linux_nfqueue_backend.md](linux_nfqueue_backend.md)): `chain priority = -150 - options.priority`, so `priority = 100` maps to nft chain priority `-250`, ahead of conntrack (`-200`) and every other stage. On WinDivert, `priority` is passed straight through and a higher value is handled first, so `100` is seen before region enforcement's `-100` and the profiles' `0`, again without a loop.
 

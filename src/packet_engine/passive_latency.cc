@@ -120,7 +120,7 @@ void PacketEngine::start_passive_latency()
 	}
 	backend::OpenOptions open_options;
 	open_options.filter			 = passive.filter.value_or(options_.global_filter);
-	open_options.priority		 = 100;
+	open_options.priority		 = backend::priority::passive_latency;
 	open_options.include_forward = true;
 	std::string open_error;
 	state_->passive_latency_handle = backend::open(open_options, open_error);
