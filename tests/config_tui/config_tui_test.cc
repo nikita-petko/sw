@@ -83,6 +83,10 @@ void test_recent_files_round_trip()
 	const std::vector<RecentEntry> loaded = load_recent(file);
 	CHECK(loaded.size() == 2 && loaded[0].path == "/a/one.yml" && loaded[1].path == "/b/odd \"name\": #1.yml" &&
 		  loaded[1].last_opened == "t2");
+	add_recent(entries, "/c/three.yml", "t4");
+	CHECK(save_recent(file, entries));
+	CHECK(load_recent(file).size() == 3 && load_recent(file)[0].path == "/c/three.yml");
+	CHECK(!fs::exists(file + ".tmp"));
 	for (int i = 0; i < 30; ++i)
 		add_recent(entries, "/f/" + std::to_string(i), "t");
 	CHECK(entries.size() == kMaxRecent);
@@ -326,6 +330,60 @@ void test_form_editing_keeps_comments_and_makes_a_backup()
 	CHECK(!app.dirty() && read(path).find("delay_ms: 250") != std::string::npos &&
 		  read(path).find("# trailing comment") != std::string::npos);
 	CHECK(fs::exists(path + ".bak") && read(path + ".bak").find("delay_ms: 100") != std::string::npos);
+	app.handle_key(key::ctrl('T'));
+	app.handle_key(key::end);
+	type(app, " edited");
+	app.handle_key(key::ctrl('S'));
+	CHECK(!app.dirty() && read(path).find(" edited") != std::string::npos && read(path).find("delay_ms: 250") != std::string::npos);
+	CHECK(read(path + ".bak").find("delay_ms: 100") != std::string::npos);
+}
+
+void test_run_saves_existing_file()
+{
+	TempDirectory	  directory;
+	const std::string path = directory.file("p.yml");
+	write(path, new_profile_template());
+	App app(services_in(directory), path);
+	app.handle_key(key::ctrl('T'));
+	app.handle_key(key::end);
+	type(app, " edited");
+	app.handle_key(key::ctrl('R'));
+	CHECK(app.outcome() == Outcome::run && !app.dirty() && read(path).find(" edited") != std::string::npos);
+	CHECK(fs::exists(path + ".bak"));
+}
+
+void test_save_failures_preserve_original()
+{
+	TempDirectory	  directory;
+	const std::string path = directory.file("p.yml");
+	const std::string original = new_profile_template();
+	write(path, original);
+	App app(services_in(directory), path);
+	app.handle_key(key::ctrl('T'));
+	app.handle_key(key::end);
+	type(app, " changed");
+	CHECK(app.dirty());
+
+	fs::create_directory(path + ".bak");
+	app.handle_key(key::ctrl('S'));
+	CHECK(app.dirty() && read(path) == original && app.message().find("Cannot back up ") == 0);
+	CHECK(!fs::exists(path + ".lagsw-tmp"));
+	fs::remove(path + ".bak");
+
+	app.handle_key(key::ctrl('S'));
+	CHECK(!app.dirty() && read(path + ".bak") == original);
+	app.handle_key(key::end);
+	type(app, " again");
+	const std::string saved = read(path);
+	fs::remove(path);
+	fs::create_directory(path);
+	app.handle_key(key::ctrl('S'));
+	CHECK(app.dirty() && app.message().find("Cannot replace ") == 0 && fs::is_directory(path));
+	CHECK(!fs::exists(path + ".lagsw-tmp") && read(path + ".bak") == original);
+	fs::remove(path);
+	write(path, saved);
+	app.handle_key(key::ctrl('S'));
+	CHECK(!app.dirty() && read(path).find(" again") != std::string::npos);
 }
 
 void test_invalid_save_needs_confirmation()
@@ -499,6 +557,8 @@ int main(int argc, char** argv)
 		{"loader_keys_and_outcomes", test_loader_keys_and_outcomes},
 		{"open_path_and_new_profile", test_open_path_and_new_profile},
 		{"form_editing_keeps_comments_and_makes_a_backup", test_form_editing_keeps_comments_and_makes_a_backup},
+		{"run_saves_existing_file", test_run_saves_existing_file},
+		{"save_failures_preserve_original", test_save_failures_preserve_original},
 		{"invalid_save_needs_confirmation", test_invalid_save_needs_confirmation},
 		{"discarding_changes_is_confirmed", test_discarding_changes_is_confirmed},
 		{"raw_editing", test_raw_editing},

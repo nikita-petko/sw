@@ -260,13 +260,19 @@ bool App::save(bool force)
 	if (!backed_up_ && exists(file_path_))
 	{
 		fs::copy_file(file_path_, file_path_ + ".bak", fs::copy_options::overwrite_existing, error);
+		if (error)
+		{
+			const std::string reason = error.message();
+			fs::remove(temporary, error);
+			message_		  = "Cannot back up " + file_path_ + ": " + reason;
+			message_is_error_ = true;
+			return false;
+		}
 		backed_up_ = true;
 	}
-	fs::rename(temporary, file_path_, error);
-	if (error)
+	if (!platform::replace_file(temporary, file_path_))
 	{
-		fs::remove(temporary, error);
-		message_		  = "Cannot replace " + file_path_ + ": " + error.message();
+		message_		  = "Cannot replace " + file_path_;
 		message_is_error_ = true;
 		return false;
 	}

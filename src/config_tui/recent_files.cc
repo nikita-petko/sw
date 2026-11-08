@@ -9,6 +9,8 @@
 #	include <fstream>
 #	include <system_error>
 
+#	include "platform.h"
+
 namespace config_tui {
 namespace {
 	namespace fs = std::filesystem;
@@ -129,13 +131,7 @@ bool save_recent(const std::string& file, const std::vector<RecentEntry>& entrie
 			return false;
 		}
 	}
-	fs::rename(temporary, file, error);
-	if (error)
-	{
-		fs::remove(temporary, error);
-		return false;
-	}
-	return true;
+	return platform::replace_file(temporary, file);
 }
 
 void add_recent(std::vector<RecentEntry>& entries, const std::string& path, const std::string& timestamp)

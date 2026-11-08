@@ -5,7 +5,13 @@ if has_config("config_tui") then
         set_kind("binary")
         set_default(false)
         set_rundir(os.projectdir())
-        add_files("config_tui_test.cc", "../support/platform_stub.cc")
+        add_files("config_tui_test.cc")
+        if is_os("windows") then
+            add_files("../../src/platform/windows/system.cc")
+            add_links("winmm", "ole32", "iphlpapi")
+        else
+            add_files("../../src/platform/posix/system.cc")
+        end
         add_files("../../src/log/*.cc", "../../src/options/util.cc", "../../src/options/profiles.cc", "../../src/options/validate.cc")
         add_files("../../src/config_tui/recent_files.cc", "../../src/config_tui/outline.cc", "../../src/config_tui/app.cc")
         add_includedirs("../../include", "../../src", "..")
