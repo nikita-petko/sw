@@ -289,6 +289,7 @@ void test_silent_server_row()
 	auto& stats = monitor.servers_[kServerAddress];
 	stats.up.packets = 10;
 	stats.down.packets = 20;
+	stats.has_silence = true;
 	stats.pps_up.push(12);
 	stats.pps_down.push(34);
 	stats.rtt_samples = 2;
@@ -329,9 +330,9 @@ void test_silent_server_row()
 	options.features.net_monitor.silent_timeout_ms = 0;
 	CHECK(row().find(std::string(kRed) + "!Test") == 0);
 	options.features.net_monitor.silent_timeout_ms = 30000;
-	stats.down.packets = 0;
+	stats.has_silence = false;
 	CHECK(row().find(std::string(kRed) + "!Test") == 0);
-	stats.down.packets = 20;
+	stats.has_silence = true;
 	stats.rtt_samples = 0;
 	stats.score.values.clear();
 	const std::string no_samples = std::string(kDim) + "!" + pad(stats.label, 24) + std::string(18, ' ') +
@@ -351,6 +352,90 @@ void test_silent_server_row()
 	monitor.record(inbound.data(), static_cast<uint32_t>(inbound.size()));
 	CHECK(row().find(std::string(kRed) + "!Test") == 0);
 }
+
+#if defined(LAGSW_FEATURE_SERVER_DISCOVERY) && defined(LAGSW_FEATURE_REGION_ENFORCEMENT)
+void test_probes_do_not_update_silence_or_alerts()
+{
+	using namespace net_monitor_detail;
+	fakes::reset();
+	PacketEngineOptions options = options_with_server();
+	options.features.server_discovery.port = 2000;
+	options.features.region_enforcement.probe_port = 3000;
+	options.features.net_monitor.alert_rtt_ms = 100;
+	options.features.net_monitor.alert_stall_ms = 500;
+	PacketEngine engine(options);
+	NetMonitor monitor(engine, options);
+	monitor.toggle();
+	monitor.stop();
+	auto& stats = monitor.servers_[kServerAddress];
+	const auto feed_packet = [&](const Bytes& packet) { monitor.record(packet.data(), static_cast<uint32_t>(packet.size())); };
+	const auto tcp_out = [&](uint16_t port, uint32_t seq) {
+		return ipv4_packet(kTcp, tcp_segment(1000, port, seq, 1, kAck | kPsh, 5, 10), kClient, kServer);
+	};
+	const auto tcp_in = [&](uint16_t port, uint32_t ack) {
+		return ipv4_packet(kTcp, tcp_segment(port, 1000, 1, ack, kAck), kServer, kClient);
+	};
+	const auto udp_in = [&](uint16_t port) {
+		return ipv4_packet(kUdp, udp_datagram(port, 1000, 10), kServer, kClient);
+	};
+
+	// Probe traffic has RTT and retransmits of its own, but cannot create server alerts or a silence timestamp.
+	feed_packet(tcp_out(3000, 100));
+	auto& probe_flow = stats.flows[(uint64_t{1000} << 16) | 3000];
+	probe_flow.pending.front().sent -= std::chrono::seconds(1);
+	feed_packet(tcp_in(3000, 110));
+	for (int i = 0; i < 21; ++i)
+		feed_packet(tcp_out(3000, 200));
+	feed_packet(udp_in(3000));
+	feed_packet(udp_in(4000));
+	monitor.tick();
+	CHECK(stats.down.packets == 3 && stats.up.packets == 22);
+	CHECK(monitor.ports_.at((1u << 16) | 3000).rtt_samples == 1);
+	CHECK(probe_flow.rtt_samples == 1);
+	CHECK(!stats.has_silence && stats.rtt_samples == 0 && stats.data_up == 0 && stats.retrans_up == 0);
+	for (int kind = 0; kind < NetMonitor::alert_kinds; ++kind)
+		CHECK(!stats.alert_active[kind] && stats.alert_count[kind] == 0);
+
+	// The main port drives silence and alerts, even while probes continue.
+	feed_packet(udp_in(2000));
+	CHECK(stats.has_silence);
+	stats.last_in -= std::chrono::seconds(31);
+	const auto last_main = stats.last_in;
+	feed_packet(udp_in(3000));
+	feed_packet(udp_in(4000));
+	CHECK(stats.last_in == last_main);
+	const std::string frame = monitor.render_frame(120, 0);
+	CHECK(frame.find(std::string(kDim) + " Test") != std::string::npos);
+	feed_packet(udp_in(2000));
+	CHECK(stats.last_in > last_main && stats.tick_max_gap_ms >= 31000);
+	feed_packet(tcp_out(2000, 100));
+	stats.flows[(uint64_t{1000} << 16) | 2000].pending.front().sent -= std::chrono::seconds(1);
+	feed_packet(tcp_in(2000, 110));
+	for (int i = 0; i < 21; ++i)
+		feed_packet(tcp_out(2000, 200));
+	monitor.tick();
+	CHECK(stats.alert_active[NetMonitor::alert_stall]);
+	CHECK(stats.alert_active[NetMonitor::alert_rtt]);
+	CHECK(stats.alert_active[NetMonitor::alert_retransmit]);
+	const double main_rtt = stats.last_rtt_ms;
+	const double main_jitter = stats.jitter_ms;
+	const uint64_t main_samples = stats.rtt_samples;
+	const uint64_t main_retransmits = stats.retrans_up;
+	feed_packet(tcp_out(3000, 300));
+	probe_flow.pending.front().sent -= std::chrono::seconds(3);
+	feed_packet(tcp_in(3000, 310));
+	CHECK(stats.last_rtt_ms == main_rtt && stats.jitter_ms == main_jitter && stats.rtt_samples == main_samples);
+	CHECK(stats.retrans_up == main_retransmits);
+
+	// Without a configured main port, only the configured probe port is excluded.
+	monitor.reset_locked();
+	options.features.server_discovery.port = 0;
+	feed_packet(udp_in(3000));
+	CHECK(!stats.has_silence);
+	feed_packet(udp_in(4000));
+	CHECK(stats.has_silence);
+}
+#endif
 
 void test_ports_sizes_and_handshakes()
 {
@@ -910,6 +995,9 @@ int main(int argc, char** argv)
 		{"view_keys_follow_the_configuration", test_view_keys_follow_the_configuration},
 		{"charts_and_frame_render", test_charts_and_frame_render},
 		{"silent_server_row", test_silent_server_row},
+#	if defined(LAGSW_FEATURE_SERVER_DISCOVERY) && defined(LAGSW_FEATURE_REGION_ENFORCEMENT)
+		{"probes_do_not_update_silence_or_alerts", test_probes_do_not_update_silence_or_alerts},
+#	endif
 		{"ports_sizes_and_handshakes", test_ports_sizes_and_handshakes},
 		{"tcp_health_flows_and_path", test_tcp_health_flows_and_path},
 		{"capture_health_and_warnings", test_capture_health_and_warnings},

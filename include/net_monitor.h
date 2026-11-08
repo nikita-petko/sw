@@ -257,6 +257,7 @@ private:
 		std::chrono::steady_clock::time_point last_in;
 		std::chrono::steady_clock::time_point last_out;
 		bool		has_in	= false;
+		bool		has_silence = false;
 		bool		has_out = false;
 		Series		pps_up, pps_down, bps_up, bps_down, rtt, rtt_min, rtt_max, retrans, data_pkts, flows_new, score;
 	};

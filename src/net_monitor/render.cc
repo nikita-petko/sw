@@ -291,7 +291,7 @@ std::string NetMonitor::render_frame(int console_columns, int console_rows)
 		}
 		line(" RTT jitter " + format_ms(focus->jitter_ms, has_rtt) + "   arrival jitter " +
 			 format_ms(focus->interarrival_jitter_ms, focus->has_in) + "   silence " +
-			 (focus->has_in ? format_ms(elapsed_ms(focus->last_in, now)) : std::string("-")) + "   longest gap " +
+			 (focus->has_silence ? format_ms(elapsed_ms(focus->last_in, now)) : std::string("-")) + "   longest gap " +
 			 format_ms(focus->max_gap_ms, focus->has_in));
 		char loss[192];
 		std::snprintf(loss,
@@ -501,7 +501,7 @@ std::string NetMonitor::render_frame(int console_columns, int console_rows)
 		const double	   average = has_rtt ? stats.rtt_sum_ms / static_cast<double>(stats.rtt_samples) : 0;
 		const bool		   current = &stats == focus;
 		const double	   score   = score_of(stats);
-		const bool		   has_silence = stats.down.packets > 0;
+		const bool		   has_silence = stats.has_silence;
 		const double	   silence = has_silence ? elapsed_ms(stats.last_in, now) : 0;
 		const uint32_t	   timeout = options_.features.net_monitor.silent_timeout_ms;
 		const bool		   silent = has_silence && timeout > 0 && silence >= timeout;

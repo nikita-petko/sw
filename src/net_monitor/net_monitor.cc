@@ -204,7 +204,7 @@ bool NetMonitor::handle_key(int key)
 			std::lock_guard<std::mutex> lock(mutex_);
 			const auto resumed_at = Clock::now();
 			for (auto& entry : servers_)
-				if (entry.second.down.packets > 0)
+				if (entry.second.has_silence)
 					entry.second.last_in += resumed_at - paused_at_;
 			clear_transient_locked();
 			last_tick_		 = resumed_at;

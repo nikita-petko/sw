@@ -52,8 +52,8 @@ features:
   passive_latency:
     enabled: false
     mode: uniform
-    delay_ms: 200
-    direction: outbound
+    delay_ms: 100
+    direction: both
     pause_key: l
     jitter_ms: 10
 

@@ -774,7 +774,9 @@ active), `e` exports
 the measured window and `r` resets it. A server whose alert thresholds are exceeded turns red in the table, and the
 events panel lists alerts, profile activations and servers found by server discovery.
 Silent rows retain their server label and selection/alert marker; their RTT trend is hidden. Silence excludes paused time
-and is unknown until an inbound packet has been observed.
+and is unknown until an eligible inbound packet has been observed. Silence and server alert measurements use the
+configured server-discovery port when nonzero; otherwise they use all traffic except the configured region-enforcement
+probe port. The probe port is excluded in either case. Packet, port and flow traffic counts still include probes.
 
 Region enforcement delays TCP PSH packets from configured servers outside the
 currently selected server group. Use the Left and Right arrow keys to change

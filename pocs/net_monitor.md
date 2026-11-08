@@ -73,6 +73,12 @@ and retains only its label, marker, last RTT, silence and score; the other field
 unknown until an inbound packet is seen, and does not advance while the monitor is paused. This changes only the
 display, not stored statistics, alerts or exports.
 
+Silence and server alert inputs use traffic on `features.server_discovery.port` when it is configured and nonzero,
+whether or not discovery is enabled. Otherwise all ports are included except `features.region_enforcement.probe_port`;
+that probe port is excluded even when a discovery port is configured. The same filtering applies to per-server RTT,
+jitter and TCP retransmission measurements, while packet, port and flow counts still include probe traffic. A server
+seen only through probes has no silence timestamp or probe-driven alerts.
+
 ### Known PoC limits
 
 - Latency is only measured for TCP; a UDP-only server shows arrival jitter and gaps but no RTT. See below for an

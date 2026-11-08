@@ -70,6 +70,20 @@ void NetMonitor::record(const uint8_t* packet, uint32_t length)
 		return;
 	}
 	ServerStats& stats	   = found->second;
+	const uint16_t server_port = parsed.tcp ? swap_u16(outbound ? parsed.tcp->DstPort : parsed.tcp->SrcPort)
+								 : parsed.udp ? swap_u16(outbound ? parsed.udp->DstPort : parsed.udp->SrcPort)
+											  : 0;
+	bool measured = true;
+#	ifdef LAGSW_FEATURE_SERVER_DISCOVERY
+	const uint16_t main_port = options_.features.server_discovery.port;
+	if (main_port != 0)
+		measured = server_port == main_port;
+#	endif
+#	ifdef LAGSW_FEATURE_REGION_ENFORCEMENT
+	const uint16_t probe_port = options_.features.region_enforcement.probe_port;
+	if (probe_port != 0 && server_port == probe_port)
+		measured = false;
+#	endif
 	Direction&	 direction = outbound ? stats.up : stats.down;
 	++direction.packets;
 	++direction.packets_tick;
@@ -106,8 +120,6 @@ void NetMonitor::record(const uint8_t* packet, uint32_t length)
 	PortStats* port_stats = nullptr;
 	if (parsed.tcp || parsed.udp)
 	{
-		const uint16_t server_port = parsed.tcp ? swap_u16(outbound ? parsed.tcp->DstPort : parsed.tcp->SrcPort)
-												: swap_u16(outbound ? parsed.udp->DstPort : parsed.udp->SrcPort);
 		const uint32_t port_key	   = (parsed.tcp ? 1u << 16 : 0u) | server_port;
 		auto		   port_found  = ports_.find(port_key);
 		if (port_found == ports_.end() && ports_.size() < kMaxPorts)
@@ -127,7 +139,7 @@ void NetMonitor::record(const uint8_t* packet, uint32_t length)
 		}
 	}
 
-	if (!outbound)
+	if (!outbound && measured)
 	{
 		if (stats.has_in)
 		{
@@ -142,8 +154,9 @@ void NetMonitor::record(const uint8_t* packet, uint32_t length)
 		}
 		stats.last_in = now;
 		stats.has_in  = true;
+		stats.has_silence = true;
 	}
-	else
+	else if (outbound && measured)
 	{
 		stats.last_out = now;
 		stats.has_out  = true;
@@ -270,12 +283,13 @@ void NetMonitor::record(const uint8_t* packet, uint32_t length)
 	{
 		if (end_seq == seq)
 			return;
-		if (payload > 0)
+		if (payload > 0 && measured)
 			++stats.data_up;
 		if (flow.out_seen && !seq_gt(end_seq, flow.highest_out_end))
 		{
 			// A retransmission makes any ACK for these bytes ambiguous, so they must not produce an RTT sample.
-			++stats.retrans_up;
+			if (measured)
+				++stats.retrans_up;
 			while (!flow.pending.empty() && !seq_gt(flow.pending.front().end_seq, end_seq))
 				flow.pending.pop_front();
 			return;
@@ -288,12 +302,15 @@ void NetMonitor::record(const uint8_t* packet, uint32_t length)
 		return;
 	}
 
-	if (payload > 0)
+	if (payload > 0 && measured)
 		++stats.data_down;
 	if (end_seq != seq)
 	{
 		if (flow.in_seen && !seq_gt(end_seq, flow.highest_in_end))
-			++stats.retrans_down;
+		{
+			if (measured)
+				++stats.retrans_down;
+		}
 		else
 		{
 			flow.in_seen		= true;
@@ -314,6 +331,21 @@ void NetMonitor::record(const uint8_t* packet, uint32_t length)
 	if (!matched)
 		return;
 	const double rtt = elapsed_ms(sent, now);
+	++flow.rtt_samples;
+	flow.rtt_sum_ms += rtt;
+	flow.last_rtt_ms = rtt;
+	flow.rtt_tick_sum_ms += rtt;
+	++flow.rtt_tick_count;
+	if (port_stats)
+	{
+		++port_stats->rtt_samples;
+		port_stats->rtt_sum_ms += rtt;
+		port_stats->last_rtt_ms = rtt;
+		port_stats->tick_rtt_sum_ms += rtt;
+		++port_stats->tick_rtt_count;
+	}
+	if (!measured)
+		return;
 	if (stats.rtt_samples == 0)
 	{
 		stats.rtt_min_ms = rtt;
@@ -333,19 +365,6 @@ void NetMonitor::record(const uint8_t* packet, uint32_t length)
 	stats.tick_rtt_max_ms = stats.tick_rtt_count == 0 ? rtt : std::max(stats.tick_rtt_max_ms, rtt);
 	++stats.tick_rtt_count;
 	++stats.rtt_hist[rtt_bucket(rtt)];
-	++flow.rtt_samples;
-	flow.rtt_sum_ms += rtt;
-	flow.last_rtt_ms = rtt;
-	flow.rtt_tick_sum_ms += rtt;
-	++flow.rtt_tick_count;
-	if (port_stats)
-	{
-		++port_stats->rtt_samples;
-		port_stats->rtt_sum_ms += rtt;
-		port_stats->last_rtt_ms = rtt;
-		port_stats->tick_rtt_sum_ms += rtt;
-		++port_stats->tick_rtt_count;
-	}
 	stats.recent_rtt.push_back(rtt);
 	if (stats.recent_rtt.size() > kRttWindow)
 		stats.recent_rtt.pop_front();
